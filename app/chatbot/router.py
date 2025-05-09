@@ -1,108 +1,17 @@
-# from fastapi import APIRouter, Depends, HTTPException, Header
-# from sqlalchemy.orm import Session
-# from typing import List, Optional
-# from pydantic import BaseModel
-
-# from app.database import get_db
-# from app.chatbot.engine import ChatbotEngine
-# from app.chatbot.models import ChatSession, ChatMessage
-
-# router = APIRouter()
-
-# # Pydantic models for request/response
-# class ChatRequest(BaseModel):
-#     message: str
-#     user_identifier: str
-
-# class ChatResponse(BaseModel):
-#     session_id: str
-#     response: str
-#     success: bool
-#     is_new_session: bool
-
-# class ChatHistory(BaseModel):
-#     session_id: str
-#     messages: List[dict]
-
-# # Chat endpoint
-# @router.post("/chat", response_model=ChatResponse)
-# async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-#     """
-#     Send a message to the chatbot and get a response
-#     """
-#     engine = ChatbotEngine(db)
-#     result = engine.process_message(api_key, request.message, request.user_identifier)
-    
-#     if not result.get("success"):
-#         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-    
-#     return result
-
-# # Get chat history
-# @router.get("/history/{session_id}", response_model=ChatHistory)
-# async def get_chat_history(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-#     """
-#     Get the chat history for a specific session
-#     """
-#     # Verify the API key and get tenant
-#     engine = ChatbotEngine(db)
-#     tenant = engine._get_tenant_by_api_key(api_key)
-#     if not tenant:
-#         raise HTTPException(status_code=403, detail="Invalid API key")
-    
-#     # Get session
-#     session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-#     if not session or session.tenant_id != tenant.id:
-#         raise HTTPException(status_code=404, detail="Session not found")
-    
-#     # Get messages
-#     messages = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at).all()
-    
-#     return {
-#         "session_id": session_id,
-#         "messages": [
-#             {
-#                 "content": msg.content,
-#                 "is_from_user": msg.is_from_user,
-#                 "created_at": msg.created_at.isoformat()
-#             }
-#             for msg in messages
-#         ]
-#     }
-
-# # End chat session
-# @router.post("/end-session")
-# async def end_chat_session(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-#     """
-#     End a chat session
-#     """
-#     # Verify the API key and get tenant
-#     engine = ChatbotEngine(db)
-#     tenant = engine._get_tenant_by_api_key(api_key)
-#     if not tenant:
-#         raise HTTPException(status_code=403, detail="Invalid API key")
-    
-#     # Verify session belongs to tenant
-#     session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-#     if not session or session.tenant_id != tenant.id:
-#         raise HTTPException(status_code=404, detail="Session not found")
-    
-#     # End session
-#     success = engine.end_session(session_id)
-    
-#     if not success:
-#         raise HTTPException(status_code=400, detail="Failed to end session")
-    
-#     return {"message": "Session ended successfully"}
-
-
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import sqlite3
-
+import openai
+import os
+import random
+import hashlib
 from app.database import get_db
+from app.config import settings
+
+# Configure OpenAI
+openai.api_key = settings.OPENAI_API_KEY
 
 router = APIRouter()
 
@@ -116,6 +25,45 @@ class ChatResponse(BaseModel):
     response: str
     success: bool
     is_new_session: bool
+
+# Helper function to rephrase response using GPT-3.5
+async def rephrase_with_gpt(faq_answer: str, question: str, personality: str = "friendly") -> str:
+    """
+    Use GPT-3.5 Turbo to rephrase an FAQ answer to make it sound more natural and conversational
+    """
+    # Define different personalities for variety
+    personalities = {
+        "friendly": "You're a friendly and helpful customer support agent. Rephrase this answer to sound more natural and conversational.",
+        "professional": "You're a professional customer support representative. Rephrase this answer to sound authoritative but helpful.",
+        "casual": "You're a casual, laid-back support agent. Rephrase this answer to sound relaxed but still helpful.",
+        "enthusiastic": "You're an enthusiastic customer support agent. Rephrase this answer with energy and positivity."
+    }
+    
+    # Randomly select a personality if not specified
+    if personality not in personalities:
+        personality = random.choice(list(personalities.keys()))
+    
+    persona = personalities[personality]
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": f"{persona} Keep the same information but make it sound more natural and conversational."},
+                {"role": "user", "content": f"Customer asked: {question}\n\nOriginal answer: {faq_answer}\n\nPlease rephrase this to sound more natural and conversational. Keep all the important information but make it sound like a real person is responding, not just reading from a script. Keep it concise."}
+            ],
+            max_tokens=300,
+            temperature=0.7,
+        )
+        
+        # Extract and return the rephrased response
+        rephrased_answer = response.choices[0].message.content.strip()
+        return rephrased_answer
+    
+    except Exception as e:
+        # If there's an error with GPT-3.5, return the original answer
+        print(f"Error rephrasing with GPT-3.5: {e}")
+        return faq_answer
 
 # Chat endpoint
 @router.post("/chat", response_model=ChatResponse)
@@ -145,21 +93,35 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
         if not faqs:
             raise HTTPException(status_code=400, detail="No FAQs found for this tenant")
         
-        # Simple FAQ matching
-        response = "I'm sorry, I don't have information about that. Here are some topics I can help with:\n\n"
+        # Default response if no match is found
+        default_response = "I'm sorry, I don't have information about that. Here are some topics I can help with:\n\n"
         
         # Add topics
         topics = [faq[0] for faq in faqs]
-        response += "- " + "\n- ".join(topics[:5])
+        default_response += "- " + "\n- ".join(topics[:5])
         
         # Try to find a matching FAQ
+        matched_answer = None
+        matched_question = None
+        
         for question, answer in faqs:
             if any(keyword.lower() in request.message.lower() for keyword in question.lower().split()):
-                response = answer
+                matched_answer = answer
+                matched_question = question
                 break
         
+        # If we found a match, use GPT-3.5 to rephrase it
+        if matched_answer:
+            # Randomly select a personality
+            personalities = ["friendly", "professional", "casual", "enthusiastic"]
+            persona = random.choice(personalities)
+            
+            # Rephrase the answer with GPT-3.5
+            response = await rephrase_with_gpt(matched_answer, matched_question, persona)
+        else:
+            response = default_response
+        
         # Create session ID based on user identifier
-        import hashlib
         session_id = hashlib.md5(f"{tenant_id}:{request.user_identifier}".encode()).hexdigest()
         
         # Simple history tracking
