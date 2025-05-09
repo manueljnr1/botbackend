@@ -1,41 +1,45 @@
-from langchain_community.chat_models import ChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain.chains.conversational_retrieval.base import BaseConversationalRetrievalChain
-from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
 from app.config import settings
+from typing import Any
 
 def create_chatbot_chain(
     vector_store,
     tenant_name: str,
     faq_list: list = None
-) -> BaseConversationalRetrievalChain:
-    """Create a conversational chain using the vector store and FAQ data"""
+) -> Any:
+    """Create a simplified chatbot chain for deployment"""
     
-    # Format FAQ data for the prompt if available
-    faq_info = ""
-    if faq_list:
-        faq_info = "\n".join([f"Q: {faq['question']}\nA: {faq['answer']}" for faq in faq_list])
+    # This is a simplified version that doesn't rely on LangChain
+    # It will just use the FAQ list for answering questions
     
-    # Initialize the LLM
-    llm = ChatOpenAI(
-        model_name="gpt-4",
-        temperature=0.7,
-        openai_api_key=settings.OPENAI_API_KEY
-    )
+    class SimpleChatbotChain:
+        def __init__(self, tenant_name, faq_list):
+            self.tenant_name = tenant_name
+            self.faq_list = faq_list or []
+            self.chat_history = []
+        
+        def __call__(self, inputs):
+            question = inputs.get("question", "")
+            
+            # Add to chat history
+            self.chat_history.append({"question": question})
+            
+            # Simple FAQ matching
+            response = "I'm sorry, I don't have information about that. Here are some topics I can help with:\n\n"
+            
+            # Add topics
+            if self.faq_list:
+                topics = [faq['question'] for faq in self.faq_list[:5]]
+                response += "- " + "\n- ".join(topics)
+            
+            # Try to find a matching FAQ
+            for faq in self.faq_list:
+                if any(keyword.lower() in question.lower() for keyword in faq['question'].lower().split()):
+                    response = faq['answer']
+                    break
+            
+            # Add to chat history
+            self.chat_history.append({"answer": response})
+            
+            return {"answer": response}
     
-    # Create conversation memory
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True
-    )
-    
-    # Create the chain
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
-        memory=memory,
-        verbose=True
-    )
-    
-    return chain
+    return SimpleChatbotChain(tenant_name, faq_list)

@@ -1,0 +1,39 @@
+services:
+  # A web service for the chatbot API
+  - type: web
+    name: chatbot-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:///./chatbot.db
+
+  # A static site for the chatbot frontend
+  - type: web
+    name: chatbot-frontend
+    env: static
+    plan: free
+    buildCommand: echo "No build needed"
+    staticPublishPath: ./
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    envVars:
+      - key: API_URL
+        fromService:
+          name: chatbot-api
+          type: web
+          property: url
