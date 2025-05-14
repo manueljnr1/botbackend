@@ -369,8 +369,7 @@ async def handle_whatsapp_webhook(request: Request, db: Session = Depends(get_db
         
         logger.info(f"Message from {from_number} to {to_number}: {message_body}")
         
-        # Get API key based on the phone number
-        api_key = "sk-420a63812b9d4458937df4e223f4edaa"  # Hardcoded for testing
+        api_key = get_api_key_for_phone(to_number)
         if not api_key:
             logger.error(f"No API key configured for number: {to_number}")
             return {"error": "No API key configured for this number"}
