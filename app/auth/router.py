@@ -147,3 +147,14 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     Get current user information
     """
     return current_user
+
+@router.get("/users/", response_model=List[UserOut]) # This will be GET /api/auth/users/
+async def read_all_users_for_admin(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_admin_user) # Ensures only admin access
+):
+    """
+    Retrieve all users. Accessible only by admin users.
+    """
+    users = db.query(User).all()
+    return users

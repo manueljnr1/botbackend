@@ -1,36 +1,28 @@
-# Python
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Python cache files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+.pytest_cache/
 
-# Virtual Environment
-venv/
-ENV/
-env/
-
-# Database
+# Database files
 *.db
 *.sqlite3
 
-# Environment Variables
+# Environment variables
 .env
+.env.local
+.env.development.local
+
+# Logs
+*.log
+logs/
 
 # IDE files
 .idea/
@@ -38,11 +30,13 @@ env/
 *.swp
 *.swo
 
-# Logs
-logs/
-*.log
-
-# Temporary files
-temp/
-tmp/
+# OS specific files
 .DS_Store
+Thumbs.db
+
+# Vector DB files
+vector_db/
+
+# Uploaded files
+uploads/
+temp/
