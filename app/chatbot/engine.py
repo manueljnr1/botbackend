@@ -310,6 +310,8 @@
 
 
 import uuid
+from openai import OpenAI
+from app.utils.env import get_openai_api_key
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.knowledge_base.processor import DocumentProcessor
@@ -317,6 +319,7 @@ from app.chatbot.chains import create_chatbot_chain
 from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ
 from app.chatbot.models import ChatSession, ChatMessage
+import logging
 
 class ChatbotEngine:
     """The main chatbot engine that handles conversations"""
@@ -413,7 +416,7 @@ class ChatbotEngine:
             
             # Create a direct LLM chain
             llm = ChatOpenAI(
-                model_name="gpt-4",
+                model_name="gpt-3.5-turbo",
                 temperature=0.7,
                 openai_api_key=settings.OPENAI_API_KEY
             )
@@ -447,7 +450,7 @@ class ChatbotEngine:
             
             # Create a direct LLM chain
             llm = ChatOpenAI(
-                model_name="gpt-4",
+                model_name="gpt-3.5-turbo",
                 temperature=0.7,
                 openai_api_key=settings.OPENAI_API_KEY
             )
@@ -510,10 +513,12 @@ class ChatbotEngine:
                     knowledge_base_info="No knowledge base available yet.",
                     faq_info=faq_info
                 )
+
+                
                 
                 # Create a direct LLM chain
                 llm = ChatOpenAI(
-                    model_name="gpt-4",
+                    model_name="ggpt-3.5-turbo",
                     temperature=0.7,
                     openai_api_key=settings.OPENAI_API_KEY
                 )

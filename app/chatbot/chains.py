@@ -121,7 +121,7 @@ def create_chatbot_chain(
     
     # Initialize the LLM
     llm = ChatOpenAI(
-        model_name="gpt-4",
+        model_name="gpt-3.5-turbo",
         temperature=0.7,
         openai_api_key=settings.OPENAI_API_KEY
     )

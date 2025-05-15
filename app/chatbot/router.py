@@ -315,6 +315,10 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
     Send a message to the chatbot and get a response
     """
     try:
+        # Debug - Log the API key being used
+        logger.info(f"Processing chat request with API key: {api_key[:5]}...")
+        
+        
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
         
@@ -324,14 +328,37 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
         if not result.get("success"):
             error_message = result.get("error", "Unknown error")
             logger.error(f"Chatbot error: {error_message}")
+            
+            # Handle OpenAI API key errors differently
+            if "Incorrect API key provided" in error_message or "invalid_api_key" in error_message:
+                logger.error("OpenAI API key error detected - using hardcoded key instead")
+                
+                # Try again with hardcoded API key
+                os.environ["OPENAI_API_KEY"] = "sk-your-valid-key-here"  # Replace with your valid key
+                
+                # Process message again
+                result = engine.process_message(api_key, request.message, request.user_identifier)
+                
+                if result.get("success"):
+                    return result
+            
+            # If we still have an error, raise an exception
             raise HTTPException(status_code=400, detail=error_message)
         
         return result
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+        
+        # Return a more user-friendly error
+        raise HTTPException(
+            status_code=500, 
+            detail="An internal server error occurred. Please try again later."
+        )
 
 # Get chat history
 @router.get("/history/{session_id}", response_model=ChatHistory)
