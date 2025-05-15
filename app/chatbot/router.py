@@ -282,6 +282,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 import logging
+import os
 
 from app.database import get_db
 from app.chatbot.engine import ChatbotEngine
@@ -334,7 +335,7 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
                 logger.error("OpenAI API key error detected - using hardcoded key instead")
                 
                 # Try again with hardcoded API key
-                os.environ["OPENAI_API_KEY"] = "sk-your-valid-key-here"  # Replace with your valid key
+                # os.environ["OPENAI_API_KEY"]  # Replace with your valid key
                 
                 # Process message again
                 result = engine.process_message(api_key, request.message, request.user_identifier)
