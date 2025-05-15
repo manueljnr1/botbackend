@@ -2,12 +2,12 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-env_path = Path(__file__).resolve().parent.parent / '.env'
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
-    print(f"Loaded environment variables from {env_path}")
-else:
-    print(f"Warning: .env file not found at {env_path}")
+# env_path = Path(__file__).resolve().parent.parent / '.env'
+# if env_path.exists():
+#     load_dotenv(dotenv_path=env_path)
+#     print(f"Loaded environment variables from {env_path}")
+# else:
+#     print(f"Warning: .env file not found at {env_path}")
 
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -39,70 +39,70 @@ app = FastAPI(
 
 # After app definition and CORS middleware:
 
-@app.post("/custom/whatsapp")
-async def custom_whatsapp_webhook(request: Request):
-    """Handle WhatsApp webhook directly without Twilio client"""
-    # Log the request
-    print(f"Received WhatsApp webhook request")
+# @app.post("/custom/whatsapp")
+# async def custom_whatsapp_webhook(request: Request):
+#     """Handle WhatsApp webhook directly without Twilio client"""
+#     # Log the request
+#     print(f"Received WhatsApp webhook request")
     
-    try:
-        # Get form data from the request
-        form_data = await request.form()
-        form_dict = dict(form_data)
-        print(f"Request form data: {form_dict}")
+#     try:
+#         # Get form data from the request
+#         form_data = await request.form()
+#         form_dict = dict(form_data)
+#         print(f"Request form data: {form_dict}")
         
-        # Extract message details
-        from_number = form_dict.get("From", "unknown")
-        to_number = form_dict.get("To", "unknown")
-        message_body = form_dict.get("Body", "")
+#         # Extract message details
+#         from_number = form_dict.get("From", "unknown")
+#         to_number = form_dict.get("To", "unknown")
+#         message_body = form_dict.get("Body", "")
         
-        print(f"Message from {from_number} to {to_number}: {message_body}")
+#         print(f"Message from {from_number} to {to_number}: {message_body}")
         
-        # Create database session
-        db = SessionLocal()
+#         # Create database session
+#         db = SessionLocal()
         
-        try:
-            # Find first active tenant
-            from app.tenants.models import Tenant
-            tenant = db.query(Tenant).filter(Tenant.is_active == True).first()
+#         try:
+#             # Find first active tenant
+#             from app.tenants.models import Tenant
+#             tenant = db.query(Tenant).filter(Tenant.is_active == True).first()
             
-            if not tenant:
-                print("No active tenant found")
-                return {"error": "No active tenant found", "success": False}
+#             if not tenant:
+#                 print("No active tenant found")
+#                 return {"error": "No active tenant found", "success": False}
             
-            # Process the message using the tenant's API key
-            print(f"Using tenant: {tenant.name} (ID: {tenant.id})")
+#             # Process the message using the tenant's API key
+#             print(f"Using tenant: {tenant.name} (ID: {tenant.id})")
             
-            # Create chatbot engine and process message
-            from app.chatbot.engine import ChatbotEngine
-            engine = ChatbotEngine(db)
-            result = engine.process_message(
-                api_key=tenant.api_key,
-                user_message=message_body,
-                user_identifier=from_number
-            )
+#             # Create chatbot engine and process message
+#             from app.chatbot.engine import ChatbotEngine
+#             engine = ChatbotEngine(db)
+#             result = engine.process_message(
+#                 api_key=tenant.api_key,
+#                 user_message=message_body,
+#                 user_identifier=from_number
+#             )
             
-            # Check result
-            if result.get("success"):
-                bot_response = result.get("response", "I'm sorry, I couldn't process your request.")
-                print(f"Bot response: {bot_response[:50]}...")
+#             # Check result
+#             if result.get("success"):
+#                 bot_response = result.get("response", "I'm sorry, I couldn't process your request.")
+#                 print(f"Bot response: {bot_response[:50]}...")
                 
-                # Return the response
-                return {"message": bot_response, "success": True}
-            else:
-                error = result.get("error", "Unknown error")
-                print(f"Error processing message: {error}")
-                return {"error": error, "success": False}
+#                 # Return the response
+#                 return {"message": bot_response, "success": True}
+#             else:
+#                 error = result.get("error", "Unknown error")
+#                 print(f"Error processing message: {error}")
+#                 return {"error": error, "success": False}
             
-        except Exception as e:
-            print(f"Error in WhatsApp webhook handler: {e}")
-            return {"error": str(e), "success": False}
-        finally:
-            db.close()
+#         except Exception as e:
+#             print(f"Error in WhatsApp webhook handler: {e}")
+#             return {"error": str(e), "success": False}
+#         finally:
+#             db.close()
             
-    except Exception as e:
-        print(f"Error parsing WhatsApp webhook request: {e}")
-        return {"error": str(e), "success": False}
+#     except Exception as e:
+#         print(f"Error parsing WhatsApp webhook request: {e}")
+#         return {"error": str(e), "success": False}
 
 # Configure CORS
 app.add_middleware(
