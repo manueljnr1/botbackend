@@ -273,7 +273,7 @@
 #     return {"status": "ok"}
 
 
-from app.utils.env import get_twilio_credentials, get_whatsapp_api_key
+# from app.utils.env import get_twilio_credentials, get_whatsapp_api_key
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from twilio.rest import Client
