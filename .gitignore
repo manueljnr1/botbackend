@@ -94,4 +94,3 @@ build/
 
 # Authentication files
 auth_info/
-test llm.py
