@@ -105,6 +105,11 @@ app = FastAPI(
 #         return {"error": str(e), "success": False}
 
 # Configure CORS
+
+
+import os
+from openai import OpenAI
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Specify allowed origins in production
