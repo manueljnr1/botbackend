@@ -280,10 +280,14 @@ from twilio.rest import Client
 from twilio.request_validator import RequestValidator
 import logging
 import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 
 from app.chatbot.engine import ChatbotEngine
 from app.database import SessionLocal, get_db
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -449,3 +453,4 @@ async def test_whatsapp_webhook(request: Request):
 def include_whatsapp_router(app):
     """Include WhatsApp router in the app"""
     app.include_router(router, prefix="/integrations/whatsapp", tags=["WhatsApp"])
+
