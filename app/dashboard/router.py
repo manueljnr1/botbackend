@@ -16,22 +16,43 @@ from app.chatbot.models import ChatSession, ChatMessage
 
 router = APIRouter()
 
-async def get_tenant_id_from_user(current_user: User) -> int:
-    """Get tenant ID from the current user"""
-    if current_user.is_admin and not current_user.tenant_id:
+async def get_tenant_id_from_user(current_user: User, tenant_id: Optional[int] = None) -> int:
+    """Get tenant ID from the current user or from the provided parameter"""
+    # If user is an admin and tenant_id is provided, use that
+    if current_user.is_admin and tenant_id is not None:
+        return tenant_id
+    
+    # If user is an admin but no tenant_id is provided, use their own tenant_id if available
+    if current_user.is_admin and current_user.tenant_id:
+        return current_user.tenant_id
+    
+    # If user is not an admin, use their tenant_id
+    if not current_user.is_admin and current_user.tenant_id:
+        return current_user.tenant_id
+    
+    # If still no tenant_id is available, raise an exception
+    if current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admin user must specify tenant_id parameter"
         )
-    return current_user.tenant_id
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not associated with any tenant"
+        )
 
 @router.get("/metrics")
 async def get_tenant_metrics(
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Get key metrics for the tenant dashboard
+    
+    Args:
+        tenant_id: Optional tenant ID (for admin users)
     
     Returns:
         - total_conversations: Number of chat sessions
@@ -41,7 +62,7 @@ async def get_tenant_metrics(
         - faq_count: Number of FAQs
         - active_sessions: Number of active chat sessions
     """
-    tenant_id = await get_tenant_id_from_user(current_user)
+    tenant_id = await get_tenant_id_from_user(current_user, tenant_id)
     
     # Get total conversations (chat sessions)
     total_conversations = db.query(func.count(ChatSession.id)) \
@@ -86,6 +107,7 @@ async def get_tenant_metrics(
 @router.get("/performance")
 async def get_performance_metrics(
     days: int = 7,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -94,13 +116,14 @@ async def get_performance_metrics(
     
     Args:
         days: Number of days to include in the metrics (default: 7)
+        tenant_id: Optional tenant ID (for admin users)
         
     Returns:
         - average_response_time: Average time to generate a response
         - messages_per_conversation: Average number of messages per conversation
         - daily_metrics: Daily breakdown of conversations and messages
     """
-    tenant_id = await get_tenant_id_from_user(current_user)
+    tenant_id = await get_tenant_id_from_user(current_user, tenant_id)
     
     # Calculate date range
     end_date = datetime.datetime.now()
@@ -168,6 +191,7 @@ async def get_performance_metrics(
 @router.get("/recent-conversations")
 async def get_recent_conversations(
     limit: int = 5,
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -176,11 +200,12 @@ async def get_recent_conversations(
     
     Args:
         limit: Maximum number of conversations to return (default: 5)
+        tenant_id: Optional tenant ID (for admin users)
     
     Returns:
         List of recent conversations with basic info
     """
-    tenant_id = await get_tenant_id_from_user(current_user)
+    tenant_id = await get_tenant_id_from_user(current_user, tenant_id)
     
     # Get recent sessions
     recent_sessions = db.query(ChatSession) \
@@ -221,16 +246,20 @@ async def get_recent_conversations(
 
 @router.get("/faq-metrics")
 async def get_faq_metrics(
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Get metrics about tenant FAQs
     
+    Args:
+        tenant_id: Optional tenant ID (for admin users)
+    
     Returns:
         FAQ metrics including categories and counts
     """
-    tenant_id = await get_tenant_id_from_user(current_user)
+    tenant_id = await get_tenant_id_from_user(current_user, tenant_id)
     
     # Get total FAQ count
     faq_count = db.query(func.count(FAQ.id)) \
@@ -262,16 +291,20 @@ async def get_faq_metrics(
 
 @router.get("/knowledge-base-metrics")
 async def get_knowledge_base_metrics(
+    tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Get metrics about tenant knowledge bases
     
+    Args:
+        tenant_id: Optional tenant ID (for admin users)
+    
     Returns:
         Knowledge base metrics including types and counts
     """
-    tenant_id = await get_tenant_id_from_user(current_user)
+    tenant_id = await get_tenant_id_from_user(current_user, tenant_id)
     
     # Get knowledge base count by document type
     kb_types = db.query(
