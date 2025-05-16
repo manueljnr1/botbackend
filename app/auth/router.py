@@ -7,8 +7,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
+
 from app.database import get_db
 from app.auth.models import User
+from app.tenants.models import Tenant
 from app.config import settings
 
 router = APIRouter()
@@ -42,6 +44,13 @@ class UserOut(BaseModel):
     
     class Config:
         from_attributes = True
+
+class UserRegister(BaseModel):
+    email: str
+    username: str
+    password: str
+    confirm_password: str
+
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -119,10 +128,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/users/", response_model=UserOut)
-async def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """
-    Create a new user (admin only)
-    """
+async def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    """Create a new user without requiring authentication"""
     # Check if user exists
     db_user = db.query(User).filter((User.email == user.email) | (User.username == user.username)).first()
     if db_user:
@@ -158,3 +165,35 @@ async def read_all_users_for_admin(
     """
     users = db.query(User).all()
     return users
+
+@router.post("/register", response_model=UserOut)
+async def register_user(user: UserRegister, db: Session = Depends(get_db)):
+    """Public registration endpoint"""
+    # Validate passwords match
+    if user.password != user.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords don't match")
+    
+    # Check if user exists
+    db_user = db.query(User).filter((User.email == user.email) | (User.username == user.username)).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email or username already registered")
+    
+    # Get default tenant for new users
+    default_tenant = db.query(Tenant).filter(Tenant.is_active == True).first()
+    if not default_tenant:
+        raise HTTPException(status_code=500, detail="No active tenant found for user registration")
+    
+    # Create user
+    new_user = User(
+        email=user.email,
+        username=user.username,
+        hashed_password=get_password_hash(user.password),
+        is_admin=False,
+        tenant_id=default_tenant.id
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    # Return user without password
+    return new_user
