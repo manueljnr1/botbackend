@@ -2,16 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# env_path = Path(__file__).resolve().parent.parent / '.env'
-# if env_path.exists():
-#     load_dotenv(dotenv_path=env_path)
-#     print(f"Loaded environment variables from {env_path}")
-# else:
-#     print(f"Warning: .env file not found at {env_path}")
 
 
 from fastapi import FastAPI, Request, Depends, HTTPException
-
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import uvicorn
@@ -37,7 +31,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# After app definition and CORS middleware:
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # @app.post("/custom/whatsapp")
 # async def custom_whatsapp_webhook(request: Request):
@@ -233,3 +227,63 @@ async def debug_env():
         "WHATSAPP_NUMBER_14155238886_API_KEY": masked_key,
         "DEFAULT_API_KEY": os.getenv("DEFAULT_API_KEY", "Not set")[:5] + "..." if os.getenv("DEFAULT_API_KEY") else "Not set"
     }
+
+
+def update_main_py():
+    """Update main.py to include the dashboard router"""
+    # Path to main.py
+    main_py_path = "app/main.py"
+    
+    # Check if file exists
+    if not os.path.exists(main_py_path):
+        print(f"Error: {main_py_path} not found")
+        return False
+    
+    # Read the current content
+    with open(main_py_path, "r") as f:
+        content = f.read()
+    
+    # Check if dashboard router is already included
+    if "from app.dashboard.router import router as dashboard_router" in content:
+        print("Dashboard router already included in main.py")
+        return True
+    
+    # Find the router imports section
+    router_imports = []
+    for line in content.split("\n"):
+        if "router as" in line and "import" in line:
+            router_imports.append(line)
+    
+    if not router_imports:
+        print("Could not find router imports in main.py")
+        return False
+    
+    # Add dashboard router import after the last router import
+    last_import = router_imports[-1]
+    new_import = "from app.dashboard.router import router as dashboard_router"
+    content = content.replace(last_import, last_import + "\n" + new_import)
+    
+    # Find the router inclusion section
+    router_includes = []
+    for line in content.split("\n"):
+        if "app.include_router" in line:
+            router_includes.append(line)
+    
+    if not router_includes:
+        print("Could not find router inclusions in main.py")
+        return False
+    
+    # Add dashboard router inclusion after the last router inclusion
+    last_include = router_includes[-1]
+    new_include = 'app.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])'
+    content = content.replace(last_include, last_include + "\n" + new_include)
+    
+    # Write the updated content
+    with open(main_py_path, "w") as f:
+        f.write(content)
+    
+    print("Successfully updated main.py to include the dashboard router")
+    return True
+
+if __name__ == "__main__":
+    update_main_py()
