@@ -98,3 +98,43 @@ class EmailService:
 
 # Create a singleton instance
 email_service = EmailService()
+
+def send_email(self, to_email, subject, html_content, from_email=None):
+    """
+    Send a generic email
+    
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        html_content: HTML content of the email
+        from_email: Sender email (defaults to DEFAULT_SENDER_EMAIL)
+        
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    if not self.is_configured:
+        logger.error("Cannot send email: Email service is not configured")
+        return False
+    
+    try:
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = from_email or self.default_sender
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # Set email content
+        msg.attach(MIMEText(html_content, "html"))
+        
+        # Connect to SMTP server and send email
+        with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            server.starttls()
+            server.login(self.smtp_username, self.smtp_password)
+            server.send_message(msg)
+        
+        logger.info(f"Email sent successfully to {to_email}")
+        return True
+    
+    except Exception as e:
+        logger.exception(f"Failed to send email: {e}")
+        return False

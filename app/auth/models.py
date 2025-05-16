@@ -2,6 +2,8 @@ from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+import secrets
+import datetime
 
 class User(Base):
     __tablename__ = "users"
@@ -17,3 +19,40 @@ class User(Base):
     
     # Relationship - Use string reference to avoid circular import
     tenant = relationship("Tenant", foreign_keys=[tenant_id])
+
+
+class PasswordReset(Base):
+    __tablename__ = "password_resets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    user = relationship("User")
+    
+    @classmethod
+    def create_token(cls, user_id, expiration_hours=24):
+        """Create a new password reset token"""
+        # Generate a secure token
+        token = secrets.token_urlsafe(32)
+        
+        # Calculate expiration time
+        expires_at = datetime.datetime.now() + datetime.timedelta(hours=expiration_hours)
+        
+        # Create new token
+        reset = cls(
+            user_id=user_id,
+            token=token,
+            expires_at=expires_at
+        )
+        
+        return reset
+    
+    def is_valid(self):
+        """Check if token is still valid"""
+        now = datetime.datetime.now()
+        return not self.is_used and now < self.expires_at
