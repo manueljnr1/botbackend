@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 
 from fastapi import FastAPI, Request, Depends, HTTPException
-from app.custom_integrations.whatsapp_handler import register_whatsapp_routes
+
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import uvicorn
@@ -109,6 +109,7 @@ app = FastAPI(
 
 import os
 from openai import OpenAI
+from app.utils.email_service import email_service
 
 app.add_middleware(
     CORSMiddleware,
