@@ -110,7 +110,8 @@ from app.config import settings
 def create_chatbot_chain(
     vector_store,
     tenant_name: str,
-    faq_list: Optional[List[Dict[str, str]]] = None
+    faq_list: list = None,
+    custom_system_prompt: str = None  # Add parameter for custom prompt
 ) -> BaseConversationalRetrievalChain:
     """Create a conversational chain using the vector store and FAQ data"""
     
@@ -119,9 +120,22 @@ def create_chatbot_chain(
     if faq_list:
         faq_info = "\n".join([f"Q: {faq['question']}\nA: {faq['answer']}" for faq in faq_list])
     
-    # Initialize the LLM
+    # Use custom prompt if provided, otherwise use the default template
+    if custom_system_prompt:
+        # Still inject the FAQs into the custom prompt
+        system_prompt = custom_system_prompt.replace("{faq_info}", faq_info)
+    else:
+        # Use the default template
+        from app.chatbot.prompts import SYSTEM_PROMPT_TEMPLATE
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.substitute(
+            company_name=tenant_name,
+            faq_info=faq_info,
+            knowledge_base_info=""  # This could be enhanced
+        )
+    
+    # Initialize the LLM with the system prompt
     llm = ChatOpenAI(
-        model_name="gpt-3.5-turbo",
+        model_name="gpt-4",
         temperature=0.7,
         openai_api_key=settings.OPENAI_API_KEY
     )
@@ -132,7 +146,7 @@ def create_chatbot_chain(
         return_messages=True
     )
     
-    # Create the chain
+    # Create the chain with the system prompt
     chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=vector_store.as_retriever(search_kwargs={"k": 3}),

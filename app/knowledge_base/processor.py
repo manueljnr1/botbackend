@@ -4,6 +4,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 from app.knowledge_base.models import DocumentType
 from app.config import settings
+from langchain_community.vectorstores import FAISS
 
 class DocumentProcessor:
     """Process and load documents for vector storage"""
@@ -67,3 +68,12 @@ class DocumentProcessor:
                 })
         
         return faqs
+    
+    def get_vector_store(self, vector_store_id: str):
+        """Load a vector store by ID"""
+        vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
+        print(f"Attempting to load vector store from: {vector_store_path}")
+        if not os.path.exists(vector_store_path):
+            print(f"WARNING: Vector store path does not exist: {vector_store_path}")
+            return None
+        return FAISS.load_local(vector_store_path, self.embeddings)

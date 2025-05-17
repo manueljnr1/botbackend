@@ -9,7 +9,6 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from datetime import datetime
 from fastapi import Form, Body
-from pydantic import EmailStr
 from app.auth.models import PasswordReset
 from app.utils.email_service import email_service
 
@@ -28,6 +27,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 class Token(BaseModel):
     access_token: str
     token_type: str
+    tenant_api_key: Optional[str] = None
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -57,7 +57,7 @@ class UserRegister(BaseModel):
     confirm_password: str
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 class ResetPasswordRequest(BaseModel):
     token: str
@@ -120,9 +120,6 @@ async def get_admin_user(current_user: User = Depends(get_current_user)):
 # Endpoints
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Get an access token by providing username and password
-    """
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -140,7 +137,20 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    # Get the tenant API key if the user is associated with a tenant
+    tenant_api_key = None
+    if user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+        if tenant:
+            tenant_api_key = tenant.api_key
+    
+    # Return both the JWT token and the tenant API key
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "tenant_api_key": tenant_api_key
+    }
 
 @router.post("/users/", response_model=UserOut)
 async def create_user(user: UserCreate, db: Session = Depends(get_db)):

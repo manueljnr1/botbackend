@@ -31,6 +31,43 @@ def add_nigerian_food_faqs(api_key="sk-420a63812b9d4458937df4e223f4edaa"):
         ("Do you offer a loyalty program?", "Yes, we have a loyalty program! For every 10 orders above ₦2,000, you get a free dish of your choice up to the value of ₦2,500. Download our app or sign up in-store to join.")
     ]
     
+def add_ui_ux(api_key="sk-149e32c39fe141bea780399e4cc6b599"):
+    """Add ui/ux FAQs to a tenant"""
+    ui_ux = [   
+        ("What services do you offer?", "We provide UI design, UX design, branding, prototyping, user research, and design system creation."),
+("How much does a typical UI/UX project cost?", "Pricing varies based on project complexity, ranging from $2,000 to $20,000."),
+("What tools do you use for design?", "We use Figma, Sketch, Adobe XD, and InVision for design and prototyping."),
+("How long does a project take to complete?", "Project timelines typically range from 4 to 12 weeks depending on scope."),
+("Do you offer design revisions?", "Yes, we include up to 3 rounds of revisions to ensure client satisfaction."),
+("What industries do you serve?", "We work with clients from e-commerce, healthcare, education, fintech, and more."),
+("Can you redesign an existing website or app?", "Yes, we offer redesign services to enhance usability and aesthetics."),
+("Do you offer branding services?", "Yes, we create visual identities, including logos, typography, and color schemes."),
+("How do you ensure designs are user-friendly?", "We conduct user research, usability testing, and heuristic evaluations."),
+("Do you collaborate with developers?", "Yes, we provide design assets and guidance for seamless integration."),
+("How do you handle client feedback?", "We document feedback during review sessions and make necessary updates."),
+("What is your approach to accessibility?", "We follow WCAG guidelines and conduct accessibility audits."),
+("Can you create wireframes before final designs?", "Yes, we develop low-fidelity wireframes to outline layouts and flows."),
+("What is the difference between UI and UX design?", "UI focuses on visual elements, while UX is about the overall user experience."),
+("Do you offer mobile app design?", "Yes, we design intuitive and visually appealing mobile interfaces."),
+("How do you measure design success?", "We use metrics like user engagement, satisfaction scores, and usability test results."),
+("What if I don’t like the design?", "We collaborate closely to ensure alignment, offering revisions as needed."),
+("Can you create design systems for ongoing projects?", "Yes, we develop reusable components and guidelines to ensure consistency."),
+("Do you offer consultations before starting a project?", "Yes, we offer an initial consultation to understand your needs and vision."),
+("How do you handle confidential information?", "We sign NDAs and handle data securely to protect client privacy."),
+("Do you offer UI/UX maintenance services?", "Yes, we provide ongoing support to update and refine your designs."),
+("What design standards do you follow?", "We adhere to Material Design, Human Interface Guidelines, and best practices."),
+("Can you create interactive prototypes?", "Yes, we develop clickable prototypes to demonstrate user interactions."),
+("What kind of client input do you need?", "We appreciate initial ideas, brand assets, and insights into your target audience."),
+("Do you provide usability testing services?", "Yes, we conduct tests to identify usability issues and improve design quality."),
+("How do you ensure cross-platform consistency?", "We design with responsiveness and platform-specific guidelines in mind."),
+("Can you integrate the design into our existing product?", "Yes, we work with developers to ensure smooth implementation."),
+("How can I track project progress?", "We provide regular updates via project management tools and meetings."),
+("What is your refund policy?", "Refunds are handled on a case-by-case basis, as outlined in our contract."),
+("How do I get started?", "Simply contact us through our website or email to schedule a consultation.")
+    ]
+
+
+
     try:
         # Connect to the database
         conn = sqlite3.connect("chatbot.db")

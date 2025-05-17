@@ -19,6 +19,9 @@ from app.tenants.router import router as tenants_router
 from app.knowledge_base.router import router as kb_router
 from app.chatbot.router import router as chatbot_router
 from app.integrations.whatsapp_router import include_whatsapp_router
+from app.analytics.router import router as analytics_router
+from app.admin.router import router as admin_router
+
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -28,7 +31,8 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Multi-Tenant Customer Support Chatbot",
     description="AI-powered customer support chatbot for multiple businesses",
-    version="1.0.0"
+    version="1.0.0",
+    debug=True
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -125,6 +129,8 @@ app.include_router(tenants_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(kb_router, prefix="/knowledge-base", tags=["Knowledge Base"])
 app.include_router(chatbot_router, prefix="/chatbot", tags=["Chatbot"])
 include_whatsapp_router(app)
+app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
+app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 
 try:
