@@ -374,98 +374,137 @@ class ChatbotEngine:
         """Initialize the chatbot chain for a tenant"""
         tenant = self._get_tenant(tenant_id)
         if not tenant:
+            print(f"Tenant not found for ID: {tenant_id}")
             return None
         
         # Get knowledge bases
         knowledge_bases = self._get_knowledge_bases(tenant_id)
+        if not knowledge_bases:
+            print(f"No knowledge bases found for tenant ID: {tenant_id}")
+            return None
+        
+        
         
         # Get FAQs
         faqs = self._get_faqs(tenant_id)
+        print(f"Found {len(faqs)} FAQs for tenant")
+
+        faq_info = "\n".join([f"Q: {faq['question']}\nA: {faq['answer']}" for faq in faqs]) if faqs else "No FAQs available yet."
         
         # If we have knowledge bases, use retrieval chain
         if knowledge_bases:
             # Use the first knowledge base for now (can be extended to combine multiple)
             kb = knowledge_bases[0]
+            print(f"Using knowledge base: {kb.name} (ID: {kb.id}, Vector Store: {kb.vector_store_id})")
             
             # Initialize document processor and get vector store
             processor = DocumentProcessor(tenant_id)
             try:
                 vector_store = processor.get_vector_store(kb.vector_store_id)
-                
-                # Create chatbot chain
-                chain = create_chatbot_chain(vector_store, tenant.name, faqs)
-                return chain
+                if vector_store is None:
+                    print(f"Failed to load vector store: {kb.vector_store_id}")
+                    return None
+                print(f"Successfully loaded vector store")
             except Exception as e:
-                print(f"Error initializing vector store: {str(e)}")
+                print(f"Error loading vector store: {e}")
+                return None
+            
+
+            # Create chatbot chain
+            try:    
+                # Check if tenant has custom system prompt
+                if tenant.system_prompt:
+                    # Replace placeholders in custom prompt
+                    custom_prompt = tenant.system_prompt
+                    custom_prompt = custom_prompt.replace("{company_name}", tenant.name)
+                    custom_prompt = custom_prompt.replace("{faq_info}", faq_info)
+                    custom_prompt = custom_prompt.replace("{knowledge_base_info}", f"Knowledge from {kb.name}")
+
+
+                    from langchain_community.chat_models import ChatOpenAI
+                    from langchain.chains import ConversationalRetrievalChain
+                    from langchain.memory import ConversationBufferMemory
+                    from app.config import settings
+
+
+
+
+                    llm = ChatOpenAI(
+                        model_name="gpt-4",
+                        temperature=0.7,
+                        openai_api_key=settings.OPENAI_API_KEY
+                    )
+                
+                    # Create conversation memory
+                    memory = ConversationBufferMemory(
+                        memory_key="chat_history",
+                        return_messages=True
+                    )
+                
+                    # Create the chain
+                    chain = ConversationalRetrievalChain.from_llm(
+                        llm=llm,
+                        retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
+                        memory=memory,
+                        verbose=True
+                    )# Create a ConversationalRetrievalChain
+
+
+
+                    if hasattr(chain, 'combine_docs_chain') and hasattr(chain.combine_docs_chain, 'llm_chain') and hasattr(chain.combine_docs_chain.llm_chain, 'prompt'):
+                        chain.combine_docs_chain.llm_chain.prompt.messages[0].content = custom_prompt
+                    else:
+                        # Use default chain creation
+                        chain = create_chatbot_chain(vector_store, tenant.name, faqs)
+                
+                    print(f"Successfully created chatbot chain for tenant: {tenant.name}")
+                    return chain
+            except Exception as e:
+                print(f"Error creating chatbot chain: {e}")
                 return None
         
         # If we don't have knowledge bases but have FAQs, create a simple chain
-        elif faqs:
-            from langchain_community.chat_models import ChatOpenAI
-            from langchain.chains import ConversationChain
-            from langchain.memory import ConversationBufferMemory
-            from app.config import settings
-            from app.chatbot.prompts import SYSTEM_PROMPT_TEMPLATE
-            
-            # Format system prompt
-            system_prompt = SYSTEM_PROMPT_TEMPLATE.substitute(
-                company_name=tenant.name,
-                knowledge_base_info="No knowledge base available yet.",
-                faq_info="\n".join([f"Q: {faq['question']}\nA: {faq['answer']}" for faq in faqs])
-            )
-            
-            # Create a direct LLM chain
-            llm = ChatOpenAI(
-                model_name="gpt-3.5-turbo",
-                temperature=0.7,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
-            
-            memory = ConversationBufferMemory(return_messages=True)
-            chain = ConversationChain(
-                llm=llm,
-                memory=memory,
-                verbose=True
-            )
-            
-            # Store the system prompt in a way the chain can use it
-            chain.prompt.template = system_prompt + "\n\nHuman: {input}\nAI: "
-            
-            return chain
-        
-        # If we have nothing, still create a generic chain
         else:
             from langchain_community.chat_models import ChatOpenAI
             from langchain.chains import ConversationChain
             from langchain.memory import ConversationBufferMemory
             from app.config import settings
             from app.chatbot.prompts import SYSTEM_PROMPT_TEMPLATE
-            
-            # Format system prompt
+        
+        # Check if tenant has custom system prompt
+        if hasattr(tenant, 'system_prompt') and tenant.system_prompt:
+            # Replace placeholders in custom prompt
+            system_prompt = tenant.system_prompt
+            system_prompt = system_prompt.replace("{company_name}", tenant.name)
+            system_prompt = system_prompt.replace("{faq_info}", faq_info)
+            system_prompt = system_prompt.replace("{knowledge_base_info}", "No knowledge base available yet.")
+        else:
+            # Format default system prompt
             system_prompt = SYSTEM_PROMPT_TEMPLATE.substitute(
                 company_name=tenant.name,
                 knowledge_base_info="No knowledge base available yet.",
-                faq_info="No FAQs available yet."
+                faq_info=faq_info
             )
-            
-            # Create a direct LLM chain
-            llm = ChatOpenAI(
-                model_name="gpt-3.5-turbo",
-                temperature=0.7,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
-            
-            memory = ConversationBufferMemory(return_messages=True)
-            chain = ConversationChain(
-                llm=llm,
-                memory=memory,
-                verbose=True
-            )
-            
-            # Store the system prompt in a way the chain can use it
-            chain.prompt.template = system_prompt + "\n\nHuman: {input}\nAI: "
-            
-            return chain
+        
+        # Create a direct LLM chain
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.7,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        memory = ConversationBufferMemory(return_messages=True)
+        chain = ConversationChain(
+            llm=llm,
+            memory=memory,
+            verbose=True
+        )
+        
+        # Store the system prompt in a way the chain can use it
+        chain.prompt.template = system_prompt + "\n\nHuman: {input}\nAI: "
+        
+        return chain
+    
     
     def process_message(
         self, api_key: str, user_message: str, user_identifier: str
@@ -518,7 +557,7 @@ class ChatbotEngine:
                 
                 # Create a direct LLM chain
                 llm = ChatOpenAI(
-                    model_name="ggpt-3.5-turbo",
+                    model_name="gpt-3.5-turbo",
                     temperature=0.7,
                     openai_api_key=settings.OPENAI_API_KEY
                 )

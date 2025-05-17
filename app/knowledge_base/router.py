@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -9,8 +9,6 @@ import uuid
 from app.database import get_db
 from app.knowledge_base.models import KnowledgeBase, FAQ, DocumentType
 from app.knowledge_base.processor import DocumentProcessor
-from app.auth.models import User
-from app.auth.router import get_current_user
 from app.tenants.models import Tenant
 
 router = APIRouter()
@@ -43,11 +41,12 @@ class FAQOut(BaseModel):
     class Config:
         from_attributes = True
 
-# Helper function
-def get_tenant_id_from_user(current_user: User) -> int:
-    if current_user.is_admin and not current_user.tenant_id:
-        raise HTTPException(status_code=400, detail="Admin user must specify tenant_id")
-    return current_user.tenant_id
+# Helper function to get tenant from API key
+def get_tenant_from_api_key(api_key: str, db: Session):
+    tenant = db.query(Tenant).filter(Tenant.api_key == api_key, Tenant.is_active == True).first()
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return tenant
 
 # Endpoints
 @router.post("/upload", response_model=KnowledgeBaseOut)
@@ -55,13 +54,14 @@ async def upload_knowledge_base(
     file: UploadFile = File(...),
     name: str = Form(...),
     description: Optional[str] = Form(None),
+    x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
 ):
     """
     Upload a knowledge base document
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     # Get document type from file extension
     file_extension = file.filename.split('.')[-1].lower()
@@ -103,19 +103,29 @@ async def upload_knowledge_base(
     return kb
 
 @router.get("/", response_model=List[KnowledgeBaseOut])
-async def list_knowledge_bases(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def list_knowledge_bases(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
-    List all knowledge bases for the current tenant
+    List all knowledge bases for the tenant
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
     return db.query(KnowledgeBase).filter(KnowledgeBase.tenant_id == tenant_id).all()
 
 @router.delete("/{kb_id}")
-async def delete_knowledge_base(kb_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_knowledge_base(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
     Delete a knowledge base
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id, KnowledgeBase.tenant_id == tenant_id).first()
     if not kb:
@@ -138,13 +148,14 @@ async def delete_knowledge_base(kb_id: int, db: Session = Depends(get_db), curre
 @router.post("/faqs/upload", response_model=List[FAQOut])
 async def upload_faq_sheet(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
 ):
     """
     Upload an FAQ sheet (CSV or Excel)
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     # Save the uploaded file temporarily
     upload_dir = os.path.join("temp", f"tenant_{tenant_id}")
@@ -185,19 +196,29 @@ async def upload_faq_sheet(
     return new_faqs
 
 @router.get("/faqs", response_model=List[FAQOut])
-async def list_faqs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def list_faqs(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
-    List all FAQs for the current tenant
+    List all FAQs for the tenant
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
     return db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
 
 @router.post("/faqs", response_model=FAQOut)
-async def create_faq(faq: FAQCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_faq(
+    faq: FAQCreate,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
     Create a new FAQ
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     new_faq = FAQ(
         tenant_id=tenant_id,
@@ -211,11 +232,17 @@ async def create_faq(faq: FAQCreate, db: Session = Depends(get_db), current_user
     return new_faq
 
 @router.put("/faqs/{faq_id}", response_model=FAQOut)
-async def update_faq(faq_id: int, faq_update: FAQCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_faq(
+    faq_id: int,
+    faq_update: FAQCreate,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
     Update an FAQ
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     faq = db.query(FAQ).filter(FAQ.id == faq_id, FAQ.tenant_id == tenant_id).first()
     if not faq:
@@ -229,11 +256,16 @@ async def update_faq(faq_id: int, faq_update: FAQCreate, db: Session = Depends(g
     return faq
 
 @router.delete("/faqs/{faq_id}")
-async def delete_faq(faq_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_faq(
+    faq_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
     """
     Delete an FAQ
     """
-    tenant_id = get_tenant_id_from_user(current_user)
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
     
     faq = db.query(FAQ).filter(FAQ.id == faq_id, FAQ.tenant_id == tenant_id).first()
     if not faq:
