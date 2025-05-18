@@ -1,4 +1,5 @@
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -13,11 +14,13 @@ from app.auth.models import PasswordReset
 from app.utils.email_service import email_service
 
 from app.database import get_db
-from app.auth.models import User
 from app.tenants.models import Tenant
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
 
 # Password and token handling
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -118,60 +121,158 @@ async def get_admin_user(current_user: User = Depends(get_current_user)):
     return current_user
 
 # Endpoints
+# @router.post("/token", response_model=Token)
+# async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+#     user = authenticate_user(db, form_data.username, form_data.password)
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Incorrect username or password",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+#     if not user.is_active:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Inactive user",
+#         )
+    
+#     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+#     access_token = create_access_token(
+#         data={"sub": user.username}, expires_delta=access_token_expires
+#     )
+    
+#     # Get the tenant API key if the user is associated with a tenant
+#     tenant_api_key = None
+#     if user.tenant_id:
+#         tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+#         if tenant:
+#             tenant_api_key = tenant.api_key
+    
+#     # Return both the JWT token and the tenant API key
+#     return {
+#         "access_token": access_token, 
+#         "token_type": "bearer",
+#         "tenant_api_key": tenant_api_key
+#     }
+
+
+
+
+
+# @router.post("/users/", response_model=UserOut)
+# async def create_user(user: UserCreate, db: Session = Depends(get_db)):
+#     """Create a new user without requiring authentication"""
+#     # Check if user exists
+#     db_user = db.query(User).filter((User.email == user.email) | (User.username == user.username)).first()
+#     if db_user:
+#         raise HTTPException(status_code=400, detail="Email or username already registered")
+    
+#     # Create user
+#     new_user = User(
+#         email=user.email,
+#         username=user.username,
+#         hashed_password=get_password_hash(user.password),
+#         is_admin=user.is_admin,
+#         tenant_id=user.tenant_id
+#     )
+#     db.add(new_user)
+#     db.commit()
+#     db.refresh(new_user)
+#     return new_user
+
+
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = authenticate_user(db, form_data.username, form_data.password)
+    """
+    Get an access token by providing username and password
+    """
+    # Debug info
+    logger.info(f"Login attempt for username: {form_data.username}")
+    
+    # Get user
+    user = db.query(User).filter(User.username == form_data.username).first()
+    
+    # Debug user info
+    if user:
+        logger.info(f"User found in database: {user.username}, Active: {user.is_active}")
+    else:
+        logger.info(f"No user found with username: {form_data.username}")
+        # List all users for debugging (be careful with this in production!)
+        all_users = db.query(User).all()
+        logger.info(f"All users in database: {[u.username for u in all_users]}")
+
+
     if not user:
+        logger.warning(f"User not found: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Verify the password
+    is_password_correct = verify_password(form_data.password, user.hashed_password)
+    if not is_password_correct:
+        logger.warning(f"Invalid password for user: {form_data.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     if not user.is_active:
+        logger.warning(f"Inactive user attempt to login: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Inactive user",
         )
     
+    # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
-    # Get the tenant API key if the user is associated with a tenant
-    tenant_api_key = None
-    if user.tenant_id:
-        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-        if tenant:
-            tenant_api_key = tenant.api_key
-    
-    # Return both the JWT token and the tenant API key
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "tenant_api_key": tenant_api_key
-    }
+    logger.info(f"Successfully authenticated user: {form_data.username}")
+    return {"access_token": access_token, "token_type": "bearer"}
+
 
 @router.post("/users/", response_model=UserOut)
 async def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    """Create a new user without requiring authentication"""
+    """
+    Create a new user
+    """
     # Check if user exists
     db_user = db.query(User).filter((User.email == user.email) | (User.username == user.username)).first()
     if db_user:
+        logger.warning(f"Registration attempt with existing email/username: {user.email}/{user.username}")
         raise HTTPException(status_code=400, detail="Email or username already registered")
+    
+    # Create hashed password
+    hashed_password = get_password_hash(user.password)
     
     # Create user
     new_user = User(
         email=user.email,
         username=user.username,
-        hashed_password=get_password_hash(user.password),
-        is_admin=user.is_admin,
+        hashed_password=hashed_password,
+        is_admin=False,  # New users are not admins by default
+        is_active=True,  # New users are active by default
         tenant_id=user.tenant_id
     )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
+    
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        logger.info(f"User created successfully: {user.username}")
+        return new_user
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error creating user")
+
+
 
 @router.get("/me/", response_model=UserOut)
 async def read_users_me(current_user: User = Depends(get_current_user)):
@@ -179,6 +280,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     Get current user information
     """
     return current_user
+
 
 @router.get("/users/", response_model=List[UserOut]) # This will be GET /api/auth/users/
 async def read_all_users_for_admin(
@@ -191,37 +293,8 @@ async def read_all_users_for_admin(
     users = db.query(User).all()
     return users
 
-@router.post("/register", response_model=UserOut)
-async def register_user(user: UserRegister, db: Session = Depends(get_db)):
-    """Public registration endpoint"""
-    # Validate passwords match
-    if user.password != user.confirm_password:
-        raise HTTPException(status_code=400, detail="Passwords don't match")
-    
-    # Check if user exists
-    db_user = db.query(User).filter((User.email == user.email) | (User.username == user.username)).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email or username already registered")
-    
-    # Get default tenant for new users
-    default_tenant = db.query(Tenant).filter(Tenant.is_active == True).first()
-    if not default_tenant:
-        raise HTTPException(status_code=500, detail="No active tenant found for user registration")
-    
-    # Create user
-    new_user = User(
-        email=user.email,
-        username=user.username,
-        hashed_password=get_password_hash(user.password),
-        is_admin=False,
-        tenant_id=default_tenant.id
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    # Return user without password
-    return new_user
+
+
 
 
 @router.post("/forgot-password", response_model=MessageResponse)

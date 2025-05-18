@@ -1,356 +1,274 @@
+#!/usr/bin/env python3
 """
-Script to create tenants with custom details
+Script to create tenants with passwords in the chatbot system
 """
 import os
 import sys
 import uuid
-import sqlite3
-import argparse
-from datetime import datetime
+import logging
+from getpass import getpass
+from passlib.context import CryptContext
 
-def create_tenant(name, description=None, api_key=None, is_active=True):
-    """
-    Create a new tenant in the database
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Add the project root to the path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_tenant_with_password():
+    """Create a new tenant with password"""
+    from app.database import SessionLocal
+    from app.tenants.models import Tenant
+    from sqlalchemy import Column, String
     
-    Args:
-        name: Name of the tenant
-        description: Description of the tenant (optional)
-        api_key: API key for the tenant (optional, auto-generated if not provided)
-        is_active: Whether the tenant is active (default: True)
+    print("=== Tenant Creation Tool ===")
     
-    Returns:
-        dict: Tenant information
-    """
-    # Connect to the database
-    db_path = os.path.join(os.getcwd(), "chatbot.db")
+    # Get tenant information
+    name = input("Tenant Name: ")
+    description = input("Description (optional): ")
+    password = getpass("Password: ")
+    confirm_password = getpass("Confirm Password: ")
     
-    if not os.path.exists(db_path):
-        print(f"Error: Database not found at {db_path}")
-        return None
+    if not name:
+        print("Error: Tenant name is required")
+        return
     
-    # Generate API key if not provided
-    if not api_key:
-        api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
+    if not password:
+        print("Error: Password is required")
+        return
+    
+    if password != confirm_password:
+        print("Error: Passwords don't match")
+        return
+    
+    # Create database session
+    db = SessionLocal()
     
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        # Check if tenant with this name already exists
+        existing_tenant = db.query(Tenant).filter(Tenant.name == name).first()
+        if existing_tenant:
+            print(f"Error: A tenant with the name '{name}' already exists")
+            return
         
-        # Check if a tenant with this name already exists
-        cursor.execute("SELECT id, name, api_key FROM tenants WHERE name = ?", (name,))
-        existing = cursor.fetchone()
+        # Generate API key
+        api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
         
-        if existing:
-            print(f"Warning: Tenant with name '{name}' already exists (ID: {existing[0]})")
+        # Check if the Tenant model has a hashed_password column
+        # If not, we need to add it first
+        has_password_column = False
+        for column in Tenant.__table__.columns:
+            if column.name == 'hashed_password':
+                has_password_column = True
+                break
+        
+        if not has_password_column:
+            print("The Tenant model does not have a hashed_password column.")
+            print("Let's add it to the database schema.")
             
-            choice = input("Do you want to update this tenant? (y/n): ").lower()
-            if choice != 'y':
-                print("Operation cancelled.")
-                conn.close()
-                return None
+            # This is a simplified approach - in a production system,
+            # you should use Alembic migrations for schema changes
+            from sqlalchemy import text
+            db.execute(text("ALTER TABLE tenants ADD COLUMN hashed_password TEXT"))
+            db.commit()
+            print("Added hashed_password column to tenants table")
             
-            # Update existing tenant
-            cursor.execute(
-                "UPDATE tenants SET description = ?, api_key = ?, is_active = ? WHERE id = ?",
-                (description, api_key, is_active, existing[0])
-            )
-            tenant_id = existing[0]
-            print(f"Updated tenant {name} (ID: {tenant_id})")
-        else:
-            # Insert new tenant
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute(
-                "INSERT INTO tenants (name, description, api_key, is_active, created_at) VALUES (?, ?, ?, ?, ?)",
-                (name, description, api_key, is_active, now)
-            )
-            tenant_id = cursor.lastrowid
-            print(f"Created new tenant {name} (ID: {tenant_id})")
+            # Add the column to the model as well
+            Tenant.hashed_password = Column(String)
         
-        conn.commit()
+        # Hash the password
+        hashed_password = get_password_hash(password)
         
-        # Get tenant info
-        cursor.execute("SELECT id, name, description, api_key, is_active FROM tenants WHERE id = ?", (tenant_id,))
-        tenant = cursor.fetchone()
-        conn.close()
+        # Create tenant
+        tenant = Tenant(
+            name=name,
+            description=description,
+            api_key=api_key,
+            is_active=True,
+            hashed_password=hashed_password  # Add the hashed password
+        )
         
-        if tenant:
-            tenant_info = {
-                "id": tenant[0],
-                "name": tenant[1],
-                "description": tenant[2],
-                "api_key": tenant[3],
-                "is_active": bool(tenant[4])
-            }
-            return tenant_info
+        db.add(tenant)
+        db.commit()
+        db.refresh(tenant)
         
-        return None
-    
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        if conn:
-            conn.rollback()
-        return None
+        print("\n=== Tenant created successfully ===")
+        print(f"Tenant ID: {tenant.id}")
+        print(f"Tenant Name: {tenant.name}")
+        print(f"API Key: {tenant.api_key}")
+        print("\nKeep this API key secure. Users will need it to access the chatbot.")
+        
     except Exception as e:
-        print(f"Error: {e}")
-        if conn:
-            conn.rollback()
-        return None
+        print(f"Error creating tenant: {e}")
+        db.rollback()
     finally:
-        if conn:
-            conn.close()
+        db.close()
+
+def authenticate_tenant():
+    """Test tenant authentication with password"""
+    from app.database import SessionLocal
+    from app.tenants.models import Tenant
+    
+    print("=== Tenant Authentication Test ===")
+    
+    # Get authentication details
+    name = input("Tenant Name: ")
+    password = getpass("Password: ")
+    
+    if not name or not password:
+        print("Error: Tenant name and password are required")
+        return
+    
+    # Create database session
+    db = SessionLocal()
+    
+    try:
+        # Check if tenant exists
+        tenant = db.query(Tenant).filter(
+            Tenant.name == name,
+            Tenant.is_active == True
+        ).first()
+        
+        if not tenant:
+            print("Error: Tenant not found or inactive")
+            return
+        
+        # Check if tenant has a password
+        if not hasattr(tenant, 'hashed_password') or not tenant.hashed_password:
+            print("Error: Tenant does not have a password set")
+            return
+        
+        # Verify password
+        if verify_password(password, tenant.hashed_password):
+            print(f"Authentication successful for tenant: {tenant.name}")
+            print(f"Tenant API Key: {tenant.api_key}")
+        else:
+            print("Error: Invalid password")
+        
+    except Exception as e:
+        print(f"Error during authentication: {e}")
+    finally:
+        db.close()
 
 def list_tenants():
-    """List all tenants in the database"""
-    # Connect to the database
-    db_path = os.path.join(os.getcwd(), "chatbot.db")
+    """List all tenants in the system"""
+    from app.database import SessionLocal
+    from app.tenants.models import Tenant
     
-    if not os.path.exists(db_path):
-        print(f"Error: Database not found at {db_path}")
-        return None
+    print("=== Tenant List ===")
+    
+    # Create database session
+    db = SessionLocal()
     
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Get all tenants
-        cursor.execute("SELECT id, name, description, api_key, is_active FROM tenants")
-        tenants = cursor.fetchall()
-        conn.close()
+        tenants = db.query(Tenant).all()
         
         if not tenants:
-            print("No tenants found in the database.")
-            return []
+            print("No tenants found in the system")
+            return
         
-        print(f"Found {len(tenants)} tenants:")
-        print("-" * 90)
-        print(f"{'ID':<5} {'Name':<20} {'Description':<30} {'API Key':<25} {'Active':<5}")
-        print("-" * 90)
+        print(f"Found {len(tenants)} tenant(s):")
+        for i, tenant in enumerate(tenants, 1):
+            status = "Active" if tenant.is_active else "Inactive"
+            print(f"{i}. {tenant.name} (ID: {tenant.id}) - {status}")
+            print(f"   API Key: {tenant.api_key}")
+            if tenant.description:
+                print(f"   Description: {tenant.description}")
+            has_password = hasattr(tenant, 'hashed_password') and tenant.hashed_password is not None
+            print(f"   Password Protected: {'Yes' if has_password else 'No'}")
+            print()
         
-        tenant_list = []
-        for tenant in tenants:
-            tenant_id, name, description, api_key, is_active = tenant
-            description = description or ""
-            if len(description) > 27:
-                description = description[:24] + "..."
-            print(f"{tenant_id:<5} {name:<20} {description:<30} {api_key[:22]+'...':<25} {'Yes' if is_active else 'No':<5}")
-            
-            tenant_list.append({
-                "id": tenant_id,
-                "name": name,
-                "description": description,
-                "api_key": api_key,
-                "is_active": bool(is_active)
-            })
-        
-        return tenant_list
-    
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        return None
     except Exception as e:
-        print(f"Error: {e}")
-        return None
+        print(f"Error listing tenants: {e}")
     finally:
-        if conn:
-            conn.close()
+        db.close()
 
-def deactivate_tenant(tenant_id):
-    """Deactivate a tenant by ID"""
-    # Connect to the database
-    db_path = os.path.join(os.getcwd(), "chatbot.db")
+def reset_tenant_password():
+    """Reset a tenant's password"""
+    from app.database import SessionLocal
+    from app.tenants.models import Tenant
     
-    if not os.path.exists(db_path):
-        print(f"Error: Database not found at {db_path}")
-        return False
+    print("=== Reset Tenant Password ===")
+    
+    # Get tenant ID
+    tenant_id = input("Enter Tenant ID: ")
+    if not tenant_id or not tenant_id.isdigit():
+        print("Error: Invalid tenant ID")
+        return
+    
+    # Create database session
+    db = SessionLocal()
     
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Check if tenant exists
-        cursor.execute("SELECT name FROM tenants WHERE id = ?", (tenant_id,))
-        tenant = cursor.fetchone()
-        
+        tenant = db.query(Tenant).filter(Tenant.id == int(tenant_id)).first()
         if not tenant:
-            print(f"Error: Tenant with ID {tenant_id} not found")
-            return False
+            print(f"Error: No tenant found with ID {tenant_id}")
+            return
         
-        # Deactivate tenant
-        cursor.execute("UPDATE tenants SET is_active = 0 WHERE id = ?", (tenant_id,))
-        conn.commit()
+        # Check if tenant has a password field
+        if not hasattr(tenant, 'hashed_password'):
+            print("Error: Tenant model does not have a password field")
+            return
         
-        print(f"Deactivated tenant {tenant[0]} (ID: {tenant_id})")
-        return True
-    
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        if conn:
-            conn.rollback()
-        return False
+        # Get new password
+        new_password = getpass("New Password: ")
+        confirm_password = getpass("Confirm New Password: ")
+        
+        if not new_password:
+            print("Error: Password is required")
+            return
+        
+        if new_password != confirm_password:
+            print("Error: Passwords don't match")
+            return
+        
+        # Update password
+        tenant.hashed_password = get_password_hash(new_password)
+        db.commit()
+        
+        print(f"Password reset successfully for tenant '{tenant.name}'")
+        
     except Exception as e:
-        print(f"Error: {e}")
-        if conn:
-            conn.rollback()
-        return False
+        print(f"Error resetting password: {e}")
+        db.rollback()
     finally:
-        if conn:
-            conn.close()
+        db.close()
 
-def activate_tenant(tenant_id):
-    """Activate a tenant by ID"""
-    # Connect to the database
-    db_path = os.path.join(os.getcwd(), "chatbot.db")
-    
-    if not os.path.exists(db_path):
-        print(f"Error: Database not found at {db_path}")
-        return False
-    
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Check if tenant exists
-        cursor.execute("SELECT name FROM tenants WHERE id = ?", (tenant_id,))
-        tenant = cursor.fetchone()
-        
-        if not tenant:
-            print(f"Error: Tenant with ID {tenant_id} not found")
-            return False
-        
-        # Activate tenant
-        cursor.execute("UPDATE tenants SET is_active = 1 WHERE id = ?", (tenant_id,))
-        conn.commit()
-        
-        print(f"Activated tenant {tenant[0]} (ID: {tenant_id})")
-        return True
-    
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        if conn:
-            conn.rollback()
-        return False
-    except Exception as e:
-        print(f"Error: {e}")
-        if conn:
-            conn.rollback()
-        return False
-    finally:
-        if conn:
-            conn.close()
-
-def interactive_mode():
-    """Interactive mode for tenant management"""
-    print("=== Tenant Management Tool ===")
-    
+def main():
+    """Main menu"""
     while True:
-        print("\nOptions:")
-        print("1. List all tenants")
-        print("2. Create a new tenant")
-        print("3. Activate a tenant")
-        print("4. Deactivate a tenant")
+        print("\n=== Tenant Management ===")
+        print("1. Create new tenant with password")
+        print("2. List all tenants")
+        print("3. Test tenant authentication")
+        print("4. Reset tenant password")
         print("0. Exit")
         
-        choice = input("\nEnter your choice (0-4): ")
+        choice = input("\nEnter your choice: ")
         
-        if choice == "0":
+        if choice == "1":
+            create_tenant_with_password()
+        elif choice == "2":
+            list_tenants()
+        elif choice == "3":
+            authenticate_tenant()
+        elif choice == "4":
+            reset_tenant_password()
+        elif choice == "0":
             print("Exiting...")
             break
-        
-        elif choice == "1":
-            list_tenants()
-        
-        elif choice == "2":
-            name = input("Enter tenant name: ")
-            description = input("Enter tenant description (optional): ")
-            
-            custom_api_key = input("Enter custom API key (leave blank for auto-generated): ")
-            api_key = custom_api_key if custom_api_key else None
-            
-            tenant = create_tenant(name, description, api_key)
-            if tenant:
-                print("\nTenant created successfully:")
-                print(f"ID: {tenant['id']}")
-                print(f"Name: {tenant['name']}")
-                print(f"Description: {tenant['description']}")
-                print(f"API Key: {tenant['api_key']}")
-                print(f"Active: {'Yes' if tenant['is_active'] else 'No'}")
-        
-        elif choice == "3":
-            tenant_id = input("Enter tenant ID to activate: ")
-            try:
-                tenant_id = int(tenant_id)
-                activate_tenant(tenant_id)
-            except ValueError:
-                print("Error: Tenant ID must be a number")
-        
-        elif choice == "4":
-            tenant_id = input("Enter tenant ID to deactivate: ")
-            try:
-                tenant_id = int(tenant_id)
-                deactivate_tenant(tenant_id)
-            except ValueError:
-                print("Error: Tenant ID must be a number")
-        
         else:
             print("Invalid choice. Please try again.")
 
 if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Tenant management tool")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # List command
-    list_parser = subparsers.add_parser("list", help="List all tenants")
-    
-    # Create command
-    create_parser = subparsers.add_parser("create", help="Create a new tenant")
-    create_parser.add_argument("name", help="Tenant name")
-    create_parser.add_argument("--description", "-d", help="Tenant description")
-    create_parser.add_argument("--api-key", "-k", help="Custom API key (auto-generated if not provided)")
-    create_parser.add_argument("--inactive", action="store_true", help="Create tenant as inactive")
-    
-    # Activate command
-    activate_parser = subparsers.add_parser("activate", help="Activate a tenant")
-    activate_parser.add_argument("tenant_id", type=int, help="Tenant ID")
-    
-    # Deactivate command
-    deactivate_parser = subparsers.add_parser("deactivate", help="Deactivate a tenant")
-    deactivate_parser.add_argument("tenant_id", type=int, help="Tenant ID")
-    
-    # Interactive mode
-    interactive_parser = subparsers.add_parser("interactive", help="Run in interactive mode")
-    
-    args = parser.parse_args()
-    
-    # Run appropriate command
-    if args.command == "list":
-        list_tenants()
-    
-    elif args.command == "create":
-        tenant = create_tenant(
-            args.name,
-            args.description,
-            args.api_key,
-            not args.inactive
-        )
-        
-        if tenant:
-            print("\nTenant created successfully:")
-            print(f"ID: {tenant['id']}")
-            print(f"Name: {tenant['name']}")
-            print(f"Description: {tenant['description']}")
-            print(f"API Key: {tenant['api_key']}")
-            print(f"Active: {'Yes' if tenant['is_active'] else 'No'}")
-    
-    elif args.command == "activate":
-        activate_tenant(args.tenant_id)
-    
-    elif args.command == "deactivate":
-        deactivate_tenant(args.tenant_id)
-    
-    elif args.command == "interactive":
-        interactive_mode()
-    
-    else:
-        # Default to interactive mode if no command specified
-        interactive_mode()
+    main()
