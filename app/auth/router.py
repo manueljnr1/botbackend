@@ -14,6 +14,7 @@ from app.auth.models import PasswordReset
 from app.utils.email_service import email_service
 
 from app.database import get_db
+from app.auth.models import User
 from app.tenants.models import Tenant
 from app.config import settings
 
