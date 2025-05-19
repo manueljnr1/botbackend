@@ -56,3 +56,13 @@ class PasswordReset(Base):
         """Check if token is still valid"""
         now = datetime.datetime.now()
         return not self.is_used and now < self.expires_at
+    
+class TenantCredentials(Base):
+    __tablename__ = "tenant_credentials"
+    
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), primary_key=True)
+    hashed_password = Column(String, nullable=False)
+    password_updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Use the same relationship name as in the Tenant model
+    tenant = relationship("Tenant", back_populates="tenant_credentials")

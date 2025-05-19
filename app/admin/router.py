@@ -11,6 +11,7 @@ from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ
 from app.chatbot.models import ChatSession, ChatMessage
 from app.auth.router import get_current_user, get_admin_user
+from app.core.security import get_password_hash
 
 router = APIRouter()
 
