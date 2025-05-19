@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -62,7 +63,7 @@ class TokenResponse(BaseModel):
     tenant_id: int
     tenant_name: str
     expires_at: datetime    
-
+    api_key: str
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
@@ -191,7 +192,8 @@ async def login_tenant(form_data: OAuth2PasswordRequestForm = Depends(), db: Ses
         "token_type": "bearer",
         "tenant_id": tenant.id,
         "tenant_name": tenant.name,
-        "expires_at": expires_at
+        "expires_at": expires_at,
+        "api_key": tenant.api_key
     }
 
 
