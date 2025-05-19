@@ -36,6 +36,7 @@ def create_tenant_with_password():
     # Get tenant information
     name = input("Tenant Name: ")
     description = input("Description (optional): ")
+    contact_email = input("Contact Email: ")  # Added contact email field
     password = getpass("Password: ")
     confirm_password = getpass("Confirm Password: ")
     
@@ -50,6 +51,13 @@ def create_tenant_with_password():
     if password != confirm_password:
         print("Error: Passwords don't match")
         return
+    
+    # Check if contact email is provided
+    if not contact_email:
+        print("Warning: No contact email provided. It's recommended to add one for password recovery.")
+        proceed = input("Do you want to proceed without a contact email? (y/n): ")
+        if proceed.lower() != 'y':
+            return
     
     # Create database session
     db = SessionLocal()
@@ -67,10 +75,13 @@ def create_tenant_with_password():
         # Check if the Tenant model has a hashed_password column
         # If not, we need to add it first
         has_password_column = False
+        has_contact_email_column = False
+        
         for column in Tenant.__table__.columns:
             if column.name == 'hashed_password':
                 has_password_column = True
-                break
+            if column.name == 'contact_email':
+                has_contact_email_column = True
         
         if not has_password_column:
             print("The Tenant model does not have a hashed_password column.")
@@ -86,6 +97,18 @@ def create_tenant_with_password():
             # Add the column to the model as well
             Tenant.hashed_password = Column(String)
         
+        if not has_contact_email_column:
+            print("The Tenant model does not have a contact_email column.")
+            print("Let's add it to the database schema.")
+            
+            from sqlalchemy import text
+            db.execute(text("ALTER TABLE tenants ADD COLUMN contact_email TEXT"))
+            db.commit()
+            print("Added contact_email column to tenants table")
+            
+            # Add the column to the model as well
+            Tenant.contact_email = Column(String)
+        
         # Hash the password
         hashed_password = get_password_hash(password)
         
@@ -95,7 +118,8 @@ def create_tenant_with_password():
             description=description,
             api_key=api_key,
             is_active=True,
-            hashed_password=hashed_password  # Add the hashed password
+            hashed_password=hashed_password,  # Add the hashed password
+            contact_email=contact_email       # Add the contact email
         )
         
         db.add(tenant)
@@ -105,6 +129,7 @@ def create_tenant_with_password():
         print("\n=== Tenant created successfully ===")
         print(f"Tenant ID: {tenant.id}")
         print(f"Tenant Name: {tenant.name}")
+        print(f"Contact Email: {tenant.contact_email if tenant.contact_email else 'Not provided'}")
         print(f"API Key: {tenant.api_key}")
         print("\nKeep this API key secure. Users will need it to access the chatbot.")
         
@@ -184,6 +209,14 @@ def list_tenants():
             print(f"   API Key: {tenant.api_key}")
             if tenant.description:
                 print(f"   Description: {tenant.description}")
+            
+            # Show contact email if it exists
+            has_email = hasattr(tenant, 'contact_email') and tenant.contact_email is not None
+            if has_email:
+                print(f"   Contact Email: {tenant.contact_email}")
+            else:
+                print("   Contact Email: Not provided")
+            
             has_password = hasattr(tenant, 'hashed_password') and tenant.hashed_password is not None
             print(f"   Password Protected: {'Yes' if has_password else 'No'}")
             print()
@@ -244,6 +277,68 @@ def reset_tenant_password():
     finally:
         db.close()
 
+def update_tenant_contact_email():
+    """Update a tenant's contact email"""
+    from app.database import SessionLocal
+    from app.tenants.models import Tenant
+    
+    print("=== Update Tenant Contact Email ===")
+    
+    # Get tenant ID
+    tenant_id = input("Enter Tenant ID: ")
+    if not tenant_id or not tenant_id.isdigit():
+        print("Error: Invalid tenant ID")
+        return
+    
+    # Create database session
+    db = SessionLocal()
+    
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == int(tenant_id)).first()
+        if not tenant:
+            print(f"Error: No tenant found with ID {tenant_id}")
+            return
+        
+        # Check if tenant has a contact_email field
+        if not hasattr(tenant, 'contact_email'):
+            print("The tenant model does not have a contact_email field.")
+            print("Let's add it to the database schema.")
+            
+            from sqlalchemy import text
+            db.execute(text("ALTER TABLE tenants ADD COLUMN contact_email TEXT"))
+            db.commit()
+            print("Added contact_email column to tenants table")
+            
+            # Add the column to the model as well
+            from sqlalchemy import Column, String
+            Tenant.contact_email = Column(String)
+        
+        # Show current email if any
+        current_email = tenant.contact_email if hasattr(tenant, 'contact_email') else None
+        if current_email:
+            print(f"Current contact email: {current_email}")
+        else:
+            print("No contact email currently set")
+        
+        # Get new email
+        new_email = input("New Contact Email: ")
+        
+        if not new_email:
+            print("Error: Contact email is required")
+            return
+        
+        # Update email
+        tenant.contact_email = new_email
+        db.commit()
+        
+        print(f"Contact email updated successfully for tenant '{tenant.name}'")
+        
+    except Exception as e:
+        print(f"Error updating contact email: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 def main():
     """Main menu"""
     while True:
@@ -252,6 +347,7 @@ def main():
         print("2. List all tenants")
         print("3. Test tenant authentication")
         print("4. Reset tenant password")
+        print("5. Update tenant contact email")  # Added new option
         print("0. Exit")
         
         choice = input("\nEnter your choice: ")
@@ -264,6 +360,8 @@ def main():
             authenticate_tenant()
         elif choice == "4":
             reset_tenant_password()
+        elif choice == "5":
+            update_tenant_contact_email()  # Added new function
         elif choice == "0":
             print("Exiting...")
             break
