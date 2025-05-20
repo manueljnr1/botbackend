@@ -8,6 +8,7 @@ from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ
 from app.chatbot.models import ChatSession, ChatMessage
 from app.config import settings
+from app.utils.language_service import language_service
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -314,3 +315,159 @@ class ChatbotEngine:
             del self.active_sessions[session_id]
         
         return True
+    
+
+    def _get_or_create_session(self, tenant_id: int, user_identifier: str) -> Tuple[str, bool]:
+        """Get existing or create new chat session"""
+        # Check for existing session
+        session = self.db.query(ChatSession).filter(
+            ChatSession.tenant_id == tenant_id,
+            ChatSession.user_identifier == user_identifier,
+            ChatSession.is_active == True
+        ).first()
+        
+        created = False
+        if not session:
+            # Create new session
+            session_id = str(uuid.uuid4())
+            session = ChatSession(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                user_identifier=user_identifier,
+                language_code="en"  # Default language is English
+            )
+            self.db.add(session)
+            self.db.commit()
+            self.db.refresh(session)
+            created = True
+            logger.info(f"Created new chat session: {session_id}")
+        else:
+            logger.info(f"Using existing chat session: {session.session_id}")
+        
+        return session.session_id, created
+    
+    def process_message_with_language(
+        self, api_key: str, user_message: str, user_identifier: str, 
+        target_language: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Process an incoming message with language detection and translation"""
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {
+                "error": "Invalid API key",
+                "success": False
+            }
+        
+        # Get or create session
+        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
+        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        
+        # Detect language if not specified
+        detected_language = language_service.detect_language(user_message)
+        source_language = detected_language or "en"
+        
+        # Update session language if detected
+        if detected_language and not target_language:
+            session.language_code = detected_language
+            self.db.commit()
+            logger.info(f"Updated session language to: {detected_language}")
+        
+        # If target language is specified, use it; otherwise use session language
+        target_language = target_language or session.language_code or "en"
+        
+        # Store original message
+        original_message = user_message
+        was_translated = False
+        
+        # Translate message to English for processing if needed
+        if source_language != "en":
+            user_message, was_translated = language_service.translate(user_message, target_lang="en", source_lang=source_language)
+            logger.info(f"Translated user message from {source_language} to English for processing")
+        
+        # Store user message
+        user_msg = ChatMessage(
+            session_id=session.id,
+            content=original_message,  # Store original message
+            translated_content=user_message if was_translated else None,  # Store translated message if any
+            source_language=source_language,
+            is_from_user=True
+        )
+        self.db.add(user_msg)
+        self.db.commit()
+        logger.info(f"Stored user message for session {session_id}")
+        
+        # Initialize or get chatbot chain
+        if session_id not in self.active_sessions:
+            logger.info(f"Initializing new chatbot chain for session {session_id}")
+            chain = self._initialize_chatbot_chain(tenant.id)
+            if not chain:
+                logger.error(f"Failed to initialize chatbot chain for tenant {tenant.id}")
+                return {
+                    "error": "Failed to initialize chatbot",
+                    "success": False
+                }
+            self.active_sessions[session_id] = chain
+        else:
+            logger.info(f"Using existing chatbot chain for session {session_id}")
+            chain = self.active_sessions[session_id]
+        
+        # Generate response
+        try:
+            logger.info(f"Generating response for: '{user_message}'")
+            
+            # Use the chain to generate a response in English
+            if hasattr(chain, '__call__'):
+                # For LangChain conversation chains
+                if hasattr(chain, 'run'):
+                    # ConversationChain uses .run()
+                    english_response = chain.run(input=user_message)
+                else:
+                    # ConversationalRetrievalChain uses __call__
+                    response = chain({"question": user_message})
+                    english_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
+            else:
+                # Fallback for any other type of chain
+                english_response = "I'm sorry, I'm having trouble accessing my knowledge base."
+                logger.error(f"Unexpected chain type: {type(chain)}")
+            
+            logger.info(f"Generated English response: '{english_response[:50]}...'")
+            
+            # Translate response back to the target language if needed
+            final_response = english_response
+            was_bot_translated = False
+            
+            if target_language != "en":
+                final_response, was_bot_translated = language_service.translate(
+                    english_response, target_lang=target_language, source_lang="en"
+                )
+                logger.info(f"Translated bot response from English to {target_language}")
+            
+            # Store bot response
+            bot_msg = ChatMessage(
+                session_id=session.id,
+                content=final_response,  # Store the final (possibly translated) response
+                translated_content=english_response if was_bot_translated else None,  # Store original English response if translated
+                source_language="en",  # Bot responses are generated in English
+                target_language=target_language if was_bot_translated else None,
+                is_from_user=False
+            )
+            self.db.add(bot_msg)
+            self.db.commit()
+            
+            return {
+                "session_id": session_id,
+                "response": final_response,
+                "detected_language": source_language,
+                "language_name": language_service.get_language_name(source_language),
+                "was_translated": was_translated or was_bot_translated,
+                "success": True,
+                "is_new_session": is_new_session
+            }
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}", exc_info=True)
+            return {
+                "error": f"Error generating response: {str(e)}",
+                "success": False
+            }

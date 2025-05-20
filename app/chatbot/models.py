@@ -3,13 +3,16 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
+
     
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, unique=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     user_identifier = Column(String, index=True)  # Could be email, phone, etc.
+    language_code = Column(String(10), default="en")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -21,11 +24,16 @@ class ChatSession(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     
+    
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("chat_sessions.id"))
     content = Column(Text)
+    translated_content = Column(Text, nullable=True)  # Add translated content
+    source_language = Column(String(10), nullable=True)  # Source language code
+    target_language = Column(String(10), nullable=True)  # Target language code (if translated)
     is_from_user = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
+

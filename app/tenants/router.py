@@ -19,6 +19,7 @@ from app.auth.router import get_current_user, get_admin_user # For admin-only en
 from app.auth.models import TenantCredentials
 from app.config import settings
 from app.tenants.models import TenantPasswordReset
+from app.admin.models import Admin
 
 
 
@@ -60,10 +61,14 @@ class TenantLogin(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
-    tenant_id: int
-    tenant_name: str
+    tenant_id: Optional[int]
+    tenant_name: Optional[str]
     expires_at: datetime    
-    api_key: str
+    api_key: Optional[str]
+    is_admin: bool = False
+    admin_id: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
@@ -147,11 +152,42 @@ async def get_current_tenant(token: str = Depends(oauth2_scheme), db: Session = 
 
 # Login endpoint
 @router.post("/login", response_model=TokenResponse)
-async def login_tenant(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """
-   Tenant login with username/email and password
+    Universal login endpoint for both admins and tenants
     """
-    # Find tenant by name or through user
+    # First, try to authenticate as an admin
+    admin = db.query(Admin).filter(
+        (Admin.username == form_data.username) | (Admin.email == form_data.username),
+        Admin.is_active == True
+    ).first()
+    
+    if admin and verify_password(form_data.password, admin.hashed_password):
+        # Admin authentication successful
+        access_token, expires_at = create_access_token(
+            data={
+                "sub": str(admin.id),
+                "is_admin": True  # Flag to indicate admin role
+            },
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
+        
+        # Return admin token response
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "is_admin": True,
+            "admin_id": str(admin.id),
+            "name": admin.name,
+            "email": admin.email,
+            "expires_at": expires_at,
+            # Add dummy values for required tenant fields
+            "tenant_id":0,  # Dummy UUID
+            "tenant_name": "ADMIN",  # Dummy name
+            "api_key": None  # or provide a dummy value if required
+        }
+    
+    # If not admin, proceed with existing tenant authentication logic
     tenant = db.query(Tenant).filter(Tenant.name == form_data.username, Tenant.is_active == True).first()
     
     if not tenant:
@@ -181,21 +217,24 @@ async def login_tenant(form_data: OAuth2PasswordRequestForm = Depends(), db: Ses
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Create access token
+    # Create access token with is_admin flag set to false for tenants
     access_token, expires_at = create_access_token(
-        data={"sub": str(tenant.id)},
+        data={
+            "sub": str(tenant.id),
+            "is_admin": False  # Flag to indicate this is NOT an admin
+        },
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
+    # Return tenant token response with is_admin field added
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "tenant_id": tenant.id,
-        "tenant_name": tenant.name,
+        "tenant_id": int(tenant.id),
+        "tenant_name": str(tenant.id),
         "expires_at": expires_at,
         "api_key": tenant.api_key
     }
-
 
 
 

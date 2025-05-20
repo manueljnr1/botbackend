@@ -24,3 +24,6 @@ langchain-community
 tree-sitter
 tree-sitter-languages
 langchain-openai
+pypdf
+langdetect
+googletrans

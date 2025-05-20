@@ -45,67 +45,67 @@ async def list_all_users(
     users = db.query(User).all()
     return users
 
-@router.put("/users/{user_id}", response_model=UserResponse)
-async def update_user(
-    user_id: int,
-    user_update: UserUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """
-    Update a user's status or role (admin only)
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+# @router.put("/users/{user_id}", response_model=UserResponse)
+# async def update_user(
+#     user_id: int,
+#     user_update: UserUpdate,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_admin_user)
+# ):
+#     """
+#     Update a user's status or role (admin only)
+#     """
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
     
-    # Prevent self-deactivation
-    if current_user.id == user_id and user_update.is_active is False:
-        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+#     # Prevent self-deactivation
+#     if current_user.id == user_id and user_update.is_active is False:
+#         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
     
-    # Prevent removing own admin privileges
-    if current_user.id == user_id and user_update.is_admin is False:
-        raise HTTPException(status_code=400, detail="You cannot remove your own admin privileges")
+#     # Prevent removing own admin privileges
+#     if current_user.id == user_id and user_update.is_admin is False:
+#         raise HTTPException(status_code=400, detail="You cannot remove your own admin privileges")
     
-    # Update user fields
-    if user_update.is_active is not None:
-        user.is_active = user_update.is_active
+#     # Update user fields
+#     if user_update.is_active is not None:
+#         user.is_active = user_update.is_active
     
-    if user_update.is_admin is not None:
-        user.is_admin = user_update.is_admin
+#     if user_update.is_admin is not None:
+#         user.is_admin = user_update.is_admin
     
-    if user_update.tenant_id is not None:
-        # Verify tenant exists
-        tenant = db.query(Tenant).filter(Tenant.id == user_update.tenant_id).first()
-        if not tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
-        user.tenant_id = user_update.tenant_id
+#     if user_update.tenant_id is not None:
+#         # Verify tenant exists
+#         tenant = db.query(Tenant).filter(Tenant.id == user_update.tenant_id).first()
+#         if not tenant:
+#             raise HTTPException(status_code=404, detail="Tenant not found")
+#         user.tenant_id = user_update.tenant_id
     
-    db.commit()
-    db.refresh(user)
-    return user
+#     db.commit()
+#     db.refresh(user)
+#     return user
 
-@router.delete("/users/{user_id}")
-async def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """
-    Delete a user (admin only)
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+# @router.delete("/users/{user_id}")
+# async def delete_user(
+#     user_id: int,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_admin_user)
+# ):
+#     """
+#     Delete a user (admin only)
+#     """
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
     
-    # Prevent self-deletion
-    if current_user.id == user_id:
-        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+#     # Prevent self-deletion
+#     if current_user.id == user_id:
+#         raise HTTPException(status_code=400, detail="You cannot delete your own account")
     
-    db.delete(user)
-    db.commit()
+#     db.delete(user)
+#     db.commit()
     
-    return {"message": "User deleted successfully"}
+#     return {"message": "User deleted successfully"}
 
 @router.get("/tenants/overview")
 async def get_tenant_overview(
