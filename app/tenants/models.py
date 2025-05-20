@@ -16,7 +16,7 @@ class Tenant(Base):
     name = Column(String, unique=True, index=True)
     description = Column(Text, nullable=True)
     api_key = Column(String, unique=True, index=True)
-    hashed_password = Column(String, nullable=False)
+    # hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     contact_email = Column(String, nullable=True)
     system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant

@@ -174,7 +174,7 @@ async def login_tenant(form_data: OAuth2PasswordRequestForm = Depends(), db: Ses
     # Get tenant credentials
     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
     
-    if not credentials or not verify_password(form_data.password, credentials.hashed_password):
+    if not credentials or not credentials.hashed_password or not verify_password(form_data.password, credentials.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -261,19 +261,19 @@ async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     # Check if tenant name already exists
     db_tenant = db.query(Tenant).filter(Tenant.name == tenant.name).first()
     if db_tenant:
-        raise HTTPException(status_code=400, detail="Tenant name already registered")
+        raise HTTPException(status_code=400, detail="Username already registered")
     
-    # Generate hashed password
-    hashed_password = get_password_hash(tenant.password)
+    
+   
     
     # Create new tenant (with is_active set to False initially for admin approval)
     new_tenant = Tenant(
         name=tenant.name,
         description=tenant.description,
-        system_prompt=None,  # Set to None as we're removing from onboarding
+        system_prompt=None,  
         api_key=f"sk-{str(uuid.uuid4()).replace('-', '')}",
         contact_email=tenant.contact_email,  # Changed from admin_email
-        is_active=False
+        is_active=True
     )
     
     # Add tenant to database
@@ -282,6 +282,7 @@ async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     db.refresh(new_tenant)
     
     # Create tenant credentials with the tenant_id we now have
+    hashed_password = get_password_hash(tenant.password)
     tenant_credentials = TenantCredentials(
         tenant_id=new_tenant.id,
         hashed_password=hashed_password
