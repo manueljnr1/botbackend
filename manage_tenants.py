@@ -26,9 +26,10 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_tenant_with_password():
-    """Create a new tenant with password"""
+    """Create a new tenant with password stored in TenantCredentials"""
     from app.database import SessionLocal
     from app.tenants.models import Tenant
+    from app.auth.models import TenantCredentials
     from sqlalchemy import Column, String
     
     print("=== Tenant Creation Tool ===")
@@ -36,7 +37,7 @@ def create_tenant_with_password():
     # Get tenant information
     name = input("Tenant Name: ")
     description = input("Description (optional): ")
-    contact_email = input("Contact Email: ")  # Added contact email field
+    contact_email = input("Contact Email: ")
     password = getpass("Password: ")
     confirm_password = getpass("Confirm Password: ")
     
@@ -72,30 +73,12 @@ def create_tenant_with_password():
         # Generate API key
         api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
         
-        # Check if the Tenant model has a hashed_password column
-        # If not, we need to add it first
-        has_password_column = False
+        # Check if the Tenant model has a contact_email column
         has_contact_email_column = False
         
         for column in Tenant.__table__.columns:
-            if column.name == 'hashed_password':
-                has_password_column = True
             if column.name == 'contact_email':
                 has_contact_email_column = True
-        
-        if not has_password_column:
-            print("The Tenant model does not have a hashed_password column.")
-            print("Let's add it to the database schema.")
-            
-            # This is a simplified approach - in a production system,
-            # you should use Alembic migrations for schema changes
-            from sqlalchemy import text
-            db.execute(text("ALTER TABLE tenants ADD COLUMN hashed_password TEXT"))
-            db.commit()
-            print("Added hashed_password column to tenants table")
-            
-            # Add the column to the model as well
-            Tenant.hashed_password = Column(String)
         
         if not has_contact_email_column:
             print("The Tenant model does not have a contact_email column.")
@@ -112,19 +95,27 @@ def create_tenant_with_password():
         # Hash the password
         hashed_password = get_password_hash(password)
         
-        # Create tenant
+        # Create tenant WITHOUT storing the password in the tenant table
         tenant = Tenant(
             name=name,
             description=description,
             api_key=api_key,
             is_active=True,
-            hashed_password=hashed_password,  # Add the hashed password
-            contact_email=contact_email       # Add the contact email
+            contact_email=contact_email
         )
         
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
+        
+        # Create TenantCredentials with the password
+        credentials = TenantCredentials(
+            tenant_id=tenant.id,
+            hashed_password=hashed_password
+        )
+        
+        db.add(credentials)
+        db.commit()
         
         print("\n=== Tenant created successfully ===")
         print(f"Tenant ID: {tenant.id}")
@@ -143,6 +134,7 @@ def authenticate_tenant():
     """Test tenant authentication with password"""
     from app.database import SessionLocal
     from app.tenants.models import Tenant
+    from app.auth.models import TenantCredentials
     
     print("=== Tenant Authentication Test ===")
     
@@ -168,13 +160,17 @@ def authenticate_tenant():
             print("Error: Tenant not found or inactive")
             return
         
-        # Check if tenant has a password
-        if not hasattr(tenant, 'hashed_password') or not tenant.hashed_password:
-            print("Error: Tenant does not have a password set")
+        # Check if tenant has credentials
+        credentials = db.query(TenantCredentials).filter(
+            TenantCredentials.tenant_id == tenant.id
+        ).first()
+        
+        if not credentials or not credentials.hashed_password:
+            print("Error: Tenant does not have credentials set")
             return
         
         # Verify password
-        if verify_password(password, tenant.hashed_password):
+        if verify_password(password, credentials.hashed_password):
             print(f"Authentication successful for tenant: {tenant.name}")
             print(f"Tenant API Key: {tenant.api_key}")
         else:
@@ -189,6 +185,7 @@ def list_tenants():
     """List all tenants in the system"""
     from app.database import SessionLocal
     from app.tenants.models import Tenant
+    from app.auth.models import TenantCredentials
     
     print("=== Tenant List ===")
     
@@ -217,7 +214,12 @@ def list_tenants():
             else:
                 print("   Contact Email: Not provided")
             
-            has_password = hasattr(tenant, 'hashed_password') and tenant.hashed_password is not None
+            # Check if tenant has credentials with password
+            credentials = db.query(TenantCredentials).filter(
+                TenantCredentials.tenant_id == tenant.id
+            ).first()
+            
+            has_password = credentials is not None and credentials.hashed_password is not None
             print(f"   Password Protected: {'Yes' if has_password else 'No'}")
             print()
         
@@ -227,9 +229,10 @@ def list_tenants():
         db.close()
 
 def reset_tenant_password():
-    """Reset a tenant's password"""
+    """Reset a tenant's password in TenantCredentials"""
     from app.database import SessionLocal
     from app.tenants.models import Tenant
+    from app.auth.models import TenantCredentials
     
     print("=== Reset Tenant Password ===")
     
@@ -248,10 +251,14 @@ def reset_tenant_password():
             print(f"Error: No tenant found with ID {tenant_id}")
             return
         
-        # Check if tenant has a password field
-        if not hasattr(tenant, 'hashed_password'):
-            print("Error: Tenant model does not have a password field")
-            return
+        # Get or create tenant credentials
+        credentials = db.query(TenantCredentials).filter(
+            TenantCredentials.tenant_id == tenant.id
+        ).first()
+        
+        if not credentials:
+            credentials = TenantCredentials(tenant_id=tenant.id)
+            db.add(credentials)
         
         # Get new password
         new_password = getpass("New Password: ")
@@ -265,8 +272,8 @@ def reset_tenant_password():
             print("Error: Passwords don't match")
             return
         
-        # Update password
-        tenant.hashed_password = get_password_hash(new_password)
+        # Update password in TenantCredentials
+        credentials.hashed_password = get_password_hash(new_password)
         db.commit()
         
         print(f"Password reset successfully for tenant '{tenant.name}'")
@@ -347,7 +354,7 @@ def main():
         print("2. List all tenants")
         print("3. Test tenant authentication")
         print("4. Reset tenant password")
-        print("5. Update tenant contact email")  # Added new option
+        print("5. Update tenant contact email")
         print("0. Exit")
         
         choice = input("\nEnter your choice: ")
@@ -361,7 +368,7 @@ def main():
         elif choice == "4":
             reset_tenant_password()
         elif choice == "5":
-            update_tenant_contact_email()  # Added new function
+            update_tenant_contact_email()
         elif choice == "0":
             print("Exiting...")
             break
