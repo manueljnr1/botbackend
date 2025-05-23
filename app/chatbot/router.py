@@ -1,11 +1,21 @@
 
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 import logging
 import os
+import asyncio
+import random
+import time
+import re
+
+
+from fastapi.responses import StreamingResponse
+import json
+
+
 
 from app.database import get_db
 from app.chatbot.engine import ChatbotEngine
@@ -41,13 +51,76 @@ class SupportedLanguage(BaseModel):
 
 
 
+class StreamingChatRequest(BaseModel):
+    message: str
+    user_identifier: str
+    enable_streaming: bool = True
+
+class ChatChunk(BaseModel):
+    chunk: str
+    is_complete: bool
+    chunk_index: int
+    total_delay: float
 
 
 
 
 
+def break_into_sentences(response: str) -> list:
+    """Break response into natural sentences for streaming"""
+    
+    response = response.strip()
+    
+    # Split by sentence endings, keeping the punctuation
+    sentence_pattern = r'(?<=[.!?])\s+(?=[A-Z])'
+    sentences = re.split(sentence_pattern, response)
+    
+    clean_sentences = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if sentence and len(sentence) > 10:  # Only meaningful sentences
+            # Ensure sentence ends with punctuation
+            if not sentence.endswith(('.', '!', '?')):
+                sentence += '.'
+            clean_sentences.append(sentence)
+    
+    return clean_sentences if clean_sentences else [response]
 
-
+def calculate_sentence_delay(sentence: str, is_last: bool = False) -> float:
+    """Calculate realistic delay for typing a sentence"""
+    
+    # Base typing speed (characters per second)
+    typing_speed = random.uniform(18, 30)
+    typing_time = len(sentence) / typing_speed
+    
+    # Add thinking pause based on sentence complexity
+    thinking_pause = 0
+    
+    # Longer pause for complex sentences
+    if any(word in sentence.lower() for word in ['however', 'therefore', 'additionally', 'furthermore']):
+        thinking_pause += random.uniform(0.5, 1.0)
+    
+    # Pause based on sentence ending
+    if sentence.endswith('.'):
+        end_pause = random.uniform(1.0, 2.0)
+    elif sentence.endswith('!'):
+        end_pause = random.uniform(0.8, 1.5)
+    elif sentence.endswith('?'):
+        end_pause = random.uniform(1.2, 2.2)
+    else:
+        end_pause = random.uniform(0.6, 1.0)
+    
+    # Longer pause for the last sentence
+    if is_last:
+        end_pause *= random.uniform(1.3, 1.8)
+    
+    total_delay = typing_time + thinking_pause + end_pause
+    
+    # Add human variation
+    total_delay *= random.uniform(0.8, 1.3)
+    
+    # Set bounds (1-6 seconds per sentence)
+    return max(1.0, min(total_delay, 6.0))
 
 
 # Chat endpoint
@@ -161,30 +234,7 @@ async def end_chat_session(session_id: str, api_key: str = Header(..., alias="X-
 
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest, 
-    api_key: str = Header(..., alias="X-API-Key"), 
-    db: Session = Depends(get_db)
-):
-    """
-    Send a message to the chatbot and get a response
-    Optionally specify a language code to receive responses in that language
-    """
-    logger.info(f"Processing chat request with API key: {api_key[:3]}...")
-    
-    engine = ChatbotEngine(db)
-    result = engine.process_message_with_language(
-        api_key=api_key,
-        user_message=request.message,
-        user_identifier=request.user_identifier,
-        target_language=request.language
-    )
-    if not result.get("success"):
-        logger.error(f"Error processing message: {result.get('error', 'Unknown error')}")
-        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-    
-    return result
+
 
 
 
@@ -199,48 +249,99 @@ async def ping():
 
 
 
-#-------------LANGUAGE SUPPORT  ENDPOINTS----------------
-
-# @router.get("/languages", response_model=List[SupportedLanguage])
-# async def get_supported_languages():
-#     """
-#     Get a list of supported languages
-#     """
-#     return [
-#         {"code": code, "name": name}
-#         for code, name in SUPPORTED_LANGUAGES.items()
-#     ]
-
-
-# @router.post("/language/{session_id}")
-# async def set_session_language(
-#     session_id: str,
-#     language: str,
-#     api_key: str = Header(..., alias="X-API-Key"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Set the language for a chat session
-#     """
-    # # Verify the language code
-    # if language not in SUPPORTED_LANGUAGES:
-    #     raise HTTPException(status_code=400, detail=f"Unsupported language code: {language}")
+# Add this new endpoint anywhere in your router.py file
+@router.post("/chat/delayed")
+async def chat_with_simple_sentence_streaming(
+    request: ChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Simplified streaming - sends JSON lines instead of SSE format
+    """
     
-    # # Verify the API key and get tenant
-    # engine = ChatbotEngine(db)
-    # tenant = engine._get_tenant_by_api_key(api_key)
-    # if not tenant:
-    #     raise HTTPException(status_code=403, detail="Invalid API key")
+    async def stream_sentences():
+        try:
+            start_time = time.time()
+            
+            # Calculate initial thinking delay
+            message_lower = request.message.lower()
+            complexity_score = sum(1 for word in ['explain', 'detail', 'how', 'why'] if word in message_lower)
+            
+            # FAQ patterns get quicker responses
+            faq_patterns = ['what is your', 'what are your', 'business hours', 'contact', 'website', 'phone', 'email', 'price', 'cost']
+            is_faq_like = any(pattern in message_lower for pattern in faq_patterns)
+            
+            if is_faq_like:
+                initial_delay = random.uniform(0.8, 2.5)
+            elif complexity_score > 2:
+                initial_delay = random.uniform(4.0, 8.0)
+            elif complexity_score > 0:
+                initial_delay = random.uniform(2.5, 6.0)
+            else:
+                initial_delay = random.uniform(1.2, 4.0)
+            
+            logger.info(f"Initial thinking delay: {initial_delay:.2f} seconds")
+            
+            # Send thinking indicator
+            yield f"{json.dumps({'type': 'thinking', 'delay': initial_delay})}\\n"
+            await asyncio.sleep(initial_delay)
+            
+            # Get response
+            engine = ChatbotEngine(db)
+            result = engine.process_message(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=request.user_identifier
+            )
+            
+            if not result.get("success"):
+                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\\n"
+                return
+            
+            # Break into sentences
+            full_response = result["response"]
+            sentences = break_into_sentences(full_response)
+            logger.info(f"Split into {len(sentences)} sentences")
+            
+            # Send start signal
+            yield f"{json.dumps({'type': 'start', 'session_id': result.get('session_id'), 'total_sentences': len(sentences)})}\\n"
+            
+            # Stream each sentence
+            for i, sentence in enumerate(sentences):
+                typing_delay = calculate_sentence_delay(sentence, is_last=(i == len(sentences) - 1))
+                await asyncio.sleep(typing_delay)
+                
+                sentence_data = {
+                    'type': 'sentence',
+                    'text': sentence.strip(),
+                    'index': i,
+                    'total_sentences': len(sentences),
+                    'is_last': i == len(sentences) - 1,
+                    'delay': typing_delay
+                }
+                
+                yield f"{json.dumps(sentence_data)}\\n"
+                logger.info(f"Sent sentence {i+1}/{len(sentences)}: '{sentence[:50]}...' (delay: {typing_delay:.2f}s)")
+            
+            # Send completion
+            completion_data = {
+                'type': 'complete',
+                'session_id': result.get('session_id'),
+                'total_time': time.time() - start_time,
+                'sentences_sent': len(sentences)
+            }
+            yield f"{json.dumps(completion_data)}\\n"
+            
+        except Exception as e:
+            logger.error(f"Error in sentence streaming: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\\n"
     
-    # # Get session
-    # session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-    # if not session or session.tenant_id != tenant.id:
-    #     raise HTTPException(status_code=404, detail="Session not found")
-    
-    # # Update session language
-    # session.language_code = language
-    # db.commit()
-    
-    # return {
-    #     "message": f"Session language set to {SUPPORTED_LANGUAGES[language]} ({language})"
-    # }
+    return StreamingResponse(
+        stream_sentences(),
+        media_type="application/x-ndjson",  # Changed from text/event-stream
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
