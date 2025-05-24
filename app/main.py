@@ -24,6 +24,7 @@ from app.chatbot.router import router as chatbot_router
 from app.integrations.whatsapp_router import include_whatsapp_router
 from app.analytics.router import router as analytics_router
 from app.admin.router import router as admin_router
+from app.discord.router import router as discord_router, get_bot_manager
 
 
 # Create database tables
@@ -39,73 +40,10 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(discord_router, prefix="/api/discord", tags=["discord"])
 
-# @app.post("/custom/whatsapp")
-# async def custom_whatsapp_webhook(request: Request):
-#     """Handle WhatsApp webhook directly without Twilio client"""
-#     # Log the request
-#     print(f"Received WhatsApp webhook request")
-    
-#     try:
-#         # Get form data from the request
-#         form_data = await request.form()
-#         form_dict = dict(form_data)
-#         print(f"Request form data: {form_dict}")
-        
-#         # Extract message details
-#         from_number = form_dict.get("From", "unknown")
-#         to_number = form_dict.get("To", "unknown")
-#         message_body = form_dict.get("Body", "")
-        
-#         print(f"Message from {from_number} to {to_number}: {message_body}")
-        
-#         # Create database session
-#         db = SessionLocal()
-        
-#         try:
-#             # Find first active tenant
-#             from app.tenants.models import Tenant
-#             tenant = db.query(Tenant).filter(Tenant.is_active == True).first()
-            
-#             if not tenant:
-#                 print("No active tenant found")
-#                 return {"error": "No active tenant found", "success": False}
-            
-#             # Process the message using the tenant's API key
-#             print(f"Using tenant: {tenant.name} (ID: {tenant.id})")
-            
-#             # Create chatbot engine and process message
-#             from app.chatbot.engine import ChatbotEngine
-#             engine = ChatbotEngine(db)
-#             result = engine.process_message(
-#                 api_key=tenant.api_key,
-#                 user_message=message_body,
-#                 user_identifier=from_number
-#             )
-            
-#             # Check result
-#             if result.get("success"):
-#                 bot_response = result.get("response", "I'm sorry, I couldn't process your request.")
-#                 print(f"Bot response: {bot_response[:50]}...")
-                
-#                 # Return the response
-#                 return {"message": bot_response, "success": True}
-#             else:
-#                 error = result.get("error", "Unknown error")
-#                 print(f"Error processing message: {error}")
-#                 return {"error": error, "success": False}
-            
-#         except Exception as e:
-#             print(f"Error in WhatsApp webhook handler: {e}")
-#             return {"error": str(e), "success": False}
-#         finally:
-#             db.close()
-            
-#     except Exception as e:
-#         print(f"Error parsing WhatsApp webhook request: {e}")
-#         return {"error": str(e), "success": False}
 
-# Configure CORS
+
 
 
 import os
@@ -296,3 +234,24 @@ def update_main_py():
 
 if __name__ == "__main__":
     update_main_py()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start Discord bots on application startup"""
+    try:
+        manager = get_bot_manager()
+        await manager.start_all_bots()
+        logger.info("All Discord bots started successfully")
+    except Exception as e:
+        logger.error(f"Error starting Discord bots: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop Discord bots on application shutdown"""
+    try:
+        manager = get_bot_manager()
+        await manager.stop_all_bots()
+        logger.info("All Discord bots stopped successfully")
+    except Exception as e:
+        logger.error(f"Error stopping Discord bots: {e}")

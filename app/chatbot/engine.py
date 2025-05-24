@@ -30,6 +30,14 @@ class ChatbotEngine:
     def __init__(self, db: Session):
         self.db = db
         self.active_sessions = {}  # In-memory storage of active chat sessions
+        
+        # Initialize the delay simulator
+        try:
+            from app.chatbot.response_simulator import SimpleHumanDelaySimulator
+            self.delay_simulator = SimpleHumanDelaySimulator()
+        except ImportError:
+            logger.warning("SimpleHumanDelaySimulator not available, delay features disabled")
+            self.delay_simulator = None
     
     def _get_tenant(self, tenant_id: int) -> Optional[Tenant]:
         """Get tenant information"""

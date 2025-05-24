@@ -21,6 +21,13 @@ class ChatSession(Base):
     tenant = relationship("Tenant", back_populates="chat_sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
+    # Discord integration fields
+    discord_channel_id = Column(String, nullable=True)
+    discord_user_id = Column(String, nullable=True)
+    discord_guild_id = Column(String, nullable=True)
+    platform = Column(String, default="web")  # web, discord, etc.
+    
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     

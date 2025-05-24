@@ -30,6 +30,12 @@ class Tenant(Base):
     chat_sessions = relationship("ChatSession", back_populates="tenant", cascade="all, delete-orphan")
     tenant_credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, overlaps="tenant_credentials", cascade="all, delete-orphan")
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    
+    # Discord integration fields
+    discord_bot_token = Column(String, nullable=True)
+    discord_application_id = Column(String, nullable=True)
+    discord_enabled = Column(Boolean, default=False)
+    discord_status_message = Column(String, nullable=True, default="Chatting with customers")
 
 
 
