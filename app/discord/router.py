@@ -13,6 +13,15 @@ from app.database import get_db, SessionLocal
 from app.tenants.models import Tenant
 from app.discord.discord_bot import DiscordBotManager
 
+# 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
+from app.pricing.integration_helpers import (
+    check_feature_access_dependency, 
+    check_integration_limit_dependency,
+    track_integration_added,
+    track_integration_removed
+)
+from app.tenants.router import get_tenant_from_api_key
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -44,6 +53,7 @@ class BotStatusResponse(BaseModel):
     guilds: int
     latency: Optional[float]
 
+# 🔥 MODIFIED WITH PRICING CHECKS
 @router.post("/configure")
 async def configure_discord_bot(
     config: DiscordConfig,
@@ -54,21 +64,32 @@ async def configure_discord_bot(
     """Configure Discord bot for a tenant"""
     
     # Get tenant
-    tenant = db.query(Tenant).filter(
-        Tenant.api_key == api_key,
-        Tenant.is_active == True
-    ).first()
+    tenant = get_tenant_from_api_key(api_key, db)
     
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    # 🔒 PRICING CHECK - Can tenant use Discord?
+    check_feature_access_dependency(tenant.id, "discord", db)
+    
+    # 🔒 PRICING CHECK - Can tenant add integrations? (only if enabling)
+    if config.enabled and not tenant.discord_enabled:
+        # This is a new integration being added
+        check_integration_limit_dependency(tenant.id, db)
     
     # Update tenant Discord configuration
+    was_enabled = tenant.discord_enabled
     tenant.discord_bot_token = config.bot_token
     tenant.discord_application_id = config.application_id
     tenant.discord_enabled = config.enabled
     tenant.discord_status_message = config.status_message
     
     db.commit()
+    
+    # 📊 PRICING TRACK - Track integration changes
+    if config.enabled and not was_enabled:
+        # New integration added
+        track_integration_added(tenant.id, db, "discord")
+    elif not config.enabled and was_enabled:
+        # Integration removed
+        track_integration_removed(tenant.id, db, "discord")
     
     # Start/restart bot in background
     if config.enabled:
@@ -78,6 +99,7 @@ async def configure_discord_bot(
     
     return {"message": "Discord configuration updated successfully"}
 
+# 🔥 MODIFIED WITH PRICING CHECKS
 @router.post("/start")
 async def start_discord_bot(
     background_tasks: BackgroundTasks,
@@ -86,13 +108,10 @@ async def start_discord_bot(
 ):
     """Start Discord bot for a tenant"""
     
-    tenant = db.query(Tenant).filter(
-        Tenant.api_key == api_key,
-        Tenant.is_active == True
-    ).first()
+    tenant = get_tenant_from_api_key(api_key, db)
     
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    # 🔒 PRICING CHECK - Can tenant use Discord?
+    check_feature_access_dependency(tenant.id, "discord", db)
     
     if not tenant.discord_bot_token:
         raise HTTPException(status_code=400, detail="Discord bot not configured")
@@ -109,13 +128,7 @@ async def stop_discord_bot(
 ):
     """Stop Discord bot for a tenant"""
     
-    tenant = db.query(Tenant).filter(
-        Tenant.api_key == api_key,
-        Tenant.is_active == True
-    ).first()
-    
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    tenant = get_tenant_from_api_key(api_key, db)
     
     background_tasks.add_task(stop_bot_for_tenant, tenant.id)
     
@@ -129,13 +142,7 @@ async def get_discord_bot_status(
     """Get Discord bot status for a tenant"""
     
     # Get tenant
-    tenant = db.query(Tenant).filter(
-        Tenant.api_key == api_key,
-        Tenant.is_active == True
-    ).first()
-    
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    tenant = get_tenant_from_api_key(api_key, db)
     
     # Default safe response
     safe_response = {

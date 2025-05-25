@@ -19,6 +19,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 from app.auth.models import User, PasswordReset
 from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ
+
 from app.chatbot.models import ChatSession, ChatMessage
 
 

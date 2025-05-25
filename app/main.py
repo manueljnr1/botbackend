@@ -25,6 +25,10 @@ from app.integrations.whatsapp_router import include_whatsapp_router
 from app.analytics.router import router as analytics_router
 from app.admin.router import router as admin_router
 from app.discord.router import router as discord_router, get_bot_manager
+from app.pricing.router import router as pricing_router
+from app.pricing.middleware import PricingMiddleware
+from app.live_chat.router import router as live_chat_router
+
 
 
 # Create database tables
@@ -41,6 +45,10 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(discord_router, prefix="/api/discord", tags=["discord"])
+app.include_router(pricing_router, prefix="/pricing", tags=["Pricing"])
+app.add_middleware(PricingMiddleware)
+app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
+
 
 
 
@@ -72,6 +80,15 @@ app.include_router(chatbot_router, prefix="/chatbot", tags=["Chatbot"])
 include_whatsapp_router(app)
 app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin"])
+app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
+
+
+try:
+    from app.live_chat.router import router as live_chat_router
+    app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
+    print("✅ Live chat router loaded successfully")
+except Exception as e:
+    print(f"❌ Failed to load live chat router: {e}")
 
 
 try:

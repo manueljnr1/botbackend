@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -30,7 +30,10 @@ class Tenant(Base):
     chat_sessions = relationship("ChatSession", back_populates="tenant", cascade="all, delete-orphan")
     tenant_credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, overlaps="tenant_credentials", cascade="all, delete-orphan")
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
-    
+    subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
+    agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
+    live_chats = relationship("LiveChat", back_populates="tenant", cascade="all, delete-orphan")
+
     # Discord integration fields
     discord_bot_token = Column(String, nullable=True)
     discord_application_id = Column(String, nullable=True)

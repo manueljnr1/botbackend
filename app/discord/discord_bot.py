@@ -1,4 +1,4 @@
-# app/discord/discord_bot.py - Complete working version
+# app/discord/discord_bot.py - Complete working version with PRICING INTEGRATION
 
 import discord
 from discord.ext import commands
@@ -7,11 +7,16 @@ import logging
 import ssl
 import aiohttp
 import certifi
+import math
 from typing import Optional, Dict, Any, Callable
 from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.chatbot.engine import ChatbotEngine
 from app.tenants.models import Tenant
+
+# 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
+from app.pricing.integration_helpers import track_message_sent
+from app.pricing.service import PricingService
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ class TenantDiscordBot:
             ssl_context.check_hostname = True
             ssl_context.verify_mode = ssl.CERT_REQUIRED
             connector = aiohttp.TCPConnector(ssl=ssl_context)
-            logger.info(f"Created SSL context with certificates for tenant {tenant_id}")
+            logger.info(f"Created SSL context with certificates for tenant {self.tenant_id}")
         except Exception as e:
             logger.warning(f"Could not create verified SSL context: {e}. Using default.")
             connector = None
@@ -172,7 +177,7 @@ class TenantDiscordBot:
                 db.close()
     
     async def handle_message(self, message):
-        """Handle incoming Discord messages"""
+        """Handle incoming Discord messages with PRICING INTEGRATION"""
         # Show typing indicator
         async with message.channel.typing():
             db = self.get_db_session()
@@ -183,6 +188,34 @@ class TenantDiscordBot:
                     await message.reply("❌ Bot configuration error. Please contact support.")
                     logger.error(f"Tenant {self.tenant_id} not found")
                     return
+                
+                # 🔒 PRICING CHECK - Check message limits BEFORE processing
+                logger.info(f"🔍 Checking Discord message limits for tenant {self.tenant_id}")
+                pricing_service = PricingService(db)
+                
+                if not pricing_service.check_message_limit(self.tenant_id):
+                    logger.warning(f"🚫 Discord message limit exceeded for tenant {self.tenant_id}")
+                    
+                    # Send limit exceeded message to Discord user
+                    limit_embed = discord.Embed(
+                        title="💰 Message Limit Reached",
+                        description="You've reached your message limit for this month.",
+                        color=0xff6b35
+                    )
+                    limit_embed.add_field(
+                        name="What now?",
+                        value="Please upgrade your plan to continue chatting with me!",
+                        inline=False
+                    )
+                    limit_embed.add_field(
+                        name="Need help?",
+                        value="Contact our support team to upgrade your plan.",
+                        inline=False
+                    )
+                    await message.reply(embed=limit_embed)
+                    return
+                
+                logger.info(f"✅ Discord message limit check passed for tenant {self.tenant_id}")
                 
                 # Create user identifier
                 user_identifier = f"discord_{message.author.id}"
@@ -221,6 +254,11 @@ class TenantDiscordBot:
                 if result.get("success"):
                     response = result["response"]
                     
+                    # 📊 PRICING TRACK - Log successful message usage
+                    logger.info(f"📊 Tracking Discord message usage for tenant {self.tenant_id}")
+                    track_success = track_message_sent(self.tenant_id, db)
+                    logger.info(f"📈 Discord message tracking result: {track_success}")
+                    
                     # Update session with Discord info
                     if result.get("session_id"):
                         from app.chatbot.models import ChatSession
@@ -252,7 +290,7 @@ class TenantDiscordBot:
                     logger.error(f"Chat engine error: {error_msg}")
                     
             except Exception as e:
-                logger.error(f"Error handling Discord message: {e}", exc_info=True)
+                logger.error(f"💥 Error handling Discord message: {e}", exc_info=True)
                 await message.reply("❌ Something went wrong. Please try again later.")
             finally:
                 db.close()
