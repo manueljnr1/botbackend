@@ -56,7 +56,7 @@ app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 
 import os
 from openai import OpenAI
-from app.utils.email_service import email_service
+from app.core.email_service import email_service
 
 app.add_middleware(
     CORSMiddleware,

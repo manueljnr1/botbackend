@@ -1,4 +1,4 @@
-# app/discord/discord_bot.py - Complete working version with PRICING INTEGRATION
+# app/discord/discord_bot.py - Complete working version with PRICING INTEGRATION and MEMORY
 
 import discord
 from discord.ext import commands
@@ -177,7 +177,7 @@ class TenantDiscordBot:
                 db.close()
     
     async def handle_message(self, message):
-        """Handle incoming Discord messages with PRICING INTEGRATION"""
+        """Handle incoming Discord messages with PRICING INTEGRATION and MEMORY"""
         # Show typing indicator
         async with message.channel.typing():
             db = self.get_db_session()
@@ -217,9 +217,6 @@ class TenantDiscordBot:
                 
                 logger.info(f"✅ Discord message limit check passed for tenant {self.tenant_id}")
                 
-                # Create user identifier
-                user_identifier = f"discord_{message.author.id}"
-                
                 # Initialize chatbot engine
                 engine = ChatbotEngine(db)
                 
@@ -236,20 +233,15 @@ class TenantDiscordBot:
                 
                 logger.info(f"Processing message from {message.author.name}: '{clean_message[:50]}...'")
                 
-                # Process message with delay simulation (if available)
-                if hasattr(engine, 'process_message_with_delay_simple'):
-                    result = await engine.process_message_with_delay_simple(
-                        api_key=tenant.api_key,
-                        user_message=clean_message,
-                        user_identifier=user_identifier
-                    )
-                else:
-                    # Fallback to regular processing
-                    result = engine.process_message(
-                        api_key=tenant.api_key,
-                        user_message=clean_message,
-                        user_identifier=user_identifier
-                    )
+                # 🧠 FIXED: Use Discord-specific memory processing
+                result = engine.process_discord_message_simple(
+                    api_key=tenant.api_key,
+                    user_message=clean_message,
+                    discord_user_id=str(message.author.id),
+                    channel_id=str(message.channel.id),
+                    guild_id=str(message.guild.id) if message.guild else "DM",
+                    max_context=20
+                )
                 
                 if result.get("success"):
                     response = result["response"]
@@ -259,18 +251,7 @@ class TenantDiscordBot:
                     track_success = track_message_sent(self.tenant_id, db)
                     logger.info(f"📈 Discord message tracking result: {track_success}")
                     
-                    # Update session with Discord info
-                    if result.get("session_id"):
-                        from app.chatbot.models import ChatSession
-                        session = db.query(ChatSession).filter(
-                            ChatSession.session_id == result["session_id"]
-                        ).first()
-                        if session:
-                            session.discord_channel_id = str(message.channel.id)
-                            session.discord_user_id = str(message.author.id)
-                            session.discord_guild_id = str(message.guild.id) if message.guild else None
-                            session.platform = "discord"
-                            db.commit()
+                    # The new method handles Discord info automatically, no need to update session
                     
                     # Split long messages for Discord's 2000 character limit
                     if len(response) > 2000:

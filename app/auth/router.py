@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from fastapi import Form, Body
 from app.auth.models import PasswordReset
-from app.utils.email_service import email_service
+from app.core.email_service import email_service
 
 from app.database import get_db
 from app.auth.models import User

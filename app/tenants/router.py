@@ -20,6 +20,7 @@ from app.auth.models import TenantCredentials
 from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
+from app.core.email_service import email_service
 
 
 
@@ -436,72 +437,6 @@ async def update_tenant_prompt(
 @router.post("/forgot-password", response_model=MessageResponse)
 async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
     """
-    Send password reset email to tenant admin
-    """
-    # Find tenant by name
-    tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
-    
-    # Always return success message, even if tenant not found (security best practice)
-    if not tenant:
-        return {"message": "If your tenant name exists in our system, you will receive a password reset link."}
-    
-    # Check if tenant already has a valid token
-    existing_token = db.query(TenantPasswordReset).filter(
-        TenantPasswordReset.tenant_id == tenant.id,
-        TenantPasswordReset.is_used == False,
-        TenantPasswordReset.expires_at > datetime.now()
-    ).first()
-    
-    # If token exists, reuse it, otherwise create a new one
-    if existing_token:
-        reset_token = existing_token.token
-    else:
-        # Create new token
-        password_reset = TenantPasswordReset.create_token(tenant.id)
-        db.add(password_reset)
-        db.commit()
-        db.refresh(password_reset)
-        reset_token = password_reset.token
-    
-    # To send an email, you need to have an email associated with the tenant
-    # If you don't have tenant email, you might need to modify this part
-    tenant_admin_email = tenant.admin_email  # You might need to add this field to your Tenant model
-    
-    if tenant_admin_email:
-        # Send email
-        reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password?token={reset_token}"
-        
-        # Prepare email content
-        email_body = f"""
-        <html>
-        <body>
-            <h2>Tenant Password Reset Request</h2>
-            <p>Hello {tenant.name} Administrator,</p>
-            <p>We received a request to reset your tenant password. If you didn't make this request, you can ignore this email.</p>
-            <p>To reset your password, click the link below:</p>
-            <p><a href="{reset_url}">{reset_url}</a></p>
-            <p>This link will expire in 24 hours.</p>
-            <p>Best regards,<br>Your App Team</p>
-        </body>
-        </html>
-        """
-        
-        # Send email
-        try:
-            email_service.send_email(
-                to_email=tenant_admin_email,
-                subject="Tenant Password Reset Request",
-                html_content=email_body
-            )
-        except Exception as e:
-            # Log error, but don't reveal to user
-            print(f"Error sending password reset email: {e}")
-    
-    return {"message": "If your tenant name exists in our system, you will receive a password reset link."}
-
-@router.post("/forgot-password", response_model=MessageResponse)
-async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
-    """
     Send password reset email to tenant contact
     """
     # Find tenant by name
@@ -509,13 +444,13 @@ async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Sessi
     
     # Always return success message, even if tenant not found (security best practice)
     if not tenant:
-        return {"message": "If your tenant name exists in our system, you will receive a password reset link."}
+        return {"message": "If your account name exists in our system, you will receive a password reset link."}
     
     # Check if tenant already has a valid token
     existing_token = db.query(TenantPasswordReset).filter(
         TenantPasswordReset.tenant_id == tenant.id,
         TenantPasswordReset.is_used == False,
-        TenantPasswordReset.expires_at > datetime.now()
+        TenantPasswordReset.expires_at > datetime.utcnow()
     ).first()
     
     # If token exists, reuse it, otherwise create a new one
@@ -530,7 +465,7 @@ async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Sessi
         reset_token = password_reset.token
     
     # Get the contact email for the tenant
-    tenant_contact_email = tenant.contact_email  # Changed from admin_email
+    tenant_contact_email = tenant.contact_email
     
     if tenant_contact_email:
         # Send email
@@ -539,27 +474,148 @@ async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Sessi
         # Prepare email content
         email_body = f"""
         <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #f8f9fa; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+                .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }}
+                .button {{ display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }}
+                .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 5px 5px; }}
+            </style>
+        </head>
         <body>
-            <h2>Tenant Password Reset Request</h2>
-            <p>Hello {tenant.name},</p>
-            <p>We received a request to reset your tenant password. If you didn't make this request, you can ignore this email.</p>
-            <p>To reset your password, click the link below:</p>
-            <p><a href="{reset_url}">{reset_url}</a></p>
-            <p>This link will expire in 24 hours.</p>
-            <p>Best regards,<br>Your App Team</p>
+            <div class="container">
+                <div class="header">
+                    <h2>Password Reset Request</h2>
+                </div>
+                <div class="content">
+                    <p>Hello <strong>{tenant.name}</strong>,</p>
+                    <p>We received a request to reset your account password. If you didn't make this request, you can safely ignore this email.</p>
+                    <p>To reset your password, click the button below:</p>
+                    <p style="text-align: center; margin: 30px 0;">
+                        <a href="{reset_url}" class="button">Reset Password</a>
+                    </p>
+                    <p>Or copy and paste this link in your browser:</p>
+                    <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
+                        {reset_url}
+                    </p>
+                    <p><strong>This link will expire in 24 hours.</strong></p>
+                </div>
+                <div class="footer">
+                    <p>Best regards,<br>Your App Team</p>
+                    <p>If you have any questions, please contact our support team.</p>
+                </div>
+            </div>
         </body>
         </html>
         """
         
-        # Send email
+        # Send email using SendGrid
         try:
-            email_service.send_email(
-                to_email=tenant_contact_email,  # Changed from admin_email
-                subject="Tenant Password Reset Request",
+            success = email_service.send_email(
+                to_email=tenant_contact_email,
+                subject="Password Reset Request",
                 html_content=email_body
             )
+            
+            if not success:
+                logger.error(f"Failed to send password reset email to {tenant_contact_email}")
+                
         except Exception as e:
             # Log error, but don't reveal to user
-            print(f"Error sending password reset email: {e}")
+            logger.exception(f"Error sending password reset email: {e}")
     
     return {"message": "If your account name exists in our system, you will receive a password reset link."}
+
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Reset tenant password using the token from email
+    """
+    # Find the password reset token
+    reset_request = db.query(TenantPasswordReset).filter(
+        TenantPasswordReset.token == request.token,
+        TenantPasswordReset.is_used == False
+    ).first()
+    
+    if not reset_request:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    # Check if token is valid (not expired)
+    if not reset_request.is_valid():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired"
+        )
+    
+    # Get the tenant
+    tenant = db.query(Tenant).filter(Tenant.id == reset_request.tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+    
+    # Update the tenant's password
+    hashed_password = get_password_hash(request.new_password)
+    
+    # Update or create tenant credentials
+    credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
+    if credentials:
+        credentials.hashed_password = hashed_password
+    else:
+        credentials = TenantCredentials(
+            tenant_id=tenant.id,
+            hashed_password=hashed_password
+        )
+        db.add(credentials)
+    
+    # Mark the reset token as used
+    reset_request.is_used = True
+    
+    # Commit changes
+    db.commit()
+    
+    # Optional: Send confirmation email
+    if tenant.contact_email:
+        confirmation_email = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h2>Password Reset Successful</h2>
+                </div>
+                <div style="padding: 20px;">
+                    <p>Hello <strong>{tenant.name}</strong>,</p>
+                    <p>Your password has been successfully reset.</p>
+                    <p>If you didn't perform this action, please contact our support team immediately.</p>
+                    <p>Best regards,<br>Your App Team</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        try:
+            email_service.send_email(
+                to_email=tenant.contact_email,
+                subject="Password Reset Successful",
+                html_content=confirmation_email
+            )
+        except Exception as e:
+            logger.exception(f"Failed to send password reset confirmation email: {e}")
+    
+    return {"message": "Password reset successfully. You can now log in with your new password."}

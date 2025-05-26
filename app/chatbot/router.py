@@ -89,6 +89,18 @@ class WebChatRequest(BaseModel):
 
 
 
+class SimpleChatRequest(BaseModel):
+    message: str
+    user_identifier: str
+    max_context: int = 20  # How many previous messages to remember
+
+class SimpleDiscordRequest(BaseModel):
+    message: str
+    discord_user_id: str
+    channel_id: str
+    guild_id: str
+    max_context: int = 20
+
 
 
 
@@ -420,237 +432,8 @@ async def chat_with_simple_sentence_streaming(
     )
 
 
-@router.post("/chat/discord", response_model=ChatResponse)
-async def chat_discord(
-    request: DiscordChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Discord-specific chat endpoint with memory
-    """
-    try:
-        # Pricing check
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_message_limit_dependency(tenant.id, db)
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process Discord message
-        result = engine.process_discord_message(
-            api_key=api_key,
-            user_message=request.message,
-            discord_user_id=request.discord_user_id,
-            channel_id=request.channel_id,
-            guild_id=request.guild_id
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Discord chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track message usage
-        track_message_sent(tenant.id, db)
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in Discord chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Fix the broken enhanced memory endpoint:
-@router.post("/chat/enhanced", response_model=ChatResponse)
-async def chat_with_enhanced_memory(
-    request: PlatformChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Chat endpoint with enhanced cross-platform memory
-    """
-    try:
-        logger.info(f"🧠 Enhanced memory chat for {request.platform}: {request.user_identifier}")
-        
-        # Pricing check
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_message_limit_dependency(tenant.id, db)
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process with enhanced memory
-        result = engine.process_message_with_enhanced_memory(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=request.user_identifier,
-            platform_data=request.platform_data
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Enhanced memory chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track message usage
-        track_message_sent(tenant.id, db)
-        
-        logger.info(f"✅ Enhanced memory chat successful")
-        logger.info(f"📊 Memory stats: {result.get('memory_stats', {})}")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in enhanced memory chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# Fix the broken cache endpoint at the end:
-@router.get("/memory/cache/web/{user_identifier}")
-async def get_cached_web_session(
-    user_identifier: str,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Retrieve cached web session data
-    """
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    # In a real implementation, you'd retrieve from cache
-    # For now, we'll get the memory from database
-    memory = EnhancedChatbotMemory(db, tenant.id)
-    web_identifier = f"web:{user_identifier}" if not user_identifier.startswith("web:") else user_identifier
-    
-    cross_platform_memory = memory.get_cross_platform_memory(web_identifier)
-    
-    return {
-        "user_identifier": user_identifier,
-        "session_data": cross_platform_memory,
-        "retrieved_at": datetime.now().isoformat()
-    }
-
-# Additional useful endpoints:
-
-@router.get("/memory/user/{user_identifier}/sessions")
-async def get_user_sessions(
-    user_identifier: str,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Get all sessions for a specific user across platforms"""
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    # Get sessions for this user identifier and similar ones
-    memory = EnhancedChatbotMemory(db, tenant.id)
-    normalized_id, platform = memory.normalize_user_identifier(user_identifier)
-    
-    # Find all possible identifiers for this user
-    possible_identifiers = [
-        user_identifier,
-        normalized_id,
-        f"discord:{normalized_id}",
-        f"whatsapp:{normalized_id}",
-        f"web:{normalized_id}",
-    ]
-    
-    sessions = db.query(ChatSession).filter(
-        ChatSession.tenant_id == tenant.id,
-        ChatSession.user_identifier.in_(possible_identifiers)
-    ).order_by(ChatSession.created_at.desc()).all()
-    
-    session_list = []
-    for session in sessions:
-        message_count = db.query(ChatMessage).filter(
-            ChatMessage.session_id == session.id
-        ).count()
-        
-        session_list.append({
-            "session_id": session.session_id,
-            "user_identifier": session.user_identifier,
-            "platform": session.platform or "web",
-            "created_at": session.created_at.isoformat(),
-            "is_active": session.is_active,
-            "message_count": message_count
-        })
-    
-    return {
-        "user_identifier": user_identifier,
-        "total_sessions": len(session_list),
-        "sessions": session_list
-    }
-
-@router.post("/memory/cleanup")
-async def cleanup_old_conversations(
-    days_old: int = 30,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Clean up old conversation sessions"""
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    memory = EnhancedChatbotMemory(db, tenant.id)
-    cleaned_sessions = memory.cleanup_old_sessions(days_old)
-    
-    return {"message": f"Cleaned up {cleaned_sessions} old sessions"}
-
-@router.get("/memory/stats")
-async def get_memory_stats(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Get overall memory system statistics for the tenant"""
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    # Get overall stats
-    total_sessions = db.query(ChatSession).filter(
-        ChatSession.tenant_id == tenant.id
-    ).count()
-    
-    active_sessions = db.query(ChatSession).filter(
-        ChatSession.tenant_id == tenant.id,
-        ChatSession.is_active == True
-    ).count()
-    
-    total_messages = db.query(ChatMessage).join(ChatSession).filter(
-        ChatSession.tenant_id == tenant.id
-    ).count()
-    
-    # Platform breakdown
-    platform_stats = db.query(
-        ChatSession.platform,
-        db.func.count(ChatSession.id).label('count')
-    ).filter(
-        ChatSession.tenant_id == tenant.id
-    ).group_by(ChatSession.platform).all()
-    
-    platform_breakdown = {stat.platform or "web": stat.count for stat in platform_stats}
-    
-    return {
-        "tenant_id": tenant.id,
-        "total_sessions": total_sessions,
-        "active_sessions": active_sessions,
-        "total_messages": total_messages,
-        "platform_breakdown": platform_breakdown,
-        "generated_at": datetime.now().isoformat()
-    }
-
 
 @router.post("/chat/with-handoff", response_model=ChatResponse)
 async def chat_with_handoff_detection(
@@ -688,3 +471,152 @@ async def chat_with_handoff_detection(
     except Exception as e:
         logger.error(f"Error in handoff-enabled chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+
+@router.post("/chat/simple", response_model=ChatResponse)
+async def chat_with_simple_memory(
+    request: SimpleChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Simple chat endpoint with basic conversation memory
+    - Remembers conversation within the same platform/session
+    - No cross-platform complexity
+    - Configurable context length
+    """
+    try:
+        logger.info(f"🧠 Simple memory chat for: {request.user_identifier}")
+        
+        # Pricing check
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_message_limit_dependency(tenant.id, db)
+        
+        # Initialize chatbot engine
+        engine = ChatbotEngine(db)
+        
+        # Process with simple memory
+        result = engine.process_message_simple_memory(
+            api_key=api_key,
+            user_message=request.message,
+            user_identifier=request.user_identifier,
+            platform="web",
+            max_context=request.max_context
+        )
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Simple memory chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track message usage
+        track_message_sent(tenant.id, db)
+        
+        logger.info(f"✅ Simple memory chat successful - used {result.get('context_messages', 0)} context messages")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in simple memory chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/chat/discord/simple", response_model=ChatResponse)
+async def discord_chat_simple(
+    request: SimpleDiscordRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Simplified Discord chat endpoint with basic memory
+    - Remembers Discord conversations for the same user
+    - No cross-platform memory
+    - Clean and simple
+    """
+    try:
+        logger.info(f"🎮 Simple Discord chat for user: {request.discord_user_id}")
+        
+        # Pricing check
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_message_limit_dependency(tenant.id, db)
+        
+        # Initialize chatbot engine
+        engine = ChatbotEngine(db)
+        
+        # Process Discord message with simple memory
+        result = engine.process_discord_message_simple(
+            api_key=api_key,
+            user_message=request.message,
+            discord_user_id=request.discord_user_id,
+            channel_id=request.channel_id,
+            guild_id=request.guild_id,
+            max_context=request.max_context
+        )
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Simple Discord chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track message usage
+        track_message_sent(tenant.id, db)
+        
+        logger.info(f"✅ Simple Discord chat successful - remembered {result.get('context_messages', 0)} previous messages")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in simple Discord chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/memory/simple/stats/{user_identifier}")
+async def get_simple_memory_stats(
+    user_identifier: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get simple memory statistics for a user - useful for debugging
+    """
+    try:
+        engine = ChatbotEngine(db)
+        result = engine.get_user_memory_stats(api_key, user_identifier)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/memory/simple/cleanup")
+async def cleanup_simple_memory(
+    days_old: int = 90,  # More generous than the complex system
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Clean up old conversation sessions - simplified version
+    """
+    from app.chatbot.simple_memory import SimpleChatbotMemory
+    
+    engine = ChatbotEngine(db)
+    tenant = engine._get_tenant_by_api_key(api_key)
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    memory = SimpleChatbotMemory(db, tenant.id)
+    cleaned_sessions = memory.cleanup_old_sessions(days_old)
+    
+    return {
+        "message": f"Cleaned up {cleaned_sessions} old sessions",
+        "days_old_threshold": days_old
+    }
