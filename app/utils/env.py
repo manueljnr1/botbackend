@@ -23,3 +23,5 @@ def get_openai_api_key():
         logger.error("OPENAI_API_KEY environment variable not set")
         return None
     return api_key
+
+

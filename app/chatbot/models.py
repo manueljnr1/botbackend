@@ -16,6 +16,7 @@ class ChatSession(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    user_email = Column(String, nullable=True) 
     
     # Relationships
     tenant = relationship("Tenant", back_populates="chat_sessions")
@@ -26,7 +27,7 @@ class ChatSession(Base):
     discord_user_id = Column(String, nullable=True)
     discord_guild_id = Column(String, nullable=True)
     platform = Column(String, default="web")  # web, discord, etc.
-    
+
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"

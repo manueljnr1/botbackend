@@ -22,23 +22,44 @@ class Tenant(Base):
     system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()) # Added server_default for creation as well, often useful
-    
+    # feedback_email = Column(String, nullable=True)
+    feedback_email = Column(String, nullable=True)      # Where tenant receives feedback emails
+    from_email = Column(String, nullable=True)          # What users see as sender
+    company_name = Column(String, nullable=True)
+    enable_feedback_system = Column(Boolean, default=True)
+    feedback_notification_enabled = Column(Boolean, default=True)
+
     # Relationships
     users = relationship("User", back_populates="tenant") # Assuming User model has a back_populates="tenant"
     knowledge_bases = relationship("KnowledgeBase", back_populates="tenant", cascade="all, delete-orphan")
     faqs = relationship("FAQ", back_populates="tenant", cascade="all, delete-orphan")
     chat_sessions = relationship("ChatSession", back_populates="tenant", cascade="all, delete-orphan")
     tenant_credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, overlaps="tenant_credentials", cascade="all, delete-orphan")
-    credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan", overlaps="tenant_credentials")
     subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
     agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
     live_chats = relationship("LiveChat", back_populates="tenant", cascade="all, delete-orphan")
+   
 
     # Discord integration fields
     discord_bot_token = Column(String, nullable=True)
     discord_application_id = Column(String, nullable=True)
     discord_enabled = Column(Boolean, default=False)
     discord_status_message = Column(String, nullable=True, default="Chatting with customers")
+
+    # Slack integration fields (NEW - ADD THESE)
+    slack_bot_token = Column(String, nullable=True)
+    slack_signing_secret = Column(String, nullable=True)
+    slack_app_id = Column(String, nullable=True)
+    slack_client_id = Column(String, nullable=True)
+    slack_client_secret = Column(String, nullable=True)
+    slack_enabled = Column(Boolean, default=False)
+    slack_team_id = Column(String, nullable=True)  # Slack workspace ID
+    slack_bot_user_id = Column(String, nullable=True)  # Bot user ID in Slack
+
+
+    
+
 
 
 

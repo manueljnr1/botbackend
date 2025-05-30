@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+from pydantic import EmailStr
 import logging
 import os
 import asyncio
@@ -18,9 +19,11 @@ import json
 
 from app.database import get_db
 from app.chatbot.engine import ChatbotEngine
+
 from app.chatbot.models import ChatSession, ChatMessage
 from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
+
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
 from app.pricing.integration_helpers import check_message_limit_dependency, track_message_sent
@@ -78,6 +81,7 @@ class DiscordChatRequest(BaseModel):
     channel_id: str
     guild_id: str
 
+
 class WhatsAppChatRequest(BaseModel):
     message: str
     phone_number: str
@@ -100,6 +104,17 @@ class SimpleDiscordRequest(BaseModel):
     channel_id: str
     guild_id: str
     max_context: int = 20
+
+
+class SmartChatRequest(BaseModel):
+    message: str
+    user_identifier: str
+    max_context: int = 20
+
+class TenantFeedbackResponse(BaseModel):
+    feedback_id: str
+    response: str
+
 
 
 
@@ -620,3 +635,156 @@ async def cleanup_simple_memory(
         "message": f"Cleaned up {cleaned_sessions} old sessions",
         "days_old_threshold": days_old
     }
+
+
+@router.post("/chat/smart", response_model=ChatResponse)
+async def chat_with_smart_feedback(
+    request: SmartChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Web chat endpoint with smart feedback system that:
+    - Asks for email on new conversations
+    - Detects when bot doesn't have good answers
+    - Automatically sends feedback requests to tenant
+    - Delivers tenant responses as follow-ups
+    """
+    try:
+        logger.info(f"🧠📧 Smart feedback chat for: {request.user_identifier}")
+        
+        # Pricing check
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_message_limit_dependency(tenant.id, db)
+        
+        # Initialize chatbot engine
+        engine = ChatbotEngine(db)
+        
+        # Process with smart feedback system
+        result = engine.process_web_message_with_feedback(
+            api_key=api_key,
+            user_message=request.message,
+            user_identifier=request.user_identifier,
+            max_context=request.max_context
+        )
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Smart feedback chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track message usage
+        track_message_sent(tenant.id, db)
+        
+        # Log special feedback events
+        if result.get("email_requested"):
+            logger.info("📧 Requested user email for feedback system")
+        elif result.get("email_captured"):
+            logger.info(f"📧 Captured user email: {result.get('user_email')}")
+        elif result.get("feedback_triggered"):
+            logger.info(f"🔔 Triggered feedback request: {result.get('feedback_id')}")
+        
+        logger.info(f"✅ Smart feedback chat successful")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/feedback/respond")
+async def handle_tenant_feedback(
+    request: TenantFeedbackResponse,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Handle tenant's response to feedback request
+    This processes the tenant's email reply and sends follow-up to user
+    """
+    try:
+        engine = ChatbotEngine(db)
+        
+        result = engine.handle_tenant_feedback_response(
+            api_key=api_key,
+            feedback_id=request.feedback_id,
+            tenant_response=request.response
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Failed to process feedback"))
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error handling tenant feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/feedback/stats")
+async def get_feedback_statistics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get feedback system statistics for tenant
+    """
+    try:
+        engine = ChatbotEngine(db)
+        result = engine.get_feedback_stats(api_key)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Failed to get stats"))
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting feedback stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/feedback/pending")
+async def get_pending_feedback_requests(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of pending feedback requests for tenant
+    """
+    try:
+        from app.chatbot.smart_feedback import PendingFeedback
+        
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        pending_requests = db.query(PendingFeedback).filter(
+            PendingFeedback.tenant_id == tenant.id,
+            PendingFeedback.user_notified == False
+        ).order_by(PendingFeedback.created_at.desc()).all()
+        
+        requests_data = []
+        for request in pending_requests:
+            requests_data.append({
+                "feedback_id": request.feedback_id,
+                "user_question": request.user_question,
+                "bot_response": request.bot_response,
+                "user_email": request.user_email,
+                "created_at": request.created_at.isoformat(),
+                "tenant_email_sent": request.tenant_email_sent
+            })
+        
+        return {
+            "success": True,
+            "pending_requests": requests_data,
+            "total_count": len(requests_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting pending feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+

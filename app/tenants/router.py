@@ -21,6 +21,11 @@ from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
 from app.core.email_service import email_service
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 
@@ -100,6 +105,12 @@ class TenantResetPasswordRequest(BaseModel):
 class MessageResponse(BaseModel):
     message: str
 
+
+
+class TenantEmailConfig(BaseModel):
+    feedback_email: Optional[str] = None
+    from_email: Optional[str] = None
+    enable_feedback_system: bool = True
 
 
 def verify_password(plain_password, hashed_password):
@@ -619,3 +630,4 @@ async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session
             logger.exception(f"Failed to send password reset confirmation email: {e}")
     
     return {"message": "Password reset successfully. You can now log in with your new password."}
+

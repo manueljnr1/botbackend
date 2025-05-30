@@ -891,3 +891,303 @@ Your response:"""
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
+        
+
+    # ========================== SMART FEEDBACK SYSTEM ==========================
+    
+    def process_message_with_smart_feedback(self, api_key: str, user_message: str, user_identifier: str, 
+                                          platform: str = "web", max_context: int = 20) -> Dict[str, Any]:
+        """
+        Process message with smart feedback system that:
+        1. Asks for email on new conversations
+        2. Detects inadequate responses
+        3. Triggers tenant feedback loop
+        """
+        from app.chatbot.smart_feedback import SmartFeedbackManager
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Initialize managers
+        from app.chatbot.simple_memory import SimpleChatbotMemory
+        memory = SimpleChatbotMemory(self.db, tenant.id)
+        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
+        
+        # Get or create session
+        session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+        
+        # Check if we should ask for email (new conversations)
+        if feedback_manager.should_request_email(session_id, user_identifier):
+            email_request = feedback_manager.generate_email_request_message(tenant.name)
+            
+            # Store the email request as bot message
+            memory.store_message(session_id, email_request, False)
+            
+            return {
+                "session_id": session_id,
+                "response": email_request,
+                "success": True,
+                "is_new_session": is_new_session,
+                "email_requested": True,
+                "platform": platform
+            }
+        
+        # Check if user is providing email
+        extracted_email = feedback_manager.extract_email_from_message(user_message)
+        if extracted_email:
+            # Store email and acknowledge
+            if feedback_manager.store_user_email(session_id, extracted_email):
+                acknowledgment = f"Thank you! I've noted your email as {extracted_email}. How can I help you today?"
+                
+                # Store both user message and bot response
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, acknowledgment, False)
+                
+                return {
+                    "session_id": session_id,
+                    "response": acknowledgment,
+                    "success": True,
+                    "is_new_session": is_new_session,
+                    "email_captured": True,
+                    "user_email": extracted_email,
+                    "platform": platform
+                }
+        
+        # Process message normally with memory
+        result = self.process_message_simple_memory(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform=platform,
+            max_context=max_context
+        )
+        
+        if not result.get("success"):
+            return result
+        
+        bot_response = result["response"]
+        
+        # Check if response is inadequate and trigger feedback if needed
+        if feedback_manager.detect_inadequate_response(bot_response):
+            logger.info(f"Detected inadequate response, triggering feedback system")
+            
+            # Get conversation context
+            conversation_history = memory.get_conversation_history(user_identifier, 10)
+            
+            # Create feedback request (this sends email to tenant)
+            feedback_id = feedback_manager.create_feedback_request(
+                session_id=session_id,
+                user_question=user_message,
+                bot_response=bot_response,
+                conversation_context=conversation_history
+            )
+            
+            if feedback_id:
+                logger.info(f"Created feedback request {feedback_id} for inadequate response")
+                result["feedback_triggered"] = True
+                result["feedback_id"] = feedback_id
+        
+        return result
+    
+    def process_web_message_with_feedback(self, api_key: str, user_message: str, user_identifier: str, 
+                                        max_context: int = 20) -> Dict[str, Any]:
+        """
+        Web-specific message processing with smart feedback system
+        """
+        if not user_identifier.startswith("web:"):
+            user_identifier = f"web:{user_identifier}"
+        
+        return self.process_message_with_smart_feedback(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform="web",
+            max_context=max_context
+        )
+    
+    def handle_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
+        """
+        Handle tenant's email response to feedback request
+        """
+        from app.chatbot.smart_feedback import SmartFeedbackManager
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
+        
+        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+        
+        return {
+            "success": success,
+            "feedback_id": feedback_id,
+            "message": "Tenant response processed and user notified" if success else "Failed to process response"
+        }
+    
+    def get_feedback_stats(self, api_key: str) -> Dict[str, Any]:
+        """
+        Get feedback system statistics for tenant
+        """
+        from app.chatbot.smart_feedback import SmartFeedbackManager
+        
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
+        stats = feedback_manager.get_pending_feedback_stats()
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "stats": stats
+        }
+    
+
+    def process_slack_message_simple(self, api_key: str, user_message: str, slack_user_id: str, 
+                               channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
+        """
+        Simplified Slack message processing with basic memory
+        """
+        user_identifier = f"slack:{slack_user_id}"
+        
+        result = self.process_message_simple_memory(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform="slack",
+            max_context=max_context
+        )
+        
+        # Add Slack-specific info to result
+        if result.get("success"):
+            result["slack_info"] = {
+                "user_id": slack_user_id,
+                "channel_id": channel_id,
+                "team_id": team_id
+            }
+        
+        return result
+    
+
+    async def process_slack_message_simple_with_delay(self, api_key: str, user_message: str, slack_user_id: str, 
+                                                    channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
+        """
+        Slack message processing with both simple memory AND delay simulation
+        """
+        import time
+        import asyncio
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Record start time for delay calculation
+        start_time = time.time()
+        
+        user_identifier = f"slack:{slack_user_id}"
+        
+        # Initialize simple memory manager
+        from app.chatbot.simple_memory import SimpleChatbotMemory
+        memory = SimpleChatbotMemory(self.db, tenant.id)
+        
+        # Get or create session
+        session_id, is_new_session = memory.get_or_create_session(user_identifier, "slack")
+        
+        # Get conversation history for context
+        conversation_history = memory.get_conversation_history(user_identifier, max_context)
+        
+        logger.info(f"Processing Slack message with delay for {user_identifier} - {len(conversation_history)} previous messages")
+        
+        # Store user message
+        if not memory.store_message(session_id, user_message, True):
+            return {"error": "Failed to store user message", "success": False}
+        
+        # Initialize or get chatbot chain
+        if session_id not in self.active_sessions:
+            logger.info(f"Initializing chatbot chain for session {session_id}")
+            chain = self._initialize_chatbot_chain(tenant.id)
+            if not chain:
+                logger.error(f"Failed to initialize chatbot chain for tenant {tenant.id}")
+                return {"error": "Failed to initialize chatbot", "success": False}
+            self.active_sessions[session_id] = chain
+        else:
+            logger.info(f"Using existing chatbot chain for session {session_id}")
+            chain = self.active_sessions[session_id]
+        
+        # Build prompt with conversation context
+        system_prompt = None
+        if hasattr(tenant, 'system_prompt') and tenant.system_prompt:
+            system_prompt = tenant.system_prompt.replace("$company_name", tenant.name)
+        
+        # Create enhanced prompt with conversation history
+        if conversation_history:
+            enhanced_prompt = memory.build_context_prompt(user_message, conversation_history, system_prompt)
+        else:
+            enhanced_prompt = user_message
+        
+        # Generate response
+        try:
+            logger.info(f"Generating response with delay for: '{user_message}' (with {len(conversation_history)} context messages)")
+            
+            if hasattr(chain, 'run'):
+                # ConversationChain uses .run()
+                bot_response = chain.run(enhanced_prompt)
+            elif hasattr(chain, '__call__'):
+                # ConversationalRetrievalChain uses __call__
+                response = chain({"question": enhanced_prompt})
+                bot_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
+            else:
+                logger.error(f"Unexpected chain type: {type(chain)}")
+                bot_response = "I'm sorry, I'm having trouble accessing my knowledge base."
+                
+            logger.info(f"Generated response: '{bot_response[:50]}...'")
+            
+            # Calculate human-like delay based on question and response
+            response_delay = 0
+            if self.delay_simulator:
+                response_delay = self.delay_simulator.calculate_response_delay(user_message, bot_response)
+                
+                # Wait for the calculated delay
+                logger.info(f"Simulating human thinking/typing time: {response_delay:.2f} seconds")
+                await asyncio.sleep(response_delay)
+            
+            # Store bot response
+            if not memory.store_message(session_id, bot_response, False):
+                logger.warning("Failed to store bot response")
+            
+            # Calculate total processing time
+            total_time = time.time() - start_time
+            
+            return {
+                "session_id": session_id,
+                "response": bot_response,
+                "success": True,
+                "is_new_session": is_new_session,
+                "context_messages": len(conversation_history),
+                "platform": "slack",
+                "slack_info": {
+                    "user_id": slack_user_id,
+                    "channel_id": channel_id,
+                    "team_id": team_id
+                },
+                "response_delay": response_delay,
+                "total_processing_time": total_time
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}", exc_info=True)
+            return {"error": f"Error generating response: {str(e)}", "success": False}
+        
+
+
+    
+
+    

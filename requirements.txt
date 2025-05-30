@@ -29,3 +29,13 @@ langdetect
 googletrans
 discord.py
 aiohttp
+slack-bolt
+slack-sdk
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+email-validator
+pytz
+google-auth-oauthlib==1.0.0
+oauth2client==3.0.0
+python-dateutil

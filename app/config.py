@@ -30,4 +30,13 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    
+    # Email Configuration (add to your settings class)
+    SMTP_SERVER: str = "smtp.gmail.com"  # or your SMTP server
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = "your-email@gmail.com"  # Your email
+    SMTP_PASSWORD: str = "your-app-password"     # App password for Gmail
+    FROM_EMAIL: str = "your-email@gmail.com"     # From address
+   
+
 settings = Settings()

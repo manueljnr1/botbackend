@@ -1,4 +1,4 @@
-# app/discord/discord_bot.py - Complete working version with PRICING INTEGRATION and MEMORY
+# app/discord/discord_bot.py - Enhanced version with DELAYS and MEMORY
 
 import discord
 from discord.ext import commands
@@ -11,10 +11,12 @@ import math
 from typing import Optional, Dict, Any, Callable
 from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
-from app.chatbot.engine import ChatbotEngine
 from app.tenants.models import Tenant
 
-# 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
+# Use the correct chatbot engine
+from app.chatbot.engine import ChatbotEngine
+
+# PRICING INTEGRATION - ADD THESE IMPORTS
 from app.pricing.integration_helpers import track_message_sent
 from app.pricing.service import PricingService
 
@@ -77,6 +79,7 @@ class TenantDiscordBot:
             logger.info(f"Discord bot for tenant {self.tenant_id} is ready!")
             logger.info(f"Bot name: {self.bot.user.name}")
             logger.info(f"Bot is in {len(self.bot.guilds)} guilds")
+            logger.info(f"✨ Features: Simple Memory + Human Delays")
             
             # Set bot status
             db = self.get_db_session()
@@ -118,11 +121,12 @@ class TenantDiscordBot:
         async def on_error(event, *args, **kwargs):
             logger.error(f"Discord bot error in event {event}: {args}", exc_info=True)
         
+        # Help command
         @self.bot.command(name='help')
         async def help_command(ctx):
             """Show help information"""
             embed = discord.Embed(
-                title="🤖 Bot Help",
+                title="🤖 AI Assistant Help",
                 description="I'm here to help answer your questions!",
                 color=0x00ff00
             )
@@ -137,11 +141,16 @@ class TenantDiscordBot:
                 inline=False
             )
             embed.add_field(
+                name="🧠 Memory",
+                value="I remember our conversations, so you can refer to things we discussed earlier!",
+                inline=False
+            )
+            embed.add_field(
                 name="📞 Support",
                 value="If you need additional help, please contact our support team.",
                 inline=False
             )
-            embed.set_footer(text="Powered by AI Chatbot")
+            embed.set_footer(text="✨ Powered by AI")
             await ctx.send(embed=embed)
         
         @self.bot.command(name='ping')
@@ -155,21 +164,27 @@ class TenantDiscordBot:
             """Reset the conversation for this user"""
             db = self.get_db_session()
             try:
+                # Use the correct chatbot engine
                 engine = ChatbotEngine(db)
+                
+                # Clear session
+                user_identifier = f"discord:{ctx.author.id}"
+                
                 # Find and end existing session
                 from app.chatbot.models import ChatSession
                 session = db.query(ChatSession).filter(
                     ChatSession.tenant_id == self.tenant_id,
-                    ChatSession.discord_user_id == str(ctx.author.id),
+                    ChatSession.user_identifier == user_identifier,
                     ChatSession.is_active == True
                 ).first()
                 
                 if session:
                     engine.end_session(session.session_id)
-                    await ctx.send("✅ Conversation reset! Let's start fresh.")
+                    await ctx.send(f"✅ Reset conversation history! Let's start fresh.")
                     logger.info(f"Reset conversation for user {ctx.author.id} in tenant {self.tenant_id}")
                 else:
                     await ctx.send("💬 No active conversation found. Just start chatting!")
+                    
             except Exception as e:
                 logger.error(f"Error resetting conversation: {e}")
                 await ctx.send("❌ Error resetting conversation. Please try again.")
@@ -177,7 +192,7 @@ class TenantDiscordBot:
                 db.close()
     
     async def handle_message(self, message):
-        """Handle incoming Discord messages with PRICING INTEGRATION and MEMORY"""
+        """Handle incoming Discord messages with PRICING and MEMORY"""
         # Show typing indicator
         async with message.channel.typing():
             db = self.get_db_session()
@@ -189,7 +204,7 @@ class TenantDiscordBot:
                     logger.error(f"Tenant {self.tenant_id} not found")
                     return
                 
-                # 🔒 PRICING CHECK - Check message limits BEFORE processing
+                # PRICING CHECK - Check message limits BEFORE processing
                 logger.info(f"🔍 Checking Discord message limits for tenant {self.tenant_id}")
                 pricing_service = PricingService(db)
                 
@@ -217,7 +232,7 @@ class TenantDiscordBot:
                 
                 logger.info(f"✅ Discord message limit check passed for tenant {self.tenant_id}")
                 
-                # Initialize chatbot engine
+                # Initialize the correct chatbot engine
                 engine = ChatbotEngine(db)
                 
                 # Clean message content (remove mentions)
@@ -231,10 +246,10 @@ class TenantDiscordBot:
                     await message.reply("Hi! How can I help you today? 😊")
                     return
                 
-                logger.info(f"Processing message from {message.author.name}: '{clean_message[:50]}...'")
+                logger.info(f"📨🎮 Processing Discord message from {message.author.name}: '{clean_message[:50]}...'")
                 
-                # 🧠 FIXED: Use Discord-specific memory processing
-                result = engine.process_discord_message_simple(
+                # Use the standard processing method
+                result = await engine.process_discord_message_simple_with_delay(
                     api_key=tenant.api_key,
                     user_message=clean_message,
                     discord_user_id=str(message.author.id),
@@ -246,14 +261,23 @@ class TenantDiscordBot:
                 if result.get("success"):
                     response = result["response"]
                     
-                    # 📊 PRICING TRACK - Log successful message usage
+                    # PRICING TRACK - Log successful message usage
                     logger.info(f"📊 Tracking Discord message usage for tenant {self.tenant_id}")
                     track_success = track_message_sent(self.tenant_id, db)
                     logger.info(f"📈 Discord message tracking result: {track_success}")
                     
-                    # The new method handles Discord info automatically, no need to update session
+                    # Enhanced logging with delay info
+                    log_parts = [f"✅ Responded to {message.author.name} in tenant {self.tenant_id}"]
                     
-                    # Split long messages for Discord's 2000 character limit
+                    if result.get('response_delay'):
+                        log_parts.append(f"(delay: {result.get('response_delay', 0):.2f}s)")
+                    
+                    if result.get('context_messages'):
+                        log_parts.append(f"[Memory: {result.get('context_messages')} msgs]")
+                    
+                    logger.info(" ".join(log_parts))
+                    
+                    # Send response - split long messages for Discord's 2000 character limit
                     if len(response) > 2000:
                         chunks = [response[i:i+1900] for i in range(0, len(response), 1900)]
                         for i, chunk in enumerate(chunks):
@@ -264,7 +288,6 @@ class TenantDiscordBot:
                     else:
                         await message.reply(response)
                         
-                    logger.info(f"Sent response to {message.author.name}")
                 else:
                     error_msg = result.get("error", "I'm having trouble right now. Please try again later.")
                     await message.reply(f"❌ {error_msg}")
@@ -478,7 +501,8 @@ class DiscordBotManager:
             "running": False,
             "connected": False,
             "guilds": 0,
-            "latency": None
+            "latency": None,
+            "features": ["simple_memory", "human_delays"]
         }
         
         if tenant_id not in self.active_bots:
@@ -491,7 +515,8 @@ class DiscordBotManager:
                 "running": bool(bot.is_running),
                 "connected": False,
                 "guilds": 0,
-                "latency": None
+                "latency": None,
+                "features": ["simple_memory", "human_delays"]
             }
             
             # Check if bot is connected
