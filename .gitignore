@@ -95,3 +95,4 @@ build/
 
 # Authentication files
 auth_info/
+chatbot.db
