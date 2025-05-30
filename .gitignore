@@ -36,7 +36,8 @@ Thumbs.db
 
 # Vector DB files
 vector_db/
-
+app.db
+chatbot.db
 # Uploaded files
 uploads/
 temp/
