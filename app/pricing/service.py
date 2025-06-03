@@ -1,8 +1,14 @@
+# app/pricing/service.py
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import HTTPException, status
+import logging
+
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from app.pricing.models import PricingPlan, TenantSubscription, UsageLog, BillingHistory
 from app.pricing.schemas import (
@@ -27,45 +33,73 @@ class PricingService:
         plans = [
             {
                 "name": "Free",
-                "plan_type": PlanType.FREE,
+                "plan_type": "free",
                 "price_monthly": 0.00,
                 "price_yearly": 0.00,
-                "max_integrations": 1,
-                "max_messages_monthly": 100,
-                "custom_prompt_allowed": False,
+                "max_integrations": -1,  # Unlimited integrations now
+                "max_messages_monthly": 50,  # Changed to 50 conversations
+                "custom_prompt_allowed": True,  # Now allowed in Free plan
                 "website_api_allowed": True,
-                "slack_allowed": False,
-                "discord_allowed": False,
+                "slack_allowed": True,  # Now allowed in Free plan
+                "discord_allowed": True,  # Now allowed in Free plan
                 "whatsapp_allowed": False,
-                "features": '["Website API integration", "Basic support"]'
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Bot Memory"]'
             },
             {
                 "name": "Basic",
-                "plan_type": PlanType.BASIC,
-                "price_monthly": 29.00,
-                "price_yearly": 290.00,  # 10 months price for yearly
-                "max_integrations": 3,
-                "max_messages_monthly": 3000,
+                "plan_type": "basic",
+                "price_monthly": 19.00,  # Changed to $19
+                "price_yearly": 190.00,  # 10 months price for yearly
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 500,  # Changed to 500 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
                 "whatsapp_allowed": False,
-                "features": '["Website API", "Slack integration", "Discord integration", "Custom prompts", "Email support"]'
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Bot Memory"]'
             },
             {
-                "name": "Pro",
-                "plan_type": PlanType.PRO,
-                "price_monthly": 99.00,
+                "name": "Growth",
+                "plan_type": "growth",
+                "price_monthly": 39.00,  # New Growth plan
+                "price_yearly": 390.00,  # 10 months price for yearly
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 5000,  # 5000 conversations
+                "custom_prompt_allowed": True,
+                "website_api_allowed": True,
+                "slack_allowed": True,
+                "discord_allowed": True,
+                "whatsapp_allowed": False,
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Bot Memory"]'
+            },
+            {
+                "name": "Agency", 
+                "plan_type": "agency",
+                "price_monthly": 99.00,  # Agency plan
                 "price_yearly": 990.00,  # 10 months price for yearly
-                "max_integrations": -1,  # Unlimited
-                "max_messages_monthly": 10000,
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 50000,  # 50,000 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
                 "whatsapp_allowed": True,
-                "features": '["All integrations", "Unlimited integrations", "Custom prompts", "Priority support", "Advanced analytics"]'
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Live Chat Integration", "Bot Memory"]'
+            },
+            {
+                "name": "Live Chat Add-on",
+                "plan_type": "livechat_addon",
+                "price_monthly": 30.00,  # Live chat add-on
+                "price_yearly": 300.00,  # 10 months price for yearly
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 5000,  # 5000 conversations
+                "custom_prompt_allowed": True,
+                "website_api_allowed": True,
+                "slack_allowed": True,
+                "discord_allowed": True,
+                "whatsapp_allowed": True,
+                "features": '["Live Chat Integration", "5000 conversations"]'
             }
         ]
         
@@ -75,47 +109,67 @@ class PricingService:
         
         self.db.commit()
     
-    def get_plan_by_type(self, plan_type: PlanType) -> Optional[PricingPlan]:
+    def get_plan_by_type(self, plan_type: str) -> Optional[PricingPlan]:
         """Get plan by type"""
         return self.db.query(PricingPlan).filter(
             PricingPlan.plan_type == plan_type,
             PricingPlan.is_active == True
         ).first()
     
-    def create_free_subscription_for_tenant(self, tenant_id: int) -> TenantSubscription:
-        """Create a free subscription for a new tenant"""
-        free_plan = self.get_plan_by_type(PlanType.FREE)
-        if not free_plan:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Free plan not found"
+    def create_free_subscription_for_tenant(self, tenant_id: int) -> Optional[TenantSubscription]:
+        """
+        Create a free subscription for a new tenant - ENHANCED VERSION
+        """
+        try:
+            # Ensure default plans exist first
+            self.create_default_plans()
+            
+            # Get the free plan
+            free_plan = self.get_plan_by_type("free")
+            if not free_plan:
+                logger.error("❌ Free plan not found - cannot create subscription")
+                return None
+            
+            # Check if subscription already exists
+            existing_subscription = self.db.query(TenantSubscription).filter(
+                TenantSubscription.tenant_id == tenant_id,
+                TenantSubscription.is_active == True
+            ).first()
+            
+            if existing_subscription:
+                logger.info(f"ℹ️ Subscription already exists for tenant {tenant_id}")
+                return existing_subscription
+            
+            # Create new subscription with proper defaults
+            subscription = TenantSubscription(
+                tenant_id=tenant_id,
+                plan_id=free_plan.id,
+                is_active=True,
+                billing_cycle="monthly",
+                current_period_start=datetime.utcnow(),
+                current_period_end=datetime.utcnow() + timedelta(days=30),
+                status="active",
+                messages_used_current_period=0,
+                integrations_count=0
             )
-        
-        # Check if subscription already exists
-        existing_subscription = self.db.query(TenantSubscription).filter(
-            TenantSubscription.tenant_id == tenant_id,
-            TenantSubscription.is_active == True
-        ).first()
-        
-        if existing_subscription:
-            return existing_subscription
-        
-        # Create new subscription
-        subscription = TenantSubscription(
-            tenant_id=tenant_id,
-            plan_id=free_plan.id,
-            is_active=True,
-            billing_cycle="monthly",
-            current_period_start=datetime.utcnow(),
-            current_period_end=datetime.utcnow() + timedelta(days=30),
-            status="active"
-        )
-        
-        self.db.add(subscription)
-        self.db.commit()
-        self.db.refresh(subscription)
-        
-        return subscription
+            
+            self.db.add(subscription)
+            self.db.commit()
+            self.db.refresh(subscription)
+            
+            # Verify the subscription was created with plan relationship
+            if not subscription.plan:
+                logger.error(f"❌ Subscription created but plan relationship is None for tenant {tenant_id}")
+                return None
+            
+            logger.info(f"✅ Created free subscription for tenant {tenant_id} with plan {subscription.plan.name}")
+            return subscription
+            
+        except Exception as e:
+            logger.error(f"💥 Error creating free subscription for tenant {tenant_id}: {e}")
+            self.db.rollback()
+            return None
+
     
     def get_tenant_subscription(self, tenant_id: int) -> Optional[TenantSubscription]:
         """Get active subscription for tenant"""
@@ -125,17 +179,59 @@ class PricingService:
         ).first()
     
     def check_message_limit(self, tenant_id: int) -> bool:
-        """Check if tenant can send more messages"""
-        subscription = self.get_tenant_subscription(tenant_id)
-        if not subscription:
-            return False
-        
-        # Check if current period is valid
-        now = datetime.utcnow()
-        if now > subscription.current_period_end:
-            self.reset_usage_for_new_period(subscription)
-        
-        return subscription.messages_used_current_period < subscription.plan.max_messages_monthly
+        """
+        Check if tenant can send more messages (conversations) - WITH PROPER NULL CHECKS
+        """
+        try:
+            subscription = self.get_tenant_subscription(tenant_id)
+            
+            if not subscription:
+                # Try to create a free subscription if none exists
+                subscription = self.create_free_subscription_for_tenant(tenant_id)
+                if not subscription:
+                    return True  # Allow messages if can't create subscription
+            
+            # CRITICAL FIX: Check if plan exists
+            if not subscription.plan:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"🚨 No plan found for tenant {tenant_id} subscription ID {subscription.id}")
+                
+                # Try to assign free plan
+                free_plan = self.get_plan_by_type("free")
+                if free_plan:
+                    subscription.plan_id = free_plan.id
+                    self.db.commit()
+                    self.db.refresh(subscription)
+                    logger.info(f"✅ Assigned free plan to tenant {tenant_id}")
+                else:
+                    logger.error(f"❌ No free plan available for tenant {tenant_id}")
+                    return True  # Allow messages if no free plan exists
+            
+            # CRITICAL FIX: Check if plan has the required attribute
+            if not hasattr(subscription.plan, 'max_messages_monthly'):
+                logger.warning(f"Plan for tenant {tenant_id} missing max_messages_monthly attribute")
+                return True  # Allow messages if plan is malformed
+            
+            if subscription.plan.max_messages_monthly is None:
+                logger.warning(f"Plan for tenant {tenant_id} has null max_messages_monthly")
+                return True  # Allow unlimited if max is None
+            
+            # Check if current period is valid
+            now = datetime.utcnow()
+            if now > subscription.current_period_end:
+                self.reset_usage_for_new_period(subscription)
+            
+            # Now safe to check the limit
+            return subscription.messages_used_current_period < subscription.plan.max_messages_monthly
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"💥 Error checking message limit for tenant {tenant_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return True  # Allow messages on error to avoid breaking chat
     
     def check_integration_limit(self, tenant_id: int) -> bool:
         """Check if tenant can add more integrations"""
@@ -143,42 +239,88 @@ class PricingService:
         if not subscription:
             return False
         
-        # -1 means unlimited
+        # -1 means unlimited (all plans now have unlimited integrations)
         if subscription.plan.max_integrations == -1:
             return True
         
         return subscription.integrations_count < subscription.plan.max_integrations
     
     def log_message_usage(self, tenant_id: int, count: int = 1) -> bool:
-        """Log message usage and check if limit is exceeded"""
-        subscription = self.get_tenant_subscription(tenant_id)
-        if not subscription:
+        """
+        Log message usage and check if limit is exceeded - WITH PROPER NULL CHECKS
+        Note: A conversation is any length of interaction within 24 hours
+        """
+        try:
+            subscription = self.get_tenant_subscription(tenant_id)
+            
+            if not subscription:
+                # Try to create free subscription
+                subscription = self.create_free_subscription_for_tenant(tenant_id)
+                if not subscription:
+                    return False
+            
+            # CRITICAL FIX: Ensure plan exists
+            if not subscription.plan:
+                free_plan = self.get_plan_by_type("free")
+                if free_plan:
+                    subscription.plan_id = free_plan.id
+                    self.db.commit()
+                    self.db.refresh(subscription)
+                else:
+                    return False
+            
+            # Check if current period is valid
+            now = datetime.utcnow()
+            if now > subscription.current_period_end:
+                self.reset_usage_for_new_period(subscription)
+            
+            # Check if this is a new conversation (within 24 hours)
+            last_24_hours = now - timedelta(hours=24)
+            recent_usage = self.db.query(UsageLog).filter(
+                UsageLog.tenant_id == tenant_id,
+                UsageLog.usage_type == "conversation",
+                UsageLog.created_at > last_24_hours
+            ).first()
+            
+            # If no recent conversation usage, this counts as a new conversation
+            if not recent_usage:
+                # Check limit before incrementing
+                if not self.check_message_limit(tenant_id):
+                    return False
+                
+                # Increment usage for new conversation
+                subscription.messages_used_current_period += 1
+                
+                # Log the conversation usage
+                usage_log = UsageLog(
+                    subscription_id=subscription.id,
+                    tenant_id=tenant_id,
+                    usage_type="conversation",
+                    count=1
+                )
+                
+                self.db.add(usage_log)
+            
+            # Always log individual message for tracking
+            message_log = UsageLog(
+                subscription_id=subscription.id,
+                tenant_id=tenant_id,
+                usage_type="message",
+                count=count
+            )
+            
+            self.db.add(message_log)
+            self.db.commit()
+            
+            return True
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"💥 Error logging message usage for tenant {tenant_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
-        
-        # Check if current period is valid
-        now = datetime.utcnow()
-        if now > subscription.current_period_end:
-            self.reset_usage_for_new_period(subscription)
-        
-        # Check limit before incrementing
-        if not self.check_message_limit(tenant_id):
-            return False
-        
-        # Increment usage
-        subscription.messages_used_current_period += count
-        
-        # Log the usage
-        usage_log = UsageLog(
-            subscription_id=subscription.id,
-            tenant_id=tenant_id,
-            usage_type="message",
-            count=count
-        )
-        
-        self.db.add(usage_log)
-        self.db.commit()
-        
-        return True
     
     def log_integration_usage(self, tenant_id: int, integration_type: str, action: str = "added") -> bool:
         """Log integration addition/removal"""
@@ -292,7 +434,11 @@ class PricingService:
             "slack": plan.slack_allowed,
             "discord": plan.discord_allowed,
             "whatsapp": plan.whatsapp_allowed,
-            "website_api": plan.website_api_allowed
+            "website_api": plan.website_api_allowed,
+            "live_chat": "Live Chat Integration" in (plan.features or ""),
+            "advanced_analytics": "Advanced Analytics" in (plan.features or ""),
+            "priority_support": "Priority Support" in (plan.features or ""),
+            "bot_memory": "Bot Memory" in (plan.features or "")
         }
         
         return feature_mapping.get(feature, False)
@@ -308,24 +454,29 @@ class PricingService:
         
         # Calculate usage percentages
         message_usage_percent = (usage_stats.messages_used / usage_stats.messages_limit) * 100
-        integration_usage_percent = (usage_stats.integrations_used / max(usage_stats.integrations_limit, 1)) * 100 if usage_stats.integrations_limit != -1 else 0
         
         recommendations = []
         
-        # Check if user is approaching limits
+        # Check if user is approaching limits and suggest appropriate upgrades
         if message_usage_percent > 80:
-            recommendations.append({
-                "type": "upgrade",
-                "reason": f"You've used {message_usage_percent:.1f}% of your message limit",
-                "suggested_plan": "Basic" if current_plan.plan_type == "free" else "Pro"
-            })
-        
-        if integration_usage_percent > 80 and usage_stats.integrations_limit != -1:
-            recommendations.append({
-                "type": "upgrade",
-                "reason": f"You've used {integration_usage_percent:.1f}% of your integration limit",
-                "suggested_plan": "Pro"
-            })
+            if current_plan.plan_type == "free":
+                recommendations.append({
+                    "type": "upgrade",
+                    "reason": f"You've used {message_usage_percent:.1f}% of your conversation limit",
+                    "suggested_plan": "Basic"
+                })
+            elif current_plan.plan_type == "basic":
+                recommendations.append({
+                    "type": "upgrade", 
+                    "reason": f"You've used {message_usage_percent:.1f}% of your conversation limit",
+                    "suggested_plan": "Growth"
+                })
+            elif current_plan.plan_type == "growth":
+                recommendations.append({
+                    "type": "upgrade",
+                    "reason": f"You've used {message_usage_percent:.1f}% of your conversation limit", 
+                    "suggested_plan": "Agency"
+                })
         
         return {
             "current_plan": current_plan.name,
@@ -349,8 +500,9 @@ class PricingService:
             UsageLog.created_at >= subscription.current_period_start
         ).all()
         
-        # Calculate total usage
-        total_messages = sum(log.count for log in usage_logs if log.usage_type == "message")
+        # Calculate conversation count and individual messages
+        conversation_count = len([log for log in usage_logs if log.usage_type == "conversation"])
+        message_count = sum(log.count for log in usage_logs if log.usage_type == "message")
         integration_changes = [log for log in usage_logs if "integration" in log.usage_type]
         
         return {
@@ -360,11 +512,13 @@ class PricingService:
             "current_period_end": subscription.current_period_end,
             "days_remaining": days_remaining,
             "usage_summary": {
-                "messages_used": subscription.messages_used_current_period,
-                "messages_limit": subscription.plan.max_messages_monthly,
+                "conversations_used": subscription.messages_used_current_period,
+                "conversations_limit": subscription.plan.max_messages_monthly,
+                "total_messages": message_count,
                 "integrations_count": subscription.integrations_count,
                 "integrations_limit": subscription.plan.max_integrations
             },
             "cost_this_period": float(subscription.plan.price_monthly),
-            "next_billing_date": subscription.current_period_end
+            "next_billing_date": subscription.current_period_end,
+            "conversation_definition": "A conversation is any length of interaction within 24 hours"
         }

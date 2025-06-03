@@ -896,7 +896,7 @@ Your response:"""
     # ========================== SMART FEEDBACK SYSTEM ==========================
     
     def process_message_with_smart_feedback(self, api_key: str, user_message: str, user_identifier: str, 
-                                          platform: str = "web", max_context: int = 20) -> Dict[str, Any]:
+                                        platform: str = "web", max_context: int = 20) -> Dict[str, Any]:
         """
         Process message with smart feedback system that:
         1. Asks for email on new conversations
@@ -970,25 +970,40 @@ Your response:"""
         
         bot_response = result["response"]
         
-        # Check if response is inadequate and trigger feedback if needed
-        if feedback_manager.detect_inadequate_response(bot_response):
-            logger.info(f"Detected inadequate response, triggering feedback system")
+        # 🔔 FIXED: Add proper feedback detection with logging
+        logger.info(f"🔍 Checking bot response for inadequate patterns: '{bot_response[:100]}...'")
+        
+        try:
+            is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+            logger.info(f"🔍 Inadequate response detection result: {is_inadequate}")
             
-            # Get conversation context
-            conversation_history = memory.get_conversation_history(user_identifier, 10)
-            
-            # Create feedback request (this sends email to tenant)
-            feedback_id = feedback_manager.create_feedback_request(
-                session_id=session_id,
-                user_question=user_message,
-                bot_response=bot_response,
-                conversation_context=conversation_history
-            )
-            
-            if feedback_id:
-                logger.info(f"Created feedback request {feedback_id} for inadequate response")
-                result["feedback_triggered"] = True
-                result["feedback_id"] = feedback_id
+            if is_inadequate:
+                logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                
+                # Get conversation context
+                conversation_history = memory.get_conversation_history(user_identifier, 10)
+                
+                # Create feedback request (this sends email to tenant)
+                feedback_id = feedback_manager.create_feedback_request(
+                    session_id=session_id,
+                    user_question=user_message,
+                    bot_response=bot_response,
+                    conversation_context=conversation_history
+                )
+                
+                if feedback_id:
+                    logger.info(f"✅ Created feedback request {feedback_id} for inadequate response")
+                    result["feedback_triggered"] = True
+                    result["feedback_id"] = feedback_id
+                else:
+                    logger.error(f"❌ Failed to create feedback request")
+            else:
+                logger.info(f"✅ Response appears adequate, no feedback needed")
+                
+        except Exception as e:
+            logger.error(f"💥 Error in feedback detection: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return result
     

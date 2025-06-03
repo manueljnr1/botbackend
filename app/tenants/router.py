@@ -14,6 +14,7 @@ import uuid
 
 from app.database import get_db
 from app.tenants.models import Tenant
+from app.admin.models import Admin
 from app.auth.models import User # For admin-only endpoints
 from app.auth.router import get_current_user, get_admin_user # For admin-only endpoints
 from app.auth.models import TenantCredentials
@@ -21,11 +22,24 @@ from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
 from app.core.email_service import email_service
-import logging
 
+import logging
 # Configure logger
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+try:
+    pass  # Add your code here
+except Exception as e:
+    logger.error(f"An error occurred: {e}")
+except Exception as e:
+    logger.error(f"An error occurred: {e}")
+    from app.pricing.service import PricingService
+    PRICING_AVAILABLE = True
+    print("✅ PricingService imported successfully")
+except ImportError as e:
+    print(f"⚠️ PricingService not available: {e}")
+    PRICING_AVAILABLE = False
 
 
 
@@ -158,6 +172,62 @@ async def get_current_tenant(token: str = Depends(oauth2_scheme), db: Session = 
         raise credentials_exception
     
     return tenant
+
+
+
+async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Dependency to get current user (either admin or tenant)"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        is_admin = payload.get("is_admin", False)
+        
+        if user_id is None:
+            raise credentials_exception
+            
+        if is_admin:
+            # Handle admin token - find admin by ID
+            admin = db.query(Admin).filter(Admin.id == user_id, Admin.is_active == True).first()
+            if admin is None:
+                raise credentials_exception
+            # Create a mock user object with admin privileges
+            class AdminUser:
+                def __init__(self, admin):
+                    self.id = admin.id
+                    self.username = admin.username
+                    self.email = admin.email
+                    self.is_admin = True
+                    self.tenant_id = None
+                    self.is_active = True
+            return AdminUser(admin)
+        else:
+            # Handle regular tenant token
+            tenant = db.query(Tenant).filter(Tenant.id == user_id, Tenant.is_active == True).first()
+            if tenant is None:
+                raise credentials_exception
+            # Find user associated with this tenant
+            user = db.query(User).filter(User.tenant_id == tenant.id, User.is_active == True).first()
+            if user is None:
+                # Create a mock user object for tenant
+                class TenantUser:
+                    def __init__(self, tenant):
+                        self.id = f"tenant_{tenant.id}"
+                        self.username = tenant.name
+                        self.email = tenant.contact_email
+                        self.is_admin = False
+                        self.tenant_id = tenant.id
+                        self.is_active = tenant.is_active
+                return TenantUser(tenant)
+            return user
+            
+    except JWTError:
+        raise credentials_exception
 
 
     
@@ -303,58 +373,109 @@ async def get_tenant_details_by_api_key(
 
 
 
-
 @router.post("/register", response_model=TenantOut)
 async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     """
-    Tenants Registration
+    Enhanced Tenant Registration with bulletproof Free subscription creation
     """
-    # Check if tenant name already exists
-    db_tenant = db.query(Tenant).filter(Tenant.name == tenant.name).first()
-    if db_tenant:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    
-   
-    
-    # Create new tenant (with is_active set to False initially for admin approval)
-    new_tenant = Tenant(
-        name=tenant.name,
-        description=tenant.description,
-        system_prompt=None,  
-        api_key=f"sk-{str(uuid.uuid4()).replace('-', '')}",
-        contact_email=tenant.contact_email,  # Changed from admin_email
-        is_active=True
-    )
-    
-    # Add tenant to database
-    db.add(new_tenant)
-    db.commit()
-    db.refresh(new_tenant)
-    
-    # Create tenant credentials with the tenant_id we now have
-    hashed_password = get_password_hash(tenant.password)
-    tenant_credentials = TenantCredentials(
-        tenant_id=new_tenant.id,
-        hashed_password=hashed_password
-    )
-    
-    # Add credentials to database
-    db.add(tenant_credentials)
-    db.commit()
-    
-    return new_tenant
+    try:
+        # Check if tenant name already exists
+        db_tenant = db.query(Tenant).filter(Tenant.name == tenant.name).first()
+        if db_tenant:
+            raise HTTPException(status_code=400, detail="Username already registered")
+        
+        # Create new tenant
+        new_tenant = Tenant(
+            name=tenant.name,
+            description=tenant.description,
+            system_prompt=None,  
+            api_key=f"sk-{str(uuid.uuid4()).replace('-', '')}",
+            contact_email=tenant.contact_email,
+            is_active=True
+        )
+        
+        # Add tenant to database and flush to get ID
+        db.add(new_tenant)
+        db.flush()  # This gets the ID without committing
+        
+        # Create tenant credentials
+        hashed_password = get_password_hash(tenant.password)
+        tenant_credentials = TenantCredentials(
+            tenant_id=new_tenant.id,
+            hashed_password=hashed_password
+        )
+        db.add(tenant_credentials)
+        
+        # 🚀 BULLETPROOF SUBSCRIPTION CREATION
+        subscription_created = False
+        subscription_error = None
+        
+        if PRICING_AVAILABLE:
+            try:
+                logger.info(f"🎁 Creating Free subscription for new tenant: {new_tenant.name} (ID: {new_tenant.id})")
+                pricing_service = PricingService(db)
+                
+                # Ensure default plans exist first
+                pricing_service.create_default_plans()
+                
+                # Create free subscription
+                subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
+                
+                if subscription and subscription.plan:
+                    subscription_created = True
+                    logger.info(f"✅ Successfully created Free subscription for {new_tenant.name}")
+                    logger.info(f"   📊 Plan: {subscription.plan.name}")
+                    logger.info(f"   💬 Conversations: {subscription.plan.max_messages_monthly}/month")
+                    logger.info(f"   🆔 Subscription ID: {subscription.id}")
+                else:
+                    subscription_error = "Subscription creation returned None or missing plan"
+                    logger.error(f"❌ Subscription creation failed for {new_tenant.name}: {subscription_error}")
+                    
+            except Exception as e:
+                subscription_error = str(e)
+                logger.error(f"💥 Failed to create subscription for new tenant {new_tenant.name}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        else:
+            subscription_error = "Pricing system not available"
+            logger.warning(f"⚠️ Pricing system not available, skipping subscription creation for {new_tenant.name}")
+        
+        # Decision: Should we fail tenant creation if subscription fails?
+        # Option 1: Fail completely (recommended for production)
+        if not subscription_created and PRICING_AVAILABLE:
+            db.rollback()
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Tenant registration failed: Could not create subscription. Error: {subscription_error}"
+            )
+        
+        # Option 2: Continue without subscription (use this for testing)
+        # if not subscription_created:
+        #     logger.warning(f"⚠️ Tenant {new_tenant.name} created without subscription: {subscription_error}")
+        
+        # Commit everything if we reach here
+        db.commit()
+        db.refresh(new_tenant)
+        
+        logger.info(f"🎉 Tenant registration completed: {new_tenant.name}")
+        return new_tenant
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (like duplicate tenant name)
+        db.rollback()
+        raise
+    except Exception as e:
+        # Handle any other unexpected errors
+        db.rollback()
+        logger.error(f"💥 Unexpected error during tenant registration: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Registration failed due to system error: {str(e)}"
+        )
 
 
-
-
-
-@router.get("/", response_model=List[TenantOut])
-async def list_tenants(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """
-    List all tenants (admin only)
-    """
-    return db.query(Tenant).all()
 
 
 
@@ -377,7 +498,12 @@ async def get_tenant(tenant_id: int, db: Session = Depends(get_db), current_user
 
 
 @router.put("/{tenant_id}", response_model=TenantOut)
-async def update_tenant(tenant_id: int, tenant_update: TenantUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
+async def update_tenant(
+    tenant_id: int, 
+    tenant_update: TenantUpdate, 
+    db: Session = Depends(get_db), 
+    current_admin = Depends(get_admin_user)  # This can be User or Admin
+):
     """
     Update a tenant's details, including system prompt (admin only or authorized user)
     """
@@ -385,11 +511,23 @@ async def update_tenant(tenant_id: int, tenant_update: TenantUpdate, db: Session
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    # Authorization: Allow admin to update any tenant, or a user to update their own tenant.
-    # This part of your original code had a slight logic issue for non-admin updates, corrected here.
-    if not current_user.is_admin and (current_user.tenant_id is None or current_user.tenant_id != tenant_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this tenant")
+    # Authorization logic that handles both User and Admin objects
+    from app.admin.models import Admin
+    from app.auth.models import User
+    
+    # Check if current_admin is an Admin object (from admin login)
+    if isinstance(current_admin, Admin):
+        # Admin can update any tenant - no additional checks needed
+        pass
+    elif isinstance(current_admin, User):
+        # User with admin privileges - check tenant ownership
+        if not current_admin.is_admin and (current_admin.tenant_id is None or current_admin.tenant_id != tenant_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this tenant")
+    else:
+        # Should not happen, but safety check
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin credentials")
 
+    # Apply updates
     update_data = tenant_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(tenant, key, value)
@@ -397,7 +535,6 @@ async def update_tenant(tenant_id: int, tenant_update: TenantUpdate, db: Session
     db.commit()
     db.refresh(tenant)
     return tenant
-
 
 
 
@@ -631,3 +768,324 @@ async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session
     
     return {"message": "Password reset successfully. You can now log in with your new password."}
 
+
+
+
+@router.post("/{tenant_id}/create-subscription")
+async def create_tenant_subscription(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)  # Admin only
+):
+    """
+    Manually create a Free subscription for a tenant (Admin only)
+    Useful for fixing tenants created before auto-subscription was implemented
+    """
+    # Check if tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Check if subscription already exists
+    try:
+        pricing_service = PricingService(db)
+        existing_subscription = pricing_service.get_tenant_subscription(tenant_id)
+        
+        if existing_subscription:
+            return {
+                "message": f"Tenant {tenant.name} already has an active subscription",
+                "plan": existing_subscription.plan.name,
+                "status": existing_subscription.status
+            }
+        
+        # Create Free subscription
+        subscription = pricing_service.create_free_subscription_for_tenant(tenant_id)
+        
+        return {
+            "message": f"Successfully created Free subscription for {tenant.name}",
+            "plan": subscription.plan.name,
+            "conversations_limit": subscription.plan.max_messages_monthly,
+            "billing_cycle": subscription.billing_cycle
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating subscription for tenant {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create subscription")
+
+
+@router.get("/{tenant_id}/subscription-status")
+async def get_tenant_subscription_status(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Enhanced subscription status check with detailed information
+    """
+    # Authorization check
+    if not current_user.is_admin and current_user.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    try:
+        if not PRICING_AVAILABLE:
+            return {
+                "tenant_name": tenant.name,
+                "has_subscription": False,
+                "message": "Pricing system not available",
+                "pricing_system_enabled": False
+            }
+        
+        pricing_service = PricingService(db)
+        subscription = pricing_service.get_tenant_subscription(tenant_id)
+        
+        if subscription and subscription.plan:
+            usage_stats = pricing_service.get_usage_stats(tenant_id)
+            return {
+                "tenant_name": tenant.name,
+                "tenant_id": tenant_id,
+                "has_subscription": True,
+                "subscription_id": subscription.id,
+                "plan": {
+                    "name": subscription.plan.name,
+                    "type": subscription.plan.plan_type,
+                    "conversations_limit": subscription.plan.max_messages_monthly,
+                    "price_monthly": float(subscription.plan.price_monthly)
+                },
+                "status": subscription.status,
+                "billing_cycle": subscription.billing_cycle,
+                "usage": {
+                    "conversations_used": usage_stats.messages_used,
+                    "conversations_limit": usage_stats.messages_limit,
+                    "conversations_remaining": usage_stats.messages_limit - usage_stats.messages_used,
+                    "integrations_used": usage_stats.integrations_used,
+                    "integrations_limit": usage_stats.integrations_limit,
+                    "can_start_conversations": usage_stats.can_send_messages,
+                    "can_add_integrations": usage_stats.can_add_integrations
+                },
+                "period": {
+                    "start": subscription.current_period_start.isoformat(),
+                    "end": subscription.current_period_end.isoformat()
+                },
+                "pricing_system_enabled": True
+            }
+        else:
+            return {
+                "tenant_name": tenant.name,
+                "tenant_id": tenant_id,
+                "has_subscription": False,
+                "message": "No active subscription found",
+                "pricing_system_enabled": True,
+                "can_create_subscription": True
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting subscription status for tenant {tenant_id}: {e}")
+        return {
+            "tenant_name": tenant.name,
+            "tenant_id": tenant_id,
+            "has_subscription": False,
+            "error": str(e),
+            "pricing_system_enabled": PRICING_AVAILABLE
+        }
+
+
+
+@router.post("/fix-all-subscriptions")
+async def fix_all_tenant_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Manual endpoint to fix all tenants without subscriptions (Admin only)
+    """
+    try:
+        # Find tenants without active subscriptions
+        from app.pricing.models import TenantSubscription
+        
+        tenants_without_subscriptions = db.query(Tenant).outerjoin(
+            TenantSubscription,
+            (Tenant.id == TenantSubscription.tenant_id) & (TenantSubscription.is_active == True)
+        ).filter(
+            TenantSubscription.id.is_(None),
+            Tenant.is_active == True
+        ).all()
+        
+        if not tenants_without_subscriptions:
+            return {
+                "message": "All tenants already have subscriptions",
+                "tenants_fixed": 0,
+                "total_tenants": db.query(Tenant).filter(Tenant.is_active == True).count()
+            }
+        
+        if not PRICING_AVAILABLE:
+            raise HTTPException(
+                status_code=500,
+                detail="Pricing system not available"
+            )
+        
+        pricing_service = PricingService(db)
+        
+        # Ensure default plans exist
+        pricing_service.create_default_plans()
+        
+        fixed_tenants = []
+        failed_tenants = []
+        
+        for tenant in tenants_without_subscriptions:
+            try:
+                logger.info(f"🔧 Creating subscription for tenant: {tenant.name}")
+                
+                subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
+                
+                if subscription:
+                    fixed_tenants.append({
+                        "tenant_id": tenant.id,
+                        "tenant_name": tenant.name,
+                        "plan": subscription.plan.name,
+                        "subscription_id": subscription.id
+                    })
+                    logger.info(f"✅ Fixed subscription for {tenant.name}")
+                else:
+                    failed_tenants.append({
+                        "tenant_id": tenant.id,
+                        "tenant_name": tenant.name,
+                        "error": "Subscription creation returned None"
+                    })
+                    
+            except Exception as e:
+                logger.error(f"💥 Error creating subscription for {tenant.name}: {e}")
+                failed_tenants.append({
+                    "tenant_id": tenant.id,
+                    "tenant_name": tenant.name,
+                    "error": str(e)
+                })
+        
+        return {
+            "message": f"Fixed {len(fixed_tenants)} out of {len(tenants_without_subscriptions)} tenants",
+            "tenants_fixed": len(fixed_tenants),
+            "tenants_failed": len(failed_tenants),
+            "fixed_tenants": fixed_tenants,
+            "failed_tenants": failed_tenants if failed_tenants else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in fix_all_tenant_subscriptions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix subscriptions: {str(e)}")
+    
+
+
+@router.put("/{tenant_id}/email-config")
+async def update_tenant_email_config(
+    tenant_id: int,
+    email_config: TenantEmailConfig,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update tenant email configuration for feedback system"""
+    
+    # Verify API key belongs to this tenant
+    tenant = get_tenant_from_api_key(api_key, db)
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    # Update email configuration
+    if email_config.feedback_email:
+        tenant.feedback_email = email_config.feedback_email
+    if email_config.from_email:
+        tenant.from_email = email_config.from_email
+    
+    tenant.enable_feedback_system = email_config.enable_feedback_system
+    
+    db.commit()
+    db.refresh(tenant)
+    
+    return {
+        "message": "Email configuration updated successfully",
+        "tenant_id": tenant_id,
+        "feedback_email": tenant.feedback_email,
+        "from_email": tenant.from_email,
+        "feedback_enabled": tenant.enable_feedback_system
+    }
+
+@router.get("/{tenant_id}/email-config")
+async def get_tenant_email_config(
+    tenant_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get tenant email configuration"""
+    
+    tenant = get_tenant_from_api_key(api_key, db)
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    return {
+        "tenant_id": tenant_id,
+        "tenant_name": tenant.name,
+        "feedback_email": tenant.feedback_email,
+        "from_email": tenant.from_email,
+        "feedback_enabled": tenant.enable_feedback_system,
+        "email_system_available": bool(os.getenv('EMAIL_PROVIDER'))
+    }
+
+
+router.post("/{tenant_id}/test-email")
+async def test_tenant_email(
+    tenant_id: int,
+    test_email: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Send a test email to verify email configuration"""
+    
+    tenant = get_tenant_from_api_key(api_key, db)
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    if not tenant.feedback_email or not tenant.from_email:
+        raise HTTPException(
+            status_code=400, 
+            detail="Email configuration incomplete. Please set feedback_email and from_email first."
+        )
+    
+    # Send test email
+    from app.utils.email_service import email_service
+    
+    subject = f"Test Email from {tenant.name} Feedback System"
+    body = f"""
+    <html>
+    <body>
+        <h2>Email Configuration Test</h2>
+        <p>Hello!</p>
+        <p>This is a test email from the <strong>{tenant.name}</strong> feedback system.</p>
+        <p>If you received this email, your email configuration is working correctly!</p>
+        <p><strong>Configuration Details:</strong></p>
+        <ul>
+            <li>Tenant: {tenant.name}</li>
+            <li>From Email: {tenant.from_email}</li>
+            <li>Feedback Email: {tenant.feedback_email}</li>
+        </ul>
+        <p>Best regards,<br>Your Feedback System</p>
+    </body>
+    </html>
+    """
+    
+    success = email_service.send_tenant_email(
+        tenant_from_email=tenant.from_email,
+        tenant_to_email=test_email,
+        subject=subject,
+        body=body
+    )
+    
+    return {
+        "success": success,
+        "message": "Test email sent successfully" if success else "Failed to send test email",
+        "sent_to": test_email,
+        "from_email": tenant.from_email
+    }

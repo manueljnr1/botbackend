@@ -1,3 +1,4 @@
+# app/pricing/schemas.py
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
@@ -8,7 +9,9 @@ from enum import Enum
 class PlanType(str, Enum):
     FREE = "free"
     BASIC = "basic"
-    PRO = "pro"
+    GROWTH = "growth"  # New plan type
+    AGENCY = "agency"  # New plan type
+    LIVECHAT_ADDON = "livechat_addon"  # New add-on type
 
 
 class BillingCycle(str, Enum):
@@ -21,12 +24,12 @@ class PricingPlanBase(BaseModel):
     plan_type: PlanType
     price_monthly: Decimal = Field(default=0.00, ge=0)
     price_yearly: Decimal = Field(default=0.00, ge=0)
-    max_integrations: int = Field(default=1, ge=-1)  # -1 for unlimited
-    max_messages_monthly: int = Field(default=100, ge=0)
-    custom_prompt_allowed: bool = False
+    max_integrations: int = Field(default=-1, ge=-1)  # -1 for unlimited (default now)
+    max_messages_monthly: int = Field(default=50, ge=0)  # Default to 50 conversations
+    custom_prompt_allowed: bool = True  # Default to True now
     website_api_allowed: bool = True
-    slack_allowed: bool = False
-    discord_allowed: bool = False
+    slack_allowed: bool = True  # Default to True now
+    discord_allowed: bool = True  # Default to True now
     whatsapp_allowed: bool = False
     features: Optional[str] = None
     is_active: bool = True
@@ -98,7 +101,7 @@ class UsageLogOut(BaseModel):
     usage_type: str
     count: int
     integration_type: Optional[str] = None
-    extra_data: Optional[str] = None  # Changed from 'metadata' to 'extra_data'
+    extra_data: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -106,14 +109,15 @@ class UsageLogOut(BaseModel):
 
 
 class UsageStatsOut(BaseModel):
-    messages_used: int
-    messages_limit: int
+    messages_used: int  # Actually conversations used
+    messages_limit: int  # Actually conversations limit
     integrations_used: int
     integrations_limit: int
     period_start: datetime
     period_end: datetime
-    can_send_messages: bool
+    can_send_messages: bool  # Actually can_start_conversations
     can_add_integrations: bool
+    conversation_definition: str = "A conversation is any length of interaction within 24 hours"
 
 
 class BillingHistoryOut(BaseModel):
@@ -145,3 +149,24 @@ class UpgradeRequest(BaseModel):
 class MessageResponse(BaseModel):
     message: str
     success: bool = True
+
+
+class PlanFeaturesDetail(BaseModel):
+    """Detailed plan features for better frontend display"""
+    plan_name: str
+    plan_type: PlanType
+    price_monthly: Decimal
+    price_yearly: Decimal
+    conversations_limit: int
+    features: List[str]
+    integrations: List[str]
+    is_popular: bool = False
+    is_addon: bool = False
+
+
+class PlanComparisonDetailOut(BaseModel):
+    """Enhanced plan comparison with feature details"""
+    plans: List[PlanFeaturesDetail]
+    current_plan: Optional[PlanFeaturesDetail] = None
+    current_usage: Optional[UsageStatsOut] = None
+    conversation_definition: str = "A conversation is any length of interaction within 24 hours"

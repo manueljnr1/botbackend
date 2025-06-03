@@ -1,3 +1,4 @@
+# app/pricing/models.py
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Numeric
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -9,32 +10,39 @@ from enum import Enum
 class PlanType(str, Enum):
     FREE = "free"
     BASIC = "basic"
-    PRO = "pro"
+    GROWTH = "growth"        # New plan type
+    AGENCY = "agency"        # New plan type  
+    LIVECHAT_ADDON = "livechat_addon"  # New add-on type
 
 
 class PricingPlan(Base):
     __tablename__ = "pricing_plans"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)  # "Free", "Basic", "Pro"
-    plan_type = Column(String, index=True)  # "free", "basic", "pro"
+    name = Column(String, unique=True, index=True)  # "Free", "Basic", "Growth", "Agency", "Live Chat Add-on"
+    plan_type = Column(String, index=True)  # "free", "basic", "growth", "agency", "livechat_addon"
     price_monthly = Column(Numeric(10, 2), default=0.00)
     price_yearly = Column(Numeric(10, 2), default=0.00)
     
     # Plan limits
-    max_integrations = Column(Integer, default=1)  # -1 for unlimited
-    max_messages_monthly = Column(Integer, default=100)
-    custom_prompt_allowed = Column(Boolean, default=False)
+    max_integrations = Column(Integer, default=-1)  # -1 for unlimited (default for all new plans)
+    max_messages_monthly = Column(Integer, default=50)  # Now represents conversations, not individual messages
+    custom_prompt_allowed = Column(Boolean, default=True)  # Now allowed in all plans
     
-    # Available integrations
+    # Available integrations - all now allowed by default except WhatsApp
     website_api_allowed = Column(Boolean, default=True)
-    slack_allowed = Column(Boolean, default=False)
-    discord_allowed = Column(Boolean, default=False)
-    whatsapp_allowed = Column(Boolean, default=False)
+    slack_allowed = Column(Boolean, default=True)  # Now allowed in all plans
+    discord_allowed = Column(Boolean, default=True)  # Now allowed in all plans
+    whatsapp_allowed = Column(Boolean, default=False)  # Only in Agency and Live Chat Add-on
     
     # Plan features
     features = Column(Text, nullable=True)  # JSON string of additional features
     is_active = Column(Boolean, default=True)
+    
+    # New fields for better plan management
+    is_addon = Column(Boolean, default=False)  # True for add-on plans like Live Chat
+    is_popular = Column(Boolean, default=False)  # For highlighting recommended plans
+    display_order = Column(Integer, default=0)  # For ordering plans in UI
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -59,12 +67,16 @@ class TenantSubscription(Base):
     current_period_start = Column(DateTime, nullable=False)
     current_period_end = Column(DateTime, nullable=False)
     
-    # Usage tracking
-    messages_used_current_period = Column(Integer, default=0)
+    # Usage tracking - conversations instead of individual messages
+    messages_used_current_period = Column(Integer, default=0)  # Actually conversations used
     integrations_count = Column(Integer, default=0)
+    
+    # Add-on tracking
+    active_addons = Column(Text, nullable=True)  # JSON string of active add-on plan IDs
     
     # Payment details
     stripe_subscription_id = Column(String, nullable=True)
+    stripe_customer_id = Column(String, nullable=True)  # Added for better Stripe integration
     status = Column(String, default="active")  # active, canceled, past_due, etc.
     
     # Timestamps
@@ -84,13 +96,16 @@ class UsageLog(Base):
     subscription_id = Column(Integer, ForeignKey("tenant_subscriptions.id"), nullable=False)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     
-    # Usage details
-    usage_type = Column(String, nullable=False)  # "message", "integration_added", etc.
+    # Usage details - enhanced for conversation tracking
+    usage_type = Column(String, nullable=False)  # "conversation", "message", "integration_added", etc.
     count = Column(Integer, default=1)
     integration_type = Column(String, nullable=True)  # "slack", "discord", "whatsapp", etc.
     
-    # Changed from 'metadata' to 'extra_data' to avoid SQLAlchemy reserved word
+    # Enhanced metadata for better tracking
     extra_data = Column(Text, nullable=True)  # JSON string for additional data
+    session_id = Column(String, nullable=True)  # Link to chat session if applicable
+    user_identifier = Column(String, nullable=True)  # User who triggered the usage
+    platform = Column(String, nullable=True)  # "web", "slack", "discord", etc.
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -112,10 +127,51 @@ class BillingHistory(Base):
     billing_period_start = Column(DateTime, nullable=False)
     billing_period_end = Column(DateTime, nullable=False)
     
+    # Enhanced billing details
+    plan_name = Column(String, nullable=True)  # Plan name at time of billing
+    conversations_included = Column(Integer, nullable=True)  # Conversations limit for this period
+    conversations_used = Column(Integer, nullable=True)  # Conversations actually used
+    addons_included = Column(Text, nullable=True)  # JSON string of add-ons included
+    
     # Payment details
     stripe_invoice_id = Column(String, nullable=True)
-    payment_status = Column(String, default="pending")  # pending, paid, failed
+    stripe_charge_id = Column(String, nullable=True)  # Added for charge tracking
+    payment_status = Column(String, default="pending")  # pending, paid, failed, refunded
     payment_date = Column(DateTime, nullable=True)
+    payment_method = Column(String, nullable=True)  # "card", "ach", etc.
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ConversationSession(Base):
+    """
+    New model to track conversation sessions for billing purposes
+    A conversation is any length of interaction within 24 hours
+    """
+    __tablename__ = "conversation_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    user_identifier = Column(String, nullable=False)  # User who started the conversation
+    platform = Column(String, nullable=False)  # "web", "slack", "discord", etc.
+    
+    # Conversation tracking
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_activity = Column(DateTime, nullable=False, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Metrics
+    message_count = Column(Integer, default=0)  # Total messages in this conversation
+    duration_minutes = Column(Integer, default=0)  # Duration of conversation
+    
+    # Billing
+    counted_for_billing = Column(Boolean, default=False)  # Whether this conversation was counted towards usage
+    billing_period_start = Column(DateTime, nullable=True)  # Which billing period this belongs to
+    
+    # Metadata
+    extra_data = Column(Text, nullable=True)  # JSON for additional conversation data
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

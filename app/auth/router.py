@@ -16,6 +16,9 @@ from app.core.email_service import email_service
 from app.database import get_db
 from app.auth.models import User
 from app.tenants.models import Tenant
+# Remove this line - Admin is in app.admin.models, not app.auth.models
+# from app.auth.models import Admin
+from app.admin.models import Admin  # Import from correct location
 from app.config import settings
 from app.core.security import get_password_hash
 
@@ -114,15 +117,41 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-async def get_admin_user(current_user: User = Depends(get_current_user)):
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform this action"
-        )
-    return current_user
-
-# 
+async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Dependency to get current admin user from JWT token
+    Handles both User admins (is_admin=True) and Admin table entries
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        subject: str = payload.get("sub")
+        is_admin_flag: bool = payload.get("is_admin", False)
+        
+        if subject is None:
+            raise credentials_exception
+            
+    except JWTError:
+        raise credentials_exception
+    
+    # Check if this is an admin token (from admin login endpoint)
+    if is_admin_flag:
+        # This is an admin token - look up in Admin table
+        admin = db.query(Admin).filter(Admin.id == subject, Admin.is_active == True).first()
+        if admin is None:
+            raise credentials_exception
+        return admin
+    else:
+        # This is a regular user token - check if user is admin
+        user = db.query(User).filter(User.username == subject, User.is_active == True).first()
+        if user is None or not user.is_admin:
+            raise credentials_exception
+        return user
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -143,7 +172,6 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         # List all users for debugging (be careful with this in production!)
         all_users = db.query(User).all()
         logger.info(f"All users in database: {[u.username for u in all_users]}")
-
 
     if not user:
         logger.warning(f"User not found: {form_data.username}")
@@ -179,10 +207,6 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     logger.info(f"Successfully authenticated user: {form_data.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
-
-
-
-
 @router.get("/me/", response_model=UserOut)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """
@@ -190,16 +214,13 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     """
     return current_user
 
-
 @router.get("/users/", response_model=List[UserOut]) # This will be GET /api/auth/users/
 async def read_all_users_for_admin(
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_admin_user) # Ensures only admin access
+    current_admin = Depends(get_admin_user) # Can be either User or Admin
 ):
     """
     Retrieve all users. Accessible only by admin users.
     """
     users = db.query(User).all()
     return users
-
-

@@ -1,6 +1,7 @@
 # app/admin/router.py
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel
@@ -15,7 +16,10 @@ from app.core.security import get_password_hash
 
 router = APIRouter()
 
-# Pydantic models
+# =============================================================================
+# PYDANTIC MODELS
+# =============================================================================
+
 class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
@@ -33,7 +37,70 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Admin-only endpoints
+class TenantUpdateAdmin(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    system_prompt: Optional[str] = None
+    contact_email: Optional[str] = None
+    feedback_email: Optional[str] = None
+    from_email: Optional[str] = None
+    enable_feedback_system: Optional[bool] = None
+    feedback_notification_enabled: Optional[bool] = None
+
+class TenantResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    is_active: bool
+    system_prompt: Optional[str] = None
+    contact_email: Optional[str] = None
+    feedback_email: Optional[str] = None
+    from_email: Optional[str] = None
+    enable_feedback_system: bool
+    feedback_notification_enabled: bool
+    api_key: str
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class FAQCreate(BaseModel):
+    question: str
+    answer: str
+    tenant_id: int
+
+class FAQUpdate(BaseModel):
+    question: Optional[str] = None
+    answer: Optional[str] = None
+
+class FAQResponse(BaseModel):
+    id: int
+    question: str
+    answer: str
+    tenant_id: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class DocumentResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    tenant_id: int
+    document_type: str
+    file_path: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# =============================================================================
+# USER MANAGEMENT ENDPOINTS
+# =============================================================================
+
 @router.get("/users", response_model=List[UserResponse])
 async def list_all_users(
     db: Session = Depends(get_db),
@@ -45,67 +112,136 @@ async def list_all_users(
     users = db.query(User).all()
     return users
 
-# @router.put("/users/{user_id}", response_model=UserResponse)
-# async def update_user(
-#     user_id: int,
-#     user_update: UserUpdate,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_admin_user)
-# ):
-#     """
-#     Update a user's status or role (admin only)
-#     """
-#     user = db.query(User).filter(User.id == user_id).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Update a user's status or role (admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     
-#     # Prevent self-deactivation
-#     if current_user.id == user_id and user_update.is_active is False:
-#         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    # Prevent self-deactivation
+    if current_user.id == user_id and user_update.is_active is False:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
     
-#     # Prevent removing own admin privileges
-#     if current_user.id == user_id and user_update.is_admin is False:
-#         raise HTTPException(status_code=400, detail="You cannot remove your own admin privileges")
+    # Prevent removing own admin privileges
+    if current_user.id == user_id and user_update.is_admin is False:
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin privileges")
     
-#     # Update user fields
-#     if user_update.is_active is not None:
-#         user.is_active = user_update.is_active
+    # Update user fields
+    if user_update.is_active is not None:
+        user.is_active = user_update.is_active
     
-#     if user_update.is_admin is not None:
-#         user.is_admin = user_update.is_admin
+    if user_update.is_admin is not None:
+        user.is_admin = user_update.is_admin
     
-#     if user_update.tenant_id is not None:
-#         # Verify tenant exists
-#         tenant = db.query(Tenant).filter(Tenant.id == user_update.tenant_id).first()
-#         if not tenant:
-#             raise HTTPException(status_code=404, detail="Tenant not found")
-#         user.tenant_id = user_update.tenant_id
+    if user_update.tenant_id is not None:
+        # Verify tenant exists
+        tenant = db.query(Tenant).filter(Tenant.id == user_update.tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        user.tenant_id = user_update.tenant_id
     
-#     db.commit()
-#     db.refresh(user)
-#     return user
+    db.commit()
+    db.refresh(user)
+    return user
 
-# @router.delete("/users/{user_id}")
-# async def delete_user(
-#     user_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_admin_user)
-# ):
-#     """
-#     Delete a user (admin only)
-#     """
-#     user = db.query(User).filter(User.id == user_id).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Delete a user (admin only)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     
-#     # Prevent self-deletion
-#     if current_user.id == user_id:
-#         raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    # Prevent self-deletion
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
     
-#     db.delete(user)
-#     db.commit()
+    db.delete(user)
+    db.commit()
     
-#     return {"message": "User deleted successfully"}
+    return {"message": "User deleted successfully"}
+
+# =============================================================================
+# TENANT MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@router.get("/tenants", response_model=List[TenantResponse])
+async def admin_list_tenants(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get list of all tenants with full details (admin only)
+    """
+    tenants = db.query(Tenant).all()
+    return tenants
+
+@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
+async def admin_get_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get detailed tenant information (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return tenant
+
+@router.put("/tenants/{tenant_id}", response_model=TenantResponse)
+async def admin_update_tenant(
+    tenant_id: int,
+    tenant_update: TenantUpdateAdmin,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Update tenant details including system prompt (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Update tenant fields
+    update_data = tenant_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(tenant, key, value)
+    
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+@router.delete("/tenants/{tenant_id}")
+async def admin_delete_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Deactivate a tenant (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant.is_active = False
+    db.commit()
+    return {"message": "Tenant deactivated successfully"}
 
 @router.get("/tenants/overview")
 async def get_tenant_overview(
@@ -163,6 +299,62 @@ async def get_tenant_overview(
         "tenant_stats": tenant_stats
     }
 
+# =============================================================================
+# SYSTEM PROMPT MANAGEMENT
+# =============================================================================
+
+@router.get("/tenants/{tenant_id}/prompt")
+async def admin_get_tenant_prompt(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get tenant's system prompt (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    return {
+        "tenant_id": tenant.id,
+        "tenant_name": tenant.name,
+        "system_prompt": tenant.system_prompt
+    }
+
+@router.put("/tenants/{tenant_id}/prompt")
+async def admin_update_tenant_prompt(
+    tenant_id: int,
+    prompt_data: dict,  # Expects {"system_prompt": "new prompt"}
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Update tenant's system prompt (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    new_system_prompt = prompt_data.get("system_prompt")
+    if new_system_prompt is None:
+        raise HTTPException(status_code=400, detail="system_prompt field is required")
+    
+    tenant.system_prompt = new_system_prompt
+    db.commit()
+    db.refresh(tenant)
+    
+    return {
+        "message": "System prompt updated successfully",
+        "tenant_id": tenant.id,
+        "tenant_name": tenant.name,
+        "system_prompt": tenant.system_prompt
+    }
+
+# =============================================================================
+# DOCUMENT MANAGEMENT ENDPOINTS
+# =============================================================================
+
 @router.get("/documents")
 async def list_all_documents(
     tenant_id: Optional[int] = None,
@@ -197,6 +389,31 @@ async def list_all_documents(
     
     return result
 
+@router.get("/documents/{document_id}", response_model=DocumentResponse)
+async def admin_get_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get detailed document information (admin only)
+    """
+    document = db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Convert enum to string for response
+    doc_response = DocumentResponse(
+        id=document.id,
+        name=document.name,
+        description=document.description,
+        tenant_id=document.tenant_id,
+        document_type=document.document_type.value,
+        file_path=document.file_path,
+        created_at=document.created_at
+    )
+    return doc_response
+
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: int,
@@ -211,20 +428,32 @@ async def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Delete the vector store
-    from app.knowledge_base.processor import DocumentProcessor
-    processor = DocumentProcessor(kb.tenant_id)
-    processor.delete_vector_store(kb.vector_store_id)
+    try:
+        from app.knowledge_base.processor import DocumentProcessor
+        processor = DocumentProcessor(kb.tenant_id)
+        processor.delete_vector_store(kb.vector_store_id)
+    except Exception as e:
+        # Log the error but don't fail the deletion
+        print(f"Warning: Could not delete vector store: {e}")
     
     # Delete the uploaded file
     import os
-    if os.path.exists(kb.file_path):
-        os.remove(kb.file_path)
+    try:
+        if kb.file_path and os.path.exists(kb.file_path):
+            os.remove(kb.file_path)
+    except Exception as e:
+        # Log the error but don't fail the deletion
+        print(f"Warning: Could not delete file: {e}")
     
     # Delete from database
     db.delete(kb)
     db.commit()
     
     return {"message": "Document deleted successfully"}
+
+# =============================================================================
+# FAQ MANAGEMENT ENDPOINTS
+# =============================================================================
 
 @router.get("/faqs")
 async def list_all_faqs(
@@ -259,6 +488,69 @@ async def list_all_faqs(
     
     return result
 
+@router.get("/faqs/{faq_id}", response_model=FAQResponse)
+async def admin_get_faq(
+    faq_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get detailed FAQ information (admin only)
+    """
+    faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
+    if not faq:
+        raise HTTPException(status_code=404, detail="FAQ not found")
+    return faq
+
+@router.post("/faqs", response_model=FAQResponse)
+async def admin_create_faq(
+    faq: FAQCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Create a new FAQ for any tenant (admin only)
+    """
+    # Verify tenant exists
+    tenant = db.query(Tenant).filter(Tenant.id == faq.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    db_faq = FAQ(
+        question=faq.question,
+        answer=faq.answer,
+        tenant_id=faq.tenant_id
+    )
+    
+    db.add(db_faq)
+    db.commit()
+    db.refresh(db_faq)
+    
+    return db_faq
+
+@router.put("/faqs/{faq_id}", response_model=FAQResponse)
+async def admin_update_faq(
+    faq_id: int,
+    faq_update: FAQUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Update FAQ content (admin only)
+    """
+    faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
+    if not faq:
+        raise HTTPException(status_code=404, detail="FAQ not found")
+    
+    # Update FAQ fields
+    update_data = faq_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(faq, key, value)
+    
+    db.commit()
+    db.refresh(faq)
+    return faq
+
 @router.delete("/faqs/{faq_id}")
 async def delete_faq(
     faq_id: int,
@@ -276,6 +568,10 @@ async def delete_faq(
     db.commit()
     
     return {"message": "FAQ deleted successfully"}
+
+# =============================================================================
+# USAGE STATISTICS
+# =============================================================================
 
 @router.get("/usage-statistics")
 async def get_usage_statistics(
@@ -369,6 +665,10 @@ async def get_usage_statistics(
         }
     }
 
+# =============================================================================
+# SESSION MANAGEMENT
+# =============================================================================
+
 @router.get("/session-details/{session_id}")
 async def get_admin_session_details(
     session_id: str,
@@ -413,4 +713,43 @@ async def get_admin_session_details(
         "created_at": session.created_at.isoformat(),
         "messages": formatted_messages,
         "message_count": len(messages)
+    }
+
+# =============================================================================
+# BULK OPERATIONS
+# =============================================================================
+
+@router.post("/tenants/bulk-action")
+async def admin_bulk_tenant_action(
+    action_data: dict,  # {"action": "activate|deactivate", "tenant_ids": [1,2,3]}
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Perform bulk actions on multiple tenants (admin only)
+    """
+    action = action_data.get("action")
+    tenant_ids = action_data.get("tenant_ids", [])
+    
+    if action not in ["activate", "deactivate"]:
+        raise HTTPException(status_code=400, detail="Invalid action. Use 'activate' or 'deactivate'")
+    
+    if not tenant_ids:
+        raise HTTPException(status_code=400, detail="No tenant IDs provided")
+    
+    # Update tenants
+    is_active = action == "activate"
+    updated_count = db.query(Tenant).filter(
+        Tenant.id.in_(tenant_ids)
+    ).update(
+        {"is_active": is_active},
+        synchronize_session=False
+    )
+    
+    db.commit()
+    
+    return {
+        "message": f"Successfully {action}d {updated_count} tenants",
+        "action": action,
+        "affected_tenants": updated_count
     }

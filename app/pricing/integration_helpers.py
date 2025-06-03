@@ -1,97 +1,308 @@
+# app/pricing/integration_helpers.py
 """
-Helper functions to integrate pricing checks into existing endpoints
+Complete integration helpers for conversation-based pricing system
+Includes ALL functions needed for proper operation
 """
 
 from fastapi import HTTPException, status, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.pricing.service import PricingService
 from app.database import get_db
 import logging
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# DEPENDENCY FUNCTIONS FOR FASTAPI ENDPOINTS
+# ============================================================================
+
 def check_message_limit_dependency(tenant_id: int, db: Session = Depends(get_db)):
-    """Dependency function to check message limits before processing"""
-    logger.info(f"🔍 Checking message limit for tenant {tenant_id}")
-    pricing_service = PricingService(db)
+    """Legacy function name - redirects to conversation limit check"""
+    return check_conversation_limit_dependency(tenant_id, db)
+
+
+def check_conversation_limit_dependency(tenant_id: int, db: Session = Depends(get_db)):
+    """Dependency function to check conversation limits before processing"""
+    logger.info(f"🔍 Checking conversation limit for tenant {tenant_id}")
     
-    if not pricing_service.check_message_limit(tenant_id):
-        logger.warning(f"🚫 Message limit exceeded for tenant {tenant_id}")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "error": "Message limit exceeded",
-                "message": "You have reached your monthly message limit. Please upgrade your plan to continue.",
-                "upgrade_required": True
-            }
-        )
-    
-    logger.info(f"✅ Message limit check passed for tenant {tenant_id}")
+    try:
+        # Use the PricingService for consistency
+        pricing_service = PricingService(db)
+        
+        if not pricing_service.check_message_limit(tenant_id):
+            logger.warning(f"🚫 Conversation limit exceeded for tenant {tenant_id}")
+            
+            # Get more details for better error message
+            try:
+                usage_stats = pricing_service.get_usage_stats(tenant_id)
+                subscription = pricing_service.get_tenant_subscription(tenant_id)
+                plan_name = subscription.plan.name if subscription else "Unknown"
+                
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Conversation limit exceeded",
+                        "message": f"You have reached your monthly limit of {usage_stats.messages_limit} conversations on the {plan_name} plan. Please upgrade to continue.",
+                        "current_usage": usage_stats.messages_used,
+                        "limit": usage_stats.messages_limit,
+                        "plan_name": plan_name,
+                        "upgrade_required": True,
+                        "conversation_definition": "A conversation is any length of interaction within 24 hours"
+                    }
+                )
+            except:
+                # Fallback error message
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Conversation limit exceeded",
+                        "message": "You have reached your monthly conversation limit. Please upgrade your plan to continue.",
+                        "upgrade_required": True,
+                        "conversation_definition": "A conversation is any length of interaction within 24 hours"
+                    }
+                )
+        
+        logger.info(f"✅ Conversation limit check passed for tenant {tenant_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error checking conversation limit for tenant {tenant_id}: {e}")
+        # Don't block on database errors - log but continue
+        pass
 
 
 def check_integration_limit_dependency(tenant_id: int, db: Session = Depends(get_db)):
     """Dependency function to check integration limits before adding"""
     logger.info(f"🔍 Checking integration limit for tenant {tenant_id}")
-    pricing_service = PricingService(db)
     
-    if not pricing_service.check_integration_limit(tenant_id):
-        logger.warning(f"🚫 Integration limit exceeded for tenant {tenant_id}")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "error": "Integration limit exceeded",
-                "message": "You have reached your integration limit. Please upgrade your plan to add more integrations.",
-                "upgrade_required": True
-            }
-        )
-    
-    logger.info(f"✅ Integration limit check passed for tenant {tenant_id}")
+    try:
+        pricing_service = PricingService(db)
+        
+        if not pricing_service.check_integration_limit(tenant_id):
+            logger.warning(f"🚫 Integration limit exceeded for tenant {tenant_id}")
+            
+            # Get plan details for better error message
+            try:
+                subscription = pricing_service.get_tenant_subscription(tenant_id)
+                plan_name = subscription.plan.name if subscription else "Unknown"
+                current_count = subscription.integrations_count if subscription else 0
+                limit = subscription.plan.max_integrations if subscription else 0
+                
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Integration limit exceeded",
+                        "message": f"You have reached your integration limit of {limit} on the {plan_name} plan. Please upgrade to add more integrations.",
+                        "current_usage": current_count,
+                        "limit": limit,
+                        "plan_name": plan_name,
+                        "upgrade_required": True
+                    }
+                )
+            except:
+                # Fallback error message
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Integration limit exceeded",
+                        "message": "You have reached your integration limit. Please upgrade your plan to add more integrations.",
+                        "upgrade_required": True
+                    }
+                )
+        
+        logger.info(f"✅ Integration limit check passed for tenant {tenant_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error checking integration limit for tenant {tenant_id}: {e}")
 
 
 def check_feature_access_dependency(tenant_id: int, feature: str, db: Session = Depends(get_db)):
     """Dependency function to check feature access"""
     logger.info(f"🔍 Checking feature access for tenant {tenant_id}, feature: {feature}")
-    pricing_service = PricingService(db)
     
-    if not pricing_service.check_feature_access(tenant_id, feature):
-        logger.warning(f"🚫 Feature {feature} not available for tenant {tenant_id}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "Feature not available",
-                "message": f"The {feature} feature is not available on your current plan. Please upgrade to access this feature.",
-                "feature": feature,
-                "upgrade_required": True
-            }
-        )
-    
-    logger.info(f"✅ Feature access granted for tenant {tenant_id}, feature: {feature}")
-
-
-# Usage tracking functions (call after successful operations)
-
-def track_message_sent(tenant_id: int, db: Session, count: int = 1):
-    """Track message usage after successful send"""
     try:
-        logger.info(f"📊 Starting to track message usage for tenant {tenant_id}, count: {count}")
         pricing_service = PricingService(db)
-        success = pricing_service.log_message_usage(tenant_id, count)
         
-        if success:
-            logger.info(f"✅ Successfully tracked {count} message(s) for tenant {tenant_id}")
-        else:
-            logger.warning(f"⚠️ Failed to track message usage for tenant {tenant_id} - might have hit limit")
+        if not pricing_service.check_feature_access(tenant_id, feature):
+            logger.warning(f"🚫 Feature {feature} not available for tenant {tenant_id}")
+            
+            # Get current plan for better error message
+            try:
+                subscription = pricing_service.get_tenant_subscription(tenant_id)
+                current_plan = subscription.plan.name if subscription else "Unknown"
+                
+                # Suggest appropriate upgrade based on feature
+                upgrade_suggestions = {
+                    "live_chat": "Agency plan",
+                    "advanced_analytics": "Basic plan or higher",
+                    "priority_support": "Growth plan or higher",
+                    "whatsapp": "Agency plan",
+                    "custom_prompt": "Free plan or higher",
+                    "slack": "Free plan or higher",
+                    "discord": "Free plan or higher"
+                }
+                
+                suggested_plan = upgrade_suggestions.get(feature, "a higher plan")
+                
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "Feature not available",
+                        "message": f"The {feature} feature is not available on your current {current_plan} plan. Please upgrade to {suggested_plan} to access this feature.",
+                        "feature": feature,
+                        "current_plan": current_plan,
+                        "suggested_plan": suggested_plan,
+                        "upgrade_required": True
+                    }
+                )
+            except:
+                # Fallback error message
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "Feature not available",
+                        "message": f"The {feature} feature is not available on your current plan. Please upgrade to access this feature.",
+                        "feature": feature,
+                        "upgrade_required": True
+                    }
+                )
         
-        return success
+        logger.info(f"✅ Feature access granted for tenant {tenant_id}, feature: {feature}")
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"💥 Error tracking message usage for tenant {tenant_id}: {e}")
+        logger.error(f"💥 Error checking feature access for tenant {tenant_id}: {e}")
+
+
+# ============================================================================
+# CONVERSATION TRACKING FUNCTIONS
+# ============================================================================
+
+def track_conversation_started(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+    """
+    Track when a new conversation starts - PRIMARY CONVERSATION TRACKING FUNCTION
+    This implements the 24-hour conversation window logic
+    """
+    try:
+        logger.info(f"📊 Tracking conversation start for tenant {tenant_id}, user: {user_identifier}, platform: {platform}")
+        
+        # Check if ConversationSession model exists, if not use fallback
+        try:
+            from app.pricing.models import ConversationSession
+            model_available = True
+        except ImportError:
+            logger.warning("ConversationSession model not available, using fallback tracking")
+            model_available = False
+        
+        if model_available:
+            # Use full conversation tracking with ConversationSession model
+            last_24_hours = datetime.utcnow() - timedelta(hours=24)
+            existing_conversation = db.query(ConversationSession).filter(
+                ConversationSession.tenant_id == tenant_id,
+                ConversationSession.user_identifier == user_identifier,
+                ConversationSession.platform == platform,
+                ConversationSession.last_activity > last_24_hours,
+                ConversationSession.is_active == True
+            ).first()
+            
+            if existing_conversation:
+                # Update existing conversation activity
+                existing_conversation.last_activity = datetime.utcnow()
+                existing_conversation.message_count += 1
+                
+                # Update duration
+                duration = (existing_conversation.last_activity - existing_conversation.started_at).total_seconds() / 60
+                existing_conversation.duration_minutes = int(duration)
+                
+                db.commit()
+                logger.info(f"✅ Updated existing conversation for tenant {tenant_id}")
+                return True
+            else:
+                # Start new conversation and log usage
+                pricing_service = PricingService(db)
+                success = pricing_service.log_message_usage(tenant_id, 1)
+                
+                if success:
+                    # Create conversation session record
+                    new_conversation = ConversationSession(
+                        tenant_id=tenant_id,
+                        user_identifier=user_identifier,
+                        platform=platform,
+                        started_at=datetime.utcnow(),
+                        last_activity=datetime.utcnow(),
+                        message_count=1,
+                        counted_for_billing=True
+                    )
+                    db.add(new_conversation)
+                    db.commit()
+                    
+                    logger.info(f"✅ Started new conversation and logged usage for tenant {tenant_id}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Failed to start conversation - limit exceeded for tenant {tenant_id}")
+                    return False
+        else:
+            # Fallback to simple usage tracking without conversation sessions
+            pricing_service = PricingService(db)
+            success = pricing_service.log_message_usage(tenant_id, 1)
+            
+            if success:
+                logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+            else:
+                logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+            
+            return success
+        
+    except Exception as e:
+        logger.error(f"💥 Error tracking conversation for tenant {tenant_id}: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return False
 
 
-def track_integration_added(tenant_id: int, db: Session, integration_type: str):
+def track_message_sent(tenant_id: int, db: Session, count: int = 1, user_identifier: str = None, platform: str = "web") -> bool:
+    """
+    Track individual message usage (updated for conversation-based model)
+    This now focuses on updating conversation activity rather than counting individual messages
+    """
+    try:
+        logger.info(f"📊 Tracking message for tenant {tenant_id}, count: {count}, platform: {platform}")
+        
+        if user_identifier:
+            # Use conversation tracking
+            return track_conversation_started(tenant_id, user_identifier, platform, db)
+        else:
+            # Fallback for when user_identifier is not provided
+            pricing_service = PricingService(db)
+            success = pricing_service.log_message_usage(tenant_id, count)
+            
+            if success:
+                logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+            else:
+                logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+            
+            return success
+        
+    except Exception as e:
+        logger.error(f"💥 Error tracking message for tenant {tenant_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+# ============================================================================
+# INTEGRATION TRACKING FUNCTIONS
+# ============================================================================
+
+def track_integration_added(tenant_id: int, db: Session, integration_type: str) -> bool:
     """Track integration addition after successful setup"""
     try:
         logger.info(f"📊 Tracking integration addition for tenant {tenant_id}, type: {integration_type}")
@@ -109,7 +320,7 @@ def track_integration_added(tenant_id: int, db: Session, integration_type: str):
         return False
 
 
-def track_integration_removed(tenant_id: int, db: Session, integration_type: str):
+def track_integration_removed(tenant_id: int, db: Session, integration_type: str) -> bool:
     """Track integration removal"""
     try:
         logger.info(f"📊 Tracking integration removal for tenant {tenant_id}, type: {integration_type}")
@@ -127,13 +338,41 @@ def track_integration_removed(tenant_id: int, db: Session, integration_type: str
         return False
 
 
-def get_tenant_usage_summary(tenant_id: int, db: Session):
+# ============================================================================
+# USAGE SUMMARY AND ANALYTICS FUNCTIONS
+# ============================================================================
+
+def get_tenant_usage_summary(tenant_id: int, db: Session) -> Dict[str, Any]:
     """Get a summary of tenant's current usage and limits"""
     try:
         logger.info(f"📈 Getting usage summary for tenant {tenant_id}")
         pricing_service = PricingService(db)
+        
+        # Get basic usage stats
         usage_stats = pricing_service.get_usage_stats(tenant_id)
         subscription = pricing_service.get_tenant_subscription(tenant_id)
+        
+        # Try to get conversation statistics if model is available
+        conversation_details = {}
+        try:
+            from app.pricing.models import ConversationSession
+            
+            current_period_start = subscription.current_period_start if subscription else datetime.utcnow() - timedelta(days=30)
+            
+            active_conversations = db.query(ConversationSession).filter(
+                ConversationSession.tenant_id == tenant_id,
+                ConversationSession.started_at >= current_period_start,
+                ConversationSession.counted_for_billing == True
+            ).count()
+            
+            conversation_details = {
+                "active_conversations_this_period": active_conversations,
+                "conversation_definition": "A conversation is any length of interaction within 24 hours"
+            }
+        except ImportError:
+            conversation_details = {
+                "conversation_definition": "A conversation is any length of interaction within 24 hours"
+            }
         
         return {
             "usage_stats": usage_stats,
@@ -142,14 +381,15 @@ def get_tenant_usage_summary(tenant_id: int, db: Session):
                 "billing_cycle": subscription.billing_cycle if subscription else None,
                 "next_billing_date": subscription.current_period_end if subscription else None
             },
-            "warnings": []
+            "conversation_details": conversation_details,
+            "warnings": check_and_warn_usage_limits(tenant_id, db)
         }
     except Exception as e:
         logger.error(f"💥 Error getting usage summary: {e}")
-        return None
+        return {"error": str(e)}
 
 
-def check_and_warn_usage_limits(tenant_id: int, db: Session):
+def check_and_warn_usage_limits(tenant_id: int, db: Session) -> List[Dict[str, Any]]:
     """Check usage and return warnings if approaching limits"""
     try:
         pricing_service = PricingService(db)
@@ -157,23 +397,31 @@ def check_and_warn_usage_limits(tenant_id: int, db: Session):
         
         warnings = []
         
-        # Check message usage
-        message_percent = (usage_stats.messages_used / usage_stats.messages_limit) * 100
-        if message_percent >= 90:
-            warnings.append({
-                "type": "message_limit",
-                "severity": "critical",
-                "message": f"You've used {message_percent:.1f}% of your message limit"
-            })
-        elif message_percent >= 75:
-            warnings.append({
-                "type": "message_limit",
-                "severity": "warning",
-                "message": f"You've used {message_percent:.1f}% of your message limit"
-            })
+        # Check conversation usage
+        if usage_stats.messages_limit > 0:  # Avoid division by zero
+            conversation_percent = (usage_stats.messages_used / usage_stats.messages_limit) * 100
+            
+            if conversation_percent >= 90:
+                warnings.append({
+                    "type": "conversation_limit",
+                    "severity": "critical",
+                    "message": f"You've used {conversation_percent:.1f}% of your conversation limit",
+                    "current_usage": usage_stats.messages_used,
+                    "limit": usage_stats.messages_limit,
+                    "definition": "A conversation is any length of interaction within 24 hours"
+                })
+            elif conversation_percent >= 75:
+                warnings.append({
+                    "type": "conversation_limit",
+                    "severity": "warning",
+                    "message": f"You've used {conversation_percent:.1f}% of your conversation limit",
+                    "current_usage": usage_stats.messages_used,
+                    "limit": usage_stats.messages_limit,
+                    "definition": "A conversation is any length of interaction within 24 hours"
+                })
         
-        # Check integration usage
-        if usage_stats.integrations_limit != -1:
+        # Check integration usage (though most plans now have unlimited integrations)
+        if usage_stats.integrations_limit != -1 and usage_stats.integrations_limit > 0:
             integration_percent = (usage_stats.integrations_used / usage_stats.integrations_limit) * 100
             if integration_percent >= 90:
                 warnings.append({
@@ -188,7 +436,115 @@ def check_and_warn_usage_limits(tenant_id: int, db: Session):
         return []
 
 
-# Decorator functions for easy integration
+# ============================================================================
+# ADVANCED ANALYTICS FUNCTIONS
+# ============================================================================
+
+def end_conversation_session(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+    """
+    Manually end a conversation session
+    Useful for explicit session termination
+    """
+    try:
+        from app.pricing.models import ConversationSession
+        
+        # Find active conversation
+        conversation = db.query(ConversationSession).filter(
+            ConversationSession.tenant_id == tenant_id,
+            ConversationSession.user_identifier == user_identifier,
+            ConversationSession.platform == platform,
+            ConversationSession.is_active == True
+        ).first()
+        
+        if conversation:
+            conversation.is_active = False
+            
+            # Calculate final duration
+            duration = (datetime.utcnow() - conversation.started_at).total_seconds() / 60
+            conversation.duration_minutes = int(duration)
+            
+            db.commit()
+            logger.info(f"✅ Ended conversation session for tenant {tenant_id}")
+            return True
+        else:
+            logger.info(f"ℹ️ No active conversation found to end for tenant {tenant_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"💥 Error ending conversation session: {e}")
+        return False
+
+
+def get_conversation_analytics(tenant_id: int, db: Session, days: int = 30) -> Dict[str, Any]:
+    """
+    Get conversation analytics for the tenant
+    Useful for advanced analytics feature
+    """
+    try:
+        from app.pricing.models import ConversationSession
+        
+        start_date = datetime.utcnow() - timedelta(days=days)
+        
+        # Get conversation statistics
+        conversations = db.query(ConversationSession).filter(
+            ConversationSession.tenant_id == tenant_id,
+            ConversationSession.started_at >= start_date
+        ).all()
+        
+        if not conversations:
+            return {
+                "total_conversations": 0,
+                "total_messages": 0,
+                "average_duration": 0,
+                "platform_breakdown": {},
+                "daily_breakdown": {},
+                "period_days": days
+            }
+        
+        # Platform breakdown
+        platform_stats = {}
+        for conv in conversations:
+            platform = conv.platform or "unknown"
+            if platform not in platform_stats:
+                platform_stats[platform] = {
+                    "count": 0,
+                    "total_messages": 0,
+                    "total_duration": 0
+                }
+            platform_stats[platform]["count"] += 1
+            platform_stats[platform]["total_messages"] += conv.message_count or 0
+            platform_stats[platform]["total_duration"] += conv.duration_minutes or 0
+        
+        # Daily breakdown
+        daily_stats = {}
+        for conv in conversations:
+            day = conv.started_at.date().isoformat()
+            if day not in daily_stats:
+                daily_stats[day] = 0
+            daily_stats[day] += 1
+        
+        total_conversations = len(conversations)
+        total_messages = sum(conv.message_count or 0 for conv in conversations)
+        total_duration = sum(conv.duration_minutes or 0 for conv in conversations)
+        average_duration = total_duration / total_conversations if total_conversations > 0 else 0
+        
+        return {
+            "total_conversations": total_conversations,
+            "total_messages": total_messages,
+            "average_duration": round(average_duration, 2),
+            "platform_breakdown": platform_stats,
+            "daily_breakdown": daily_stats,
+            "period_days": days
+        }
+        
+    except Exception as e:
+        logger.error(f"💥 Error getting conversation analytics: {e}")
+        return {"error": str(e)}
+
+
+# ============================================================================
+# DECORATOR FUNCTIONS
+# ============================================================================
 
 def require_feature_access(feature: str):
     """Decorator to require feature access for an endpoint"""
@@ -207,8 +563,8 @@ def require_feature_access(feature: str):
     return decorator
 
 
-def track_message_usage(count: int = 1):
-    """Decorator to automatically track message usage after successful endpoint execution"""
+def track_conversation_usage(user_identifier: str = None, platform: str = "web"):
+    """Decorator to automatically track conversation usage after successful endpoint execution"""
     def decorator(func):
         def wrapper(*args, **kwargs):
             result = func(*args, **kwargs)
@@ -217,77 +573,9 @@ def track_message_usage(count: int = 1):
             tenant_id = kwargs.get('tenant_id') or args[0] if args else None
             db = kwargs.get('db') or next(get_db())
             
-            if tenant_id:
-                track_message_sent(tenant_id, db, count)
+            if tenant_id and user_identifier:
+                track_conversation_started(tenant_id, user_identifier, platform, db)
             
             return result
         return wrapper
     return decorator
-
-
-# Example usage in your existing endpoints:
-"""
-# In your chatbot router - before processing message
-@router.post("/chat")
-async def chat_endpoint(
-    message_data: ChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    tenant = get_tenant_from_api_key(api_key, db)
-    
-    # Check message limit before processing
-    check_message_limit_dependency(tenant.id, db)
-    
-    # Process the chat message
-    response = await process_chat_message(message_data, tenant)
-    
-    # Track usage after successful processing
-    track_message_sent(tenant.id, db, count=1)
-    
-    return response
-
-
-# In your discord router - before creating bot
-@router.post("/bot/create")
-async def create_discord_bot(
-    bot_data: DiscordBotCreate,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    tenant = get_tenant_from_api_key(api_key, db)
-    
-    # Check feature access
-    check_feature_access_dependency(tenant.id, "discord", db)
-    
-    # Check integration limit
-    check_integration_limit_dependency(tenant.id, db)
-    
-    # Create the bot
-    bot = await create_bot(bot_data, tenant)
-    
-    # Track integration addition
-    track_integration_added(tenant.id, db, "discord")
-    
-    return bot
-
-
-# In your tenant router - before updating system prompt
-@router.put("/{tenant_id}/prompt")
-async def update_tenant_prompt(
-    tenant_id: int,
-    prompt_data: dict,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    tenant = get_tenant_from_api_key(api_key, db)
-    
-    # Check custom prompt feature access
-    check_feature_access_dependency(tenant.id, "custom_prompt", db)
-    
-    # Update the prompt
-    tenant.system_prompt = prompt_data.get("system_prompt")
-    db.commit()
-    
-    return tenant
-"""

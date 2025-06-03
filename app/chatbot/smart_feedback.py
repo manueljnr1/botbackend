@@ -3,6 +3,8 @@
 Smart Feedback System - Human-in-the-loop for better responses
 """
 
+
+
 import logging
 import uuid
 from typing import Dict, Any, Optional, List, Tuple
@@ -12,6 +14,8 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Foreign
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.utils.email_service import EmailService
+
+
 from app.chatbot.models import ChatSession
 import re
 
@@ -62,6 +66,9 @@ class SmartFeedbackManager:
             r"i'd recommend.*contacting",
             r"you may want to.*contact",
             r"for more information.*contact"
+            r"sorry.*unable",
+            r"sorry.*cannot",
+            r"am unable to",
         ]
     
     def should_request_email(self, session_id: str, user_identifier: str) -> bool:
@@ -136,16 +143,22 @@ class SmartFeedbackManager:
         """
         response_lower = bot_response.lower()
         
+        logger.info(f"🔍 Checking response: '{response_lower[:100]}...'")
+        
         for pattern in self.inadequate_response_patterns:
             if re.search(pattern, response_lower):
-                logger.info(f"Detected inadequate response pattern: {pattern}")
+                logger.info(f"✅ MATCHED inadequate response pattern: {pattern}")
                 return True
+            else:
+                logger.debug(f"❌ Pattern '{pattern}' did not match")
         
         # Additional checks
-        if len(bot_response) < 30:  # Very short responses might be inadequate
+        if len(bot_response) < 30:
             if any(word in response_lower for word in ["sorry", "don't", "can't", "unable"]):
+                logger.info(f"✅ MATCHED short inadequate response with trigger words")
                 return True
         
+        logger.info(f"❌ No inadequate patterns detected")
         return False
     
     def create_feedback_request(self, session_id: str, user_question: str, 

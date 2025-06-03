@@ -39,3 +39,4 @@ pytz
 google-auth-oauthlib==1.0.0
 oauth2client==3.0.0
 python-dateutil
+sendgrid==6.11.0

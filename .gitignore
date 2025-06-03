@@ -1,98 +1,224 @@
-# Virtual environment
-venv/
-env/
-ENV/
+# Environment variables (MOST IMPORTANT)
+.env
+.env.*
+*.env
 
-# Python cache files
+# Database files (contain user data)
+*.db
+*.sqlite
+*.sqlite3
+chatbot.db
+app.db
+
+# API Keys and secrets
+secrets.json
+config/secrets.*
+**/secrets/**
+
+# Log files (may contain sensitive data)
+*.log
+logs/
+*.log.*
+
+# ============================================================================
+# PYTHON-SPECIFIC FILES
+# ============================================================================
+
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-.pytest_cache/
-
-# Database files
-*.db
-*.sqlite3
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-
-# Logs
-*.log
-logs/
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS specific files
-.DS_Store
-Thumbs.db
-
-# Vector DB files
-vector_db/
-app.db
-chatbot.db
-# Uploaded files
-uploads/
-temp/
-# Environment variables and secrets
-.env
-*.env
-.env.local
-.env.development
 
 # Virtual environments
 venv/
 env/
 ENV/
-.venv
+env.bak/
+venv.bak/
+.venv/
 
-# Python cache files
-__pycache__/
-*.py[cod]
-*$py.class
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
 .pytest_cache/
 
-# Database files
-*.db
-*.sqlite
-*.sqlite3
+# Jupyter Notebook
+.ipynb_checkpoints
 
-# Logs
-logs/
-*.log
+# IPython
+profile_default/
+ipython_config.py
 
-# Temporary files
-temp/
-tmp/
-.DS_Store
+# pyenv
+.python-version
 
-# IDE specific files
-.idea/
+# pipenv
+Pipfile.lock
+
+# Poetry
+poetry.lock
+
+# ============================================================================
+# IDE AND EDITOR FILES
+# ============================================================================
+
+# VSCode
 .vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
 *.swp
 *.swo
+*~
 
-# Dependency directories
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ============================================================================
+# MACOS SPECIFIC
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# ============================================================================
+# WINDOWS SPECIFIC
+# ============================================================================
+
+# Windows thumbnail cache files
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+
+# Dump file
+*.stackdump
+
+# Folder config file
+[Dd]esktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows Installer files
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Windows shortcuts
+*.lnk
+
+# ============================================================================
+# DEVELOPMENT AND BUILD FILES
+# ============================================================================
+
+# Node.js (if you have any frontend)
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Distribution / packaging
-dist/
+# Build directories
 build/
+dist/
 *.egg-info/
 
-# Media files that might be large
-*.jpg
-*.png
-*.mp4
-*.wav
+# Docker
+Dockerfile.prod
+docker-compose.override.yml
 
-# Authentication files
-auth_info/
-chatbot.db
+# ============================================================================
+# TEMPORARY AND BACKUP FILES
+# ============================================================================
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+*_backup.*
+*.old
+
+# Archive files (unless intentional)
+*.zip
+*.tar.gz
+*.rar
+
+# ============================================================================
+# PROJECT-SPECIFIC FILES
+# ============================================================================
+
+# Your specific files to ignore
+uploads/
+downloads/
+cache/
+*.cache
+
+# Test files
+test_*.py
+*_test.py
+testing/
+
+# Documentation builds
+docs/_build/
+site/
+
+# Migration backups
+*_backup.db
+migrations_backup/
+__pycache__/
+*.pyc
+*.pyo

@@ -1,3 +1,4 @@
+# app/pricing/router.py
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -9,7 +10,8 @@ from app.pricing.schemas import (
     PricingPlanOut, PricingPlanCreate, PricingPlanUpdate,
     SubscriptionOut, SubscriptionCreate, SubscriptionUpdate,
     UsageStatsOut, UsageLogOut, BillingHistoryOut,
-    PlanComparisonOut, UpgradeRequest, MessageResponse
+    PlanComparisonOut, PlanComparisonDetailOut, PlanFeaturesDetail,
+    UpgradeRequest, MessageResponse, PlanType
 )
 from app.pricing.service import PricingService
 from app.tenants.router import get_tenant_from_api_key, get_current_tenant
@@ -45,14 +47,77 @@ async def create_pricing_plan(
 @router.get("/plans", response_model=List[PricingPlanOut])
 async def list_pricing_plans(
     db: Session = Depends(get_db),
-    include_inactive: bool = False
+    include_inactive: bool = False,
+    exclude_addons: bool = False
 ):
     """List all pricing plans"""
     query = db.query(PricingPlan)
     if not include_inactive:
         query = query.filter(PricingPlan.is_active == True)
     
+    if exclude_addons:
+        query = query.filter(PricingPlan.plan_type != "livechat_addon")
+    
     return query.all()
+
+
+@router.get("/plans/detailed", response_model=List[PlanFeaturesDetail])
+async def get_detailed_plans(
+    db: Session = Depends(get_db),
+    include_addons: bool = True
+):
+    """Get detailed plan information with features breakdown"""
+    plans = db.query(PricingPlan).filter(PricingPlan.is_active == True).all()
+    
+    if not include_addons:
+        plans = [p for p in plans if p.plan_type != "livechat_addon"]
+    
+    detailed_plans = []
+    
+    for plan in plans:
+        # Parse features from JSON string
+        import json
+        try:
+            features_list = json.loads(plan.features) if plan.features else []
+        except:
+            features_list = []
+        
+        # Build integrations list
+        integrations = []
+        if plan.website_api_allowed:
+            integrations.append("Web Integration")
+        if plan.slack_allowed:
+            integrations.append("Slack Integration")
+        if plan.discord_allowed:
+            integrations.append("Discord Integration")
+        if plan.whatsapp_allowed:
+            integrations.append("WhatsApp Integration")
+        
+        # Determine if plan is popular (Growth plan)
+        is_popular = plan.plan_type == "growth"
+        is_addon = plan.plan_type == "livechat_addon"
+        
+        detailed_plan = PlanFeaturesDetail(
+            plan_name=plan.name,
+            plan_type=plan.plan_type,
+            price_monthly=plan.price_monthly,
+            price_yearly=plan.price_yearly,
+            conversations_limit=plan.max_messages_monthly,
+            features=features_list,
+            integrations=integrations,
+            is_popular=is_popular,
+            is_addon=is_addon
+        )
+        
+        detailed_plans.append(detailed_plan)
+    
+    # Sort plans by price (excluding add-ons)
+    main_plans = [p for p in detailed_plans if not p.is_addon]
+    addon_plans = [p for p in detailed_plans if p.is_addon]
+    
+    main_plans.sort(key=lambda x: x.price_monthly)
+    
+    return main_plans + addon_plans
 
 
 @router.get("/plans/{plan_id}", response_model=PricingPlanOut)
@@ -193,26 +258,75 @@ async def upgrade_subscription(
     return new_subscription
 
 
-@router.get("/compare", response_model=PlanComparisonOut)
+@router.get("/compare", response_model=PlanComparisonDetailOut)
 async def compare_plans(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Get plan comparison with current tenant's plan and usage"""
+    """Get enhanced plan comparison with current tenant's plan and usage"""
     tenant = get_tenant_from_api_key(api_key, db)
     pricing_service = PricingService(db)
     
-    # Get all active plans
-    plans = db.query(PricingPlan).filter(PricingPlan.is_active == True).all()
+    # Get all active plans (excluding add-ons for main comparison)
+    plans = db.query(PricingPlan).filter(
+        PricingPlan.is_active == True,
+        PricingPlan.plan_type != "livechat_addon"
+    ).all()
     
     # Get current subscription and usage
     subscription = pricing_service.get_tenant_subscription(tenant.id)
-    current_plan = subscription.plan if subscription else None
+    current_plan_detail = None
     current_usage = pricing_service.get_usage_stats(tenant.id) if subscription else None
     
-    return PlanComparisonOut(
-        plans=plans,
-        current_plan=current_plan,
+    # Convert plans to detailed format
+    detailed_plans = []
+    
+    for plan in plans:
+        # Parse features from JSON string
+        import json
+        try:
+            features_list = json.loads(plan.features) if plan.features else []
+        except:
+            features_list = []
+        
+        # Build integrations list
+        integrations = []
+        if plan.website_api_allowed:
+            integrations.append("Web Integration")
+        if plan.slack_allowed:
+            integrations.append("Slack Integration")
+        if plan.discord_allowed:
+            integrations.append("Discord Integration")
+        if plan.whatsapp_allowed:
+            integrations.append("WhatsApp Integration")
+        
+        # Determine if plan is popular (Growth plan)
+        is_popular = plan.plan_type == "growth"
+        
+        detailed_plan = PlanFeaturesDetail(
+            plan_name=plan.name,
+            plan_type=plan.plan_type,
+            price_monthly=plan.price_monthly,
+            price_yearly=plan.price_yearly,
+            conversations_limit=plan.max_messages_monthly,
+            features=features_list,
+            integrations=integrations,
+            is_popular=is_popular,
+            is_addon=False
+        )
+        
+        detailed_plans.append(detailed_plan)
+        
+        # Set current plan if it matches
+        if subscription and subscription.plan.id == plan.id:
+            current_plan_detail = detailed_plan
+    
+    # Sort plans by price
+    detailed_plans.sort(key=lambda x: x.price_monthly)
+    
+    return PlanComparisonDetailOut(
+        plans=detailed_plans,
+        current_plan=current_plan_detail,
         current_usage=current_usage
     )
 
@@ -246,19 +360,20 @@ async def check_limits(
     can_add_integrations = pricing_service.check_integration_limit(tenant.id)
     
     return {
-        "can_send_messages": can_send_messages,
+        "can_start_conversations": can_send_messages,
         "can_add_integrations": can_add_integrations,
-        "usage_stats": pricing_service.get_usage_stats(tenant.id)
+        "usage_stats": pricing_service.get_usage_stats(tenant.id),
+        "conversation_definition": "A conversation is any length of interaction within 24 hours"
     }
 
 
-@router.post("/log-usage/message")
-async def log_message_usage(
+@router.post("/log-usage/conversation")
+async def log_conversation_usage(
     count: int = 1,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Log message usage for tenant"""
+    """Log conversation usage for tenant (replaces message usage)"""
     tenant = get_tenant_from_api_key(api_key, db)
     pricing_service = PricingService(db)
     
@@ -267,10 +382,10 @@ async def log_message_usage(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Message limit exceeded for current billing period"
+            detail="Conversation limit exceeded for current billing period"
         )
     
-    return {"message": "Usage logged successfully", "success": True}
+    return {"message": "Conversation usage logged successfully", "success": True}
 
 
 @router.post("/log-usage/integration")
@@ -320,6 +435,34 @@ async def check_feature_access(
     }
 
 
+@router.get("/recommendations")
+async def get_plan_recommendations(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get personalized plan recommendations based on usage"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    pricing_service = PricingService(db)
+    
+    recommendations = pricing_service.get_plan_recommendations(tenant.id)
+    
+    return recommendations
+
+
+@router.get("/billing/summary")
+async def get_billing_summary(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive billing summary for tenant"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    pricing_service = PricingService(db)
+    
+    summary = pricing_service.get_billing_summary(tenant.id)
+    
+    return summary
+
+
 @router.post("/initialize-defaults")
 async def initialize_default_plans(
     db: Session = Depends(get_db),
@@ -330,3 +473,56 @@ async def initialize_default_plans(
     pricing_service.create_default_plans()
     
     return {"message": "Default pricing plans created successfully"}
+
+
+@router.get("/plans/by-type/{plan_type}")
+async def get_plan_by_type(
+    plan_type: PlanType,
+    db: Session = Depends(get_db)
+):
+    """Get plan details by plan type"""
+    pricing_service = PricingService(db)
+    plan = pricing_service.get_plan_by_type(plan_type.value)
+    
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan of type {plan_type} not found"
+        )
+    
+    return plan
+
+
+@router.post("/add-addon/{addon_type}")
+async def add_addon_to_subscription(
+    addon_type: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Add an addon (like Live Chat) to current subscription"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    pricing_service = PricingService(db)
+    
+    # Get the addon plan
+    addon_plan = db.query(PricingPlan).filter(
+        PricingPlan.plan_type == addon_type,
+        PricingPlan.is_active == True
+    ).first()
+    
+    if not addon_plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Addon type {addon_type} not found"
+        )
+    
+    # For now, just return the addon details
+    # In production, you'd handle payment and subscription modification
+    return {
+        "message": f"Addon {addon_plan.name} can be added to your subscription",
+        "addon_details": {
+            "name": addon_plan.name,
+            "price_monthly": addon_plan.price_monthly,
+            "features": addon_plan.features
+        },
+        "note": "Payment integration required for actual addon activation"
+    }

@@ -187,3 +187,64 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    
+
+
+@app.on_event("startup")
+async def ensure_all_tenants_have_subscriptions():
+    """
+    Startup event to ensure all existing tenants have subscriptions
+    """
+    try:
+        from app.database import SessionLocal
+        from app.tenants.models import Tenant
+        from app.pricing.models import TenantSubscription
+        from app.pricing.service import PricingService
+        
+        db = SessionLocal()
+        
+        try:
+            logger.info("🔍 Checking for tenants without subscriptions...")
+            
+            # Find tenants without active subscriptions
+            tenants_without_subscriptions = db.query(Tenant).outerjoin(
+                TenantSubscription,
+                (Tenant.id == TenantSubscription.tenant_id) & (TenantSubscription.is_active == True)
+            ).filter(
+                TenantSubscription.id.is_(None),
+                Tenant.is_active == True
+            ).all()
+            
+            if tenants_without_subscriptions:
+                logger.info(f"📊 Found {len(tenants_without_subscriptions)} tenants without subscriptions")
+                
+                pricing_service = PricingService(db)
+                
+                # Ensure default plans exist
+                pricing_service.create_default_plans()
+                
+                fixed_count = 0
+                for tenant in tenants_without_subscriptions:
+                    try:
+                        logger.info(f"🔧 Fixing subscription for tenant: {tenant.name} (ID: {tenant.id})")
+                        
+                        subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
+                        
+                        if subscription:
+                            fixed_count += 1
+                            logger.info(f"✅ Fixed subscription for {tenant.name}")
+                        else:
+                            logger.error(f"❌ Failed to create subscription for {tenant.name}")
+                            
+                    except Exception as e:
+                        logger.error(f"💥 Error fixing tenant {tenant.name}: {e}")
+                
+                logger.info(f"🎉 Fixed subscriptions for {fixed_count}/{len(tenants_without_subscriptions)} tenants")
+            else:
+                logger.info("✅ All tenants have subscriptions")
+                
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"💥 Error in startup subscription check: {e}")
