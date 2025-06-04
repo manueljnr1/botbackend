@@ -7,7 +7,24 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
+class SimpleSession:
+    """Simple session object to hold access token and expiration"""
+    def __init__(self, access_token: str, expires_at: int):
+        self.access_token = access_token
+        self.expires_at = expires_at
+
+
+class SimpleUser:
+    """Simple user object to hold user data"""
+    def __init__(self, id: str, email: str):
+        self.id = id
+        self.email = email
+
+
 class SupabaseAuthService:
+    """Supabase authentication service for handling auth operations"""
+    
     def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None):
         """
         Initialize Supabase Auth Service with environment variables as fallback
@@ -23,7 +40,7 @@ class SupabaseAuthService:
         
         self.supabase_url = self.supabase_url.rstrip('/')
         logger.info("Supabase auth service initialized")
-    
+
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """
         Sign in user with email and password
@@ -107,7 +124,7 @@ class SupabaseAuthService:
                 "session": None,
                 "user": None
             }
-    
+
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Create a new user account
@@ -178,21 +195,155 @@ class SupabaseAuthService:
                 "error": "User creation service error"
             }
 
+    async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Send password reset email using Supabase
+        """
+        try:
+            if not email:
+                return {
+                    "success": False,
+                    "error": "Email is required"
+                }
+            
+            payload = {"email": email}
+            if redirect_to:
+                payload["redirect_to"] = redirect_to
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.supabase_url}/auth/v1/recover",
+                    headers={
+                        "apikey": self.supabase_key,
+                        "Authorization": f"Bearer {self.supabase_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload
+                )
+                
+                if response.status_code == 200:
+                    return {
+                        "success": True,
+                        "error": None,
+                        "message": "Password reset email sent successfully"
+                    }
+                else:
+                    try:
+                        error_data = response.json()
+                        logger.error(f"Supabase password reset error response: {error_data}")
+                    except:
+                        error_data = {"error": response.text}
+                        logger.error(f"Supabase password reset error text: {response.text}")
+                    
+                    error_messages = {
+                        400: "Invalid email format",
+                        404: "User not found", 
+                        422: "Email not found or invalid",
+                        429: "Too many password reset requests - rate limited"
+                    }
+                    
+                    friendly_error = error_messages.get(response.status_code, "Failed to send password reset email")
+                    
+                    return {
+                        "success": False,
+                        "error": friendly_error
+                    }
+                    
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "error": "Password reset request timed out"
+            }
+        except Exception as e:
+            logger.error(f"Supabase password reset error: {e}")
+            return {
+                "success": False,
+                "error": "Password reset service error"
+            }
+        
+    async def reset_password(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
+        """Alias for send_password_reset for backward compatibility"""
+        return await self.send_password_reset(email, redirect_to)
 
-class SimpleSession:
-    def __init__(self, access_token: str, expires_at: int):
-        self.access_token = access_token
-        self.expires_at = expires_at
+    async def verify_reset_token(self, token: str, new_password: str) -> Dict[str, Any]:
+        """Alias for verify_password_reset for backward compatibility"""
+        return await self.verify_password_reset(token, new_password)
 
-class SimpleUser:
-    def __init__(self, id: str, email: str):
-        self.id = id
-        self.email = email
+    async def verify_password_reset(self, token: str, new_password: str) -> Dict[str, Any]:
+        """
+        Verify password reset token and update password
+        """
+        try:
+            if not token or not new_password:
+                return {
+                    "success": False,
+                    "error": "Token and new password are required"
+                }
+            
+            if len(new_password) < 6:
+                return {
+                    "success": False,
+                    "error": "Password must be at least 6 characters"
+                }
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.supabase_url}/auth/v1/verify",
+                    headers={
+                        "apikey": self.supabase_key,
+                        "Authorization": f"Bearer {self.supabase_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "type": "recovery",
+                        "token": token,
+                        "password": new_password
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "error": None,
+                        "user": data.get("user"),
+                        "session": data.get("session")
+                    }
+                else:
+                    try:
+                        error_data = response.json()
+                        logger.error(f"Supabase password reset verification error: {error_data}")
+                    except:
+                        error_data = {"error": response.text}
+                        logger.error(f"Supabase password reset verification error text: {response.text}")
+                    
+                    error_messages = {
+                        400: "Invalid or expired token",
+                        401: "Invalid or expired token",
+                        422: "Invalid token or password format"
+                    }
+                    
+                    friendly_error = error_messages.get(response.status_code, "Failed to reset password")
+                    
+                    return {
+                        "success": False,
+                        "error": friendly_error
+                    }
+                    
+        except Exception as e:
+            logger.error(f"Supabase password reset verification error: {e}")
+            return {
+                "success": False,
+                "error": "Password reset verification service error"
+            }
 
 
 class DummySupabaseService:
-    """Fallback service for development"""
+    """Fallback service for development when Supabase is not configured"""
+    
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
+        """Dummy sign in method"""
+        logger.warning("Using dummy Supabase service - sign_in")
         return {
             "success": False,
             "error": "Supabase not configured",
@@ -201,6 +352,24 @@ class DummySupabaseService:
         }
     
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Dummy create user method"""
+        logger.warning("Using dummy Supabase service - create_user")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
+        """Dummy send password reset method"""
+        logger.warning("Using dummy Supabase service - send_password_reset")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def verify_password_reset(self, token: str, new_password: str) -> Dict[str, Any]:
+        """Dummy verify password reset method"""
+        logger.warning("Using dummy Supabase service - verify_password_reset")
         return {
             "success": False,
             "error": "Supabase not configured"
@@ -208,7 +377,12 @@ class DummySupabaseService:
 
 
 def check_supabase_config() -> bool:
-    """Check if Supabase configuration is valid"""
+    """
+    Check if Supabase configuration is valid
+    
+    Returns:
+        bool: True if both URL and key are configured, False otherwise
+    """
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
     
@@ -219,6 +393,7 @@ def check_supabase_config() -> bool:
 try:
     if check_supabase_config():
         supabase_auth_service = SupabaseAuthService()
+        logger.info("Supabase auth service created successfully")
     else:
         logger.warning("Supabase not configured, using dummy service")
         supabase_auth_service = DummySupabaseService()

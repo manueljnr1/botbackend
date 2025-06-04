@@ -529,6 +529,79 @@ async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
             detail="Registration failed due to system error"
         )
 
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def tenant_forgot_password_supabase(
+    request: TenantForgotPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    """Enhanced password reset using Supabase"""
+    tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
+    
+    if not tenant or not tenant.email:
+        return {"message": "If your account name exists in our system, you will receive a password reset link."}
+    
+    # Use the correct method name from your service
+    result = await supabase_auth_service.send_password_reset(
+        email=tenant.email,
+        redirect_to=f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password"
+    )
+    
+    if result["success"]:
+        logger.info(f"Supabase password reset sent for tenant: {tenant.name}")
+    else:
+        logger.error(f"Supabase password reset failed for {tenant.name}: {result.get('error')}")
+    
+    return {"message": "If your account name exists in our system, you will receive a password reset link."}
+
+
+
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def tenant_reset_password_supabase(
+    request: TenantResetPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    """Reset password using Supabase token"""
+    # Use the correct method name from your service
+    result = await supabase_auth_service.verify_password_reset(
+        token=request.token, 
+        new_password=request.new_password
+    )
+    
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Invalid or expired reset token")
+        )
+    
+    # Optional: Update local tenant credentials if needed
+    if result.get("user"):
+        user_email = result["user"].get("email")
+        if user_email:
+            tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
+            if tenant:
+                # Update local credentials
+                credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
+                if credentials:
+                    credentials.hashed_password = get_password_hash(request.new_password)
+                else:
+                    credentials = TenantCredentials(
+                        tenant_id=tenant.id,
+                        hashed_password=get_password_hash(request.new_password)
+                    )
+                    db.add(credentials)
+                db.commit()
+                logger.info(f"Local password updated for tenant: {tenant.name}")
+    
+    return {"message": "Password reset successfully. You can now log in with your new password."}
+
+
+
+
+
 # CRUD endpoints
 @router.get("/{tenant_id}", response_model=TenantOut)
 async def get_tenant(
@@ -619,104 +692,8 @@ async def get_tenant(
     
     return tenant  # Direct return
 
-# Password reset endpoints
-@router.post("/forgot-password", response_model=MessageResponse)
-async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Send password reset email to tenant contact"""
-    from fastapi import Request
-    
-    tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
-    
-    if not tenant:
-        return {"message": "If your account name exists in our system, you will receive a password reset link."}
-    
-    # Check for existing valid token
-    existing_token = db.query(TenantPasswordReset).filter(
-        TenantPasswordReset.tenant_id == tenant.id,
-        TenantPasswordReset.is_used == False,
-        TenantPasswordReset.expires_at > datetime.utcnow()
-    ).first()
-    
-    if existing_token:
-        reset_token = existing_token.token
-    else:
-        password_reset = TenantPasswordReset.create_token(tenant.id)
-        db.add(password_reset)
-        db.commit()
-        db.refresh(password_reset)
-        reset_token = password_reset.token
-    
-    if tenant.email:
-        reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password?token={reset_token}"
-        
-        email_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2>Password Reset Request</h2>
-                <p>Hello <strong>{tenant.name}</strong>,</p>
-                <p>We received a request to reset your account password.</p>
-                <p><a href="{reset_url}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">Reset Password</a></p>
-                <p>This link will expire in 24 hours.</p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        try:
-            email_service.send_email(
-                to_email=tenant.email,
-                subject="Password Reset Request",
-                html_content=email_body
-            )
-        except Exception as e:
-            logger.error(f"Error sending password reset email: {e}")
-    
-    return {"message": "If your account name exists in our system, you will receive a password reset link."}
 
-@router.post("/reset-password", response_model=MessageResponse)
-async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session = Depends(get_db)):
-    """Reset tenant password using the token from email"""
-    reset_request = db.query(TenantPasswordReset).filter(
-        TenantPasswordReset.token == request.token,
-        TenantPasswordReset.is_used == False
-    ).first()
-    
-    if not reset_request:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        )
-    
-    if not reset_request.is_valid():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reset token has expired"
-        )
-    
-    tenant = db.query(Tenant).filter(Tenant.id == reset_request.tenant_id).first()
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found"
-        )
-    
-    hashed_password = get_password_hash(request.new_password)
-    
-    credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
-    if credentials:
-        credentials.hashed_password = hashed_password
-    else:
-        credentials = TenantCredentials(
-            tenant_id=tenant.id,
-            hashed_password=hashed_password
-        )
-        db.add(credentials)
-    
-    reset_request.is_used = True
-    db.commit()
-    
-    return {"message": "Password reset successfully. You can now log in with your new password."}
+
 
 # Subscription endpoints (if pricing available)
 @router.post("/{tenant_id}/create-subscription")
@@ -1014,7 +991,7 @@ async def test_tenant_email(
     }
 
 # Supabase-specific endpoints
-@router.post("/forgot-password-v2", response_model=MessageResponse)
+@router.post("/forgot-password", response_model=MessageResponse)
 async def tenant_forgot_password_supabase(
     request: TenantForgotPasswordRequest, 
     db: Session = Depends(get_db)
@@ -1025,7 +1002,11 @@ async def tenant_forgot_password_supabase(
     if not tenant or not tenant.email:
         return {"message": "If your account name exists in our system, you will receive a password reset link."}
     
-    result = await supabase_auth_service.reset_password(tenant.email)
+    # Use the correct method name from your service
+    result = await supabase_auth_service.send_password_reset(
+        email=tenant.email,
+        redirect_to=f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password"
+    )
     
     if result["success"]:
         logger.info(f"Supabase password reset sent for tenant: {tenant.name}")
@@ -1034,15 +1015,20 @@ async def tenant_forgot_password_supabase(
     
     return {"message": "If your account name exists in our system, you will receive a password reset link."}
 
-@router.post("/reset-password-v2", response_model=MessageResponse)
+
+
+
+
+@router.post("/reset-password", response_model=MessageResponse)
 async def tenant_reset_password_supabase(
     request: TenantResetPasswordRequest, 
     db: Session = Depends(get_db)
 ):
     """Reset password using Supabase token"""
-    result = await supabase_auth_service.verify_reset_token(
-        request.token, 
-        request.new_password
+    # Use the correct method name from your service
+    result = await supabase_auth_service.verify_password_reset(
+        token=request.token, 
+        new_password=request.new_password
     )
     
     if not result["success"]:
@@ -1051,7 +1037,27 @@ async def tenant_reset_password_supabase(
             detail=result.get("error", "Invalid or expired reset token")
         )
     
+    # Optional: Update local tenant credentials if needed
+    if result.get("user"):
+        user_email = result["user"].get("email")
+        if user_email:
+            tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
+            if tenant:
+                # Update local credentials
+                credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
+                if credentials:
+                    credentials.hashed_password = get_password_hash(request.new_password)
+                else:
+                    credentials = TenantCredentials(
+                        tenant_id=tenant.id,
+                        hashed_password=get_password_hash(request.new_password)
+                    )
+                    db.add(credentials)
+                db.commit()
+                logger.info(f"Local password updated for tenant: {tenant.name}")
+    
     return {"message": "Password reset successfully. You can now log in with your new password."}
+
 
 @router.post("/create-supabase-user", response_model=MessageResponse)
 async def create_supabase_user_endpoint(
@@ -1124,3 +1130,108 @@ async def create_supabase_user_by_name(
         error_msg = result.get("error", "Unknown error")
         logger.error(f"Failed to create Supabase user: {error_msg}")
         raise HTTPException(status_code=400, detail=f"Supabase user creation failed: {error_msg}")
+
+
+
+
+
+
+
+        # Password reset endpoints
+# @router.post("/forgot-password", response_model=MessageResponse)
+# async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
+#     """Send password reset email to tenant contact"""
+#     from fastapi import Request
+    
+#     tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
+    
+#     if not tenant:
+#         return {"message": "If your account name exists in our system, you will receive a password reset link."}
+    
+#     # Check for existing valid token
+#     existing_token = db.query(TenantPasswordReset).filter(
+#         TenantPasswordReset.tenant_id == tenant.id,
+#         TenantPasswordReset.is_used == False,
+#         TenantPasswordReset.expires_at > datetime.utcnow()
+#     ).first()
+    
+#     if existing_token:
+#         reset_token = existing_token.token
+#     else:
+#         password_reset = TenantPasswordReset.create_token(tenant.id)
+#         db.add(password_reset)
+#         db.commit()
+#         db.refresh(password_reset)
+#         reset_token = password_reset.token
+    
+#     if tenant.email:
+#         reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password?token={reset_token}"
+        
+#         email_body = f"""
+#         <html>
+#         <body style="font-family: Arial, sans-serif;">
+#             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+#                 <h2>Password Reset Request</h2>
+#                 <p>Hello <strong>{tenant.name}</strong>,</p>
+#                 <p>We received a request to reset your account password.</p>
+#                 <p><a href="{reset_url}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">Reset Password</a></p>
+#                 <p>This link will expire in 24 hours.</p>
+#             </div>
+#         </body>
+#         </html>
+#         """
+        
+#         try:
+#             email_service.send_email(
+#                 to_email=tenant.email,
+#                 subject="Password Reset Request",
+#                 html_content=email_body
+#             )
+#         except Exception as e:
+#             logger.error(f"Error sending password reset email: {e}")
+    
+#     return {"message": "If your account name exists in our system, you will receive a password reset link."}
+
+# @router.post("/reset-password", response_model=MessageResponse)
+# async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session = Depends(get_db)):
+#     """Reset tenant password using the token from email"""
+#     reset_request = db.query(TenantPasswordReset).filter(
+#         TenantPasswordReset.token == request.token,
+#         TenantPasswordReset.is_used == False
+#     ).first()
+    
+#     if not reset_request:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Invalid or expired reset token"
+#         )
+    
+#     if not reset_request.is_valid():
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Reset token has expired"
+#         )
+    
+#     tenant = db.query(Tenant).filter(Tenant.id == reset_request.tenant_id).first()
+#     if not tenant:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="Tenant not found"
+#         )
+    
+#     hashed_password = get_password_hash(request.new_password)
+    
+#     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
+#     if credentials:
+#         credentials.hashed_password = hashed_password
+#     else:
+#         credentials = TenantCredentials(
+#             tenant_id=tenant.id,
+#             hashed_password=hashed_password
+#         )
+#         db.add(credentials)
+    
+#     reset_request.is_used = True
+#     db.commit()
+    
+#     return {"message": "Password reset successfully. You can now log in with your new password."}
