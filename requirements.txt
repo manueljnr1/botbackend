@@ -6,7 +6,6 @@ alembic
 annotated-types
 anyio
 attrs
-audioop-lts
 Authlib
 bandit
 bcrypt
