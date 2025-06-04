@@ -42,7 +42,7 @@ class TenantUpdateAdmin(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     system_prompt: Optional[str] = None
-    contact_email: Optional[str] = None
+    email: Optional[str] = None
     feedback_email: Optional[str] = None
     from_email: Optional[str] = None
     enable_feedback_system: Optional[bool] = None
@@ -54,7 +54,7 @@ class TenantResponse(BaseModel):
     description: Optional[str] = None
     is_active: bool
     system_prompt: Optional[str] = None
-    contact_email: Optional[str] = None
+    email: Optional[str] = None
     feedback_email: Optional[str] = None
     from_email: Optional[str] = None
     enable_feedback_system: bool
