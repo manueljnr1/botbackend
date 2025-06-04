@@ -1,7 +1,8 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError as JWTError
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -10,7 +11,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from app.core.security import get_password_hash
+from fastapi_limiter.depends import RateLimiter
 import uuid
+import time
+from collections import defaultdict
 
 from app.database import get_db
 from app.tenants.models import Tenant
@@ -22,45 +26,25 @@ from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
 from app.core.email_service import email_service
+from app.auth.supabase_service import supabase_auth_service
 
 import logging
-# Configure logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+rate_limit_storage = defaultdict(list)
 
 try:
-    pass  # Add your code here
-except Exception as e:
-    logger.error(f"An error occurred: {e}")
-except Exception as e:
-    logger.error(f"An error occurred: {e}")
     from app.pricing.service import PricingService
     PRICING_AVAILABLE = True
-    print("✅ PricingService imported successfully")
 except ImportError as e:
-    print(f"⚠️ PricingService not available: {e}")
     PRICING_AVAILABLE = False
 
-
-
-
-
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="tenants/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="tenants/login-legacy")
 
-
-
-
-# MODIFIED HELPER FUNCTION
 def get_tenant_from_api_key(api_key: str, db: Session) -> Tenant:
-    """
-    Retrieve an active tenant using the provided API key.
-    """
-    # Added Tenant.is_active == True to the filter
+    """Retrieve an active tenant using the provided API key."""
     tenant = db.query(Tenant).filter(Tenant.api_key == api_key, Tenant.is_active == True).first()
     if not tenant:
-        # Changed status_code to status.HTTP_403_FORBIDDEN for consistency
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key or inactive tenant")
     return tenant
 
@@ -73,9 +57,8 @@ class TenantCreate(BaseModel):
     password: str
     contact_email: str
 
-
 class TenantLogin(BaseModel):
-    username: str  # This can be either username, email, or tenant name
+    username: str
     password: str
 
 class TokenResponse(BaseModel):
@@ -96,21 +79,20 @@ class TenantUpdate(BaseModel):
     is_active: Optional[bool] = None
     system_prompt: Optional[str] = None
 
-# MODIFIED TenantOut Pydantic model
 class TenantOut(BaseModel):
     id: int
     name: str
-    description: Optional[str] = None # Explicitly set default to None
+    description: Optional[str] = None
     api_key: str
     is_active: bool
     system_prompt: Optional[str] = None
-    contact_email: Optional[str] = None   # Added system_prompt field
+    contact_email: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 class TenantForgotPasswordRequest(BaseModel):
-    name: str  # Use tenant name instead of email
+    name: str
 
 class TenantResetPasswordRequest(BaseModel):
     token: str
@@ -119,13 +101,41 @@ class TenantResetPasswordRequest(BaseModel):
 class MessageResponse(BaseModel):
     message: str
 
-
-
 class TenantEmailConfig(BaseModel):
     feedback_email: Optional[str] = None
     from_email: Optional[str] = None
     enable_feedback_system: bool = True
 
+class SupabaseLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class SupabaseTokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_at: datetime
+    user_id: str
+    email: str
+    tenant_id: Optional[int]
+    tenant_name: Optional[str]
+    api_key: Optional[str]
+
+# Rate limiting
+def check_rate_limit(identifier: str, max_attempts: int = 5, window_minutes: int = 15) -> bool:
+    """Simple rate limiting check"""
+    now = time.time()
+    window_seconds = window_minutes * 60
+    
+    rate_limit_storage[identifier] = [
+        timestamp for timestamp in rate_limit_storage[identifier] 
+        if now - timestamp < window_seconds
+    ]
+    
+    if len(rate_limit_storage[identifier]) >= max_attempts:
+        return False
+    
+    rate_limit_storage[identifier].append(now)
+    return True
 
 def verify_password(plain_password, hashed_password):
     """Verify password against the hashed version"""
@@ -141,12 +151,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
     
     return encoded_jwt, expire
-
-
-
 
 async def get_current_tenant(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Dependency to get the current tenant from a token"""
@@ -157,8 +164,7 @@ async def get_current_tenant(token: str = Depends(oauth2_scheme), db: Session = 
     )
     
     try:
-        # Decode the JWT token
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
         tenant_id: int = payload.get("sub")
         
         if tenant_id is None:
@@ -166,14 +172,76 @@ async def get_current_tenant(token: str = Depends(oauth2_scheme), db: Session = 
     except JWTError:
         raise credentials_exception
     
-    # Get the tenant from the database
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
     if tenant is None:
         raise credentials_exception
     
     return tenant
 
+async def get_current_tenant_supabase(
+    authorization: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Dependency to get current tenant using Supabase token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        if not authorization.startswith("Bearer "):
+            raise credentials_exception
+        
+        token = authorization.split(" ")[1]
+        
+        # Validate token with Supabase
+        supabase_result = await supabase_auth_service.get_user_from_token(token)
+        
+        if not supabase_result["success"]:
+            raise credentials_exception
+        
+        user = supabase_result["user"]
+        
+        tenant = db.query(Tenant).filter(
+            Tenant.contact_email == user.email,
+            Tenant.is_active == True
+        ).first()
+        
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No tenant found for this user"
+            )
+        
+        return tenant
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token validation error: {e}")
+        raise credentials_exception
 
+async def get_current_user_hybrid(
+    authorization: str = Header(None),
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """Hybrid auth: Try Supabase first, fallback to traditional JWT"""
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            return await get_current_tenant_supabase(authorization, db)
+        except HTTPException:
+            pass
+    
+    try:
+        return await get_current_user_or_admin(token, db)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Dependency to get current user (either admin or tenant)"""
@@ -184,7 +252,7 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
     )
     
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("sub")
         is_admin = payload.get("is_admin", False)
         
@@ -192,11 +260,10 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
             raise credentials_exception
             
         if is_admin:
-            # Handle admin token - find admin by ID
             admin = db.query(Admin).filter(Admin.id == user_id, Admin.is_active == True).first()
             if admin is None:
                 raise credentials_exception
-            # Create a mock user object with admin privileges
+            
             class AdminUser:
                 def __init__(self, admin):
                     self.id = admin.id
@@ -207,14 +274,12 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
                     self.is_active = True
             return AdminUser(admin)
         else:
-            # Handle regular tenant token
             tenant = db.query(Tenant).filter(Tenant.id == user_id, Tenant.is_active == True).first()
             if tenant is None:
                 raise credentials_exception
-            # Find user associated with this tenant
+            
             user = db.query(User).filter(User.tenant_id == tenant.id, User.is_active == True).first()
             if user is None:
-                # Create a mock user object for tenant
                 class TenantUser:
                     def __init__(self, tenant):
                         self.id = f"tenant_{tenant.id}"
@@ -229,32 +294,25 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
     except JWTError:
         raise credentials_exception
 
-
-    
-
-# Login endpoint
-@router.post("/login", response_model=TokenResponse)
+# Legacy login endpoint
+@router.post("/login-legacy", response_model=TokenResponse)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Universal login endpoint for both admins and tenants
-    """
-    # First, try to authenticate as an admin
+    """Universal login endpoint for both admins and tenants"""
+    # Try admin authentication first
     admin = db.query(Admin).filter(
         (Admin.username == form_data.username) | (Admin.email == form_data.username),
         Admin.is_active == True
     ).first()
     
     if admin and verify_password(form_data.password, admin.hashed_password):
-        # Admin authentication successful
         access_token, expires_at = create_access_token(
             data={
                 "sub": str(admin.id),
-                "is_admin": True  # Flag to indicate admin role
+                "is_admin": True
             },
             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         )
         
-        # Return admin token response
         return {
             "access_token": access_token,
             "token_type": "bearer",
@@ -263,17 +321,15 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             "name": admin.name,
             "email": admin.email,
             "expires_at": expires_at,
-            # Add dummy values for required tenant fields
-            "tenant_id":0,  # Dummy UUID
-            "tenant_name": "ADMIN",  # Dummy name
-            "api_key": None  # or provide a dummy value if required
+            "tenant_id": 0,
+            "tenant_name": "ADMIN",
+            "api_key": None
         }
     
-    # If not admin, proceed with existing tenant authentication logic
+    # Try tenant authentication
     tenant = db.query(Tenant).filter(Tenant.name == form_data.username, Tenant.is_active == True).first()
     
     if not tenant:
-        # If no tenant found by name, try to find a user with this username that's linked to a tenant
         user = db.query(User).filter(
             (User.username == form_data.username) | (User.email == form_data.username),
             User.is_active == True
@@ -289,7 +345,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Get tenant credentials
     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
     
     if not credentials or not credentials.hashed_password or not verify_password(form_data.password, credentials.hashed_password):
@@ -299,16 +354,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Create access token with is_admin flag set to false for tenants
     access_token, expires_at = create_access_token(
         data={
             "sub": str(tenant.id),
-            "is_admin": False  # Flag to indicate this is NOT an admin
+            "is_admin": False
         },
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
-    # Return tenant token response with is_admin field added
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -318,73 +371,126 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
         "api_key": tenant.api_key
     }
 
-
-
-# NEW ENDPOINT
-@router.get("/details/by-apikey", response_model=TenantOut)
-async def get_tenant_details_by_api_key(
-    api_key: str = Header(..., alias="X-API-Key"),
+# Supabase login endpoint
+@router.post("/login", response_model=SupabaseTokenResponse)
+async def login_with_supabase(
+    login_data: SupabaseLoginRequest,
     db: Session = Depends(get_db)
 ):
-    """
-    Get current tenant's details (including name, id, and system_prompt) using their API key.
-    This is useful for the frontend to configure itself for the active tenant.
-    """
-    tenant = get_tenant_from_api_key(api_key, db) # Uses the modified helper
-    return tenant
+    """Hybrid login: Supports both admins (traditional JWT) and tenants (Supabase)"""
+    try:
+        if not login_data.email or not login_data.password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+        
+        # Try admin authentication first
+        admin = db.query(Admin).filter(
+            (Admin.username == login_data.email) | (Admin.email == login_data.email),
+            Admin.is_active == True
+        ).first()
+        
+        if admin and verify_password(login_data.password, admin.hashed_password):
+            access_token, expires_at = create_access_token(
+                data={
+                    "sub": str(admin.id),
+                    "is_admin": True
+                },
+                expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            )
+            
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "expires_at": expires_at,
+                "user_id": str(admin.id),
+                "email": admin.email,
+                "tenant_id": None,
+                "tenant_name": "ADMIN",
+                "api_key": None
+            }
+        
+        # Try Supabase tenant authentication
+        supabase_result = await supabase_auth_service.sign_in(
+            email=login_data.email,
+            password=login_data.password
+        )
+        
+        if not supabase_result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Find corresponding tenant
+        tenant = db.query(Tenant).filter(
+            Tenant.contact_email == login_data.email,
+            Tenant.is_active == True
+        ).first()
+        
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No tenant found with this email address"
+            )
+        
+        session = supabase_result["session"]
+        user = supabase_result["user"]
+        
+        return {
+            "access_token": session.access_token,
+            "token_type": "bearer",
+            "expires_at": datetime.fromtimestamp(session.expires_at),
+            "user_id": user.id,
+            "email": user.email,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "api_key": tenant.api_key
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed due to server error"
+        )
 
-
-
-
-
-# @router.post("/", response_model=TenantOut)
-# async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-#     """
-#     Create a new tenant (admin only)
-#     """
-#     db_tenant = db.query(Tenant).filter(Tenant.name == tenant.name).first()
-#     if db_tenant:
-#         raise HTTPException(status_code=400, detail="Tenant name already registered")
-    
-#     # Generate hashed password from the required password
-#     hashed_password = get_password_hash(tenant.password)
-    
-    # Create tenant without password information
-    # new_tenant = Tenant(
-    #     name=tenant.name,
-    #     description=tenant.description,
-    #     system_prompt=tenant.system_prompt,
-    #     api_key=f"sk-{str(uuid.uuid4()).replace('-', '')}",
-    #     is_active=True
-    # )
-    # db.add(new_tenant)
-    # db.commit()
-    # db.refresh(new_tenant)
-    
-    # # Store password in separate credentials table
-    # tenant_credentials = TenantCredentials(
-    #     tenant_id=new_tenant.id,
-    #     hashed_password=hashed_password
-    # )
-    # db.add(tenant_credentials)
-    # db.commit()
-    
-    # return new_tenant
-
-
-
+# Registration endpoint
 @router.post("/register", response_model=TenantOut)
 async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
-    """
-    Enhanced Tenant Registration with bulletproof Free subscription creation
-    """
+    """Enhanced Tenant Registration with Supabase Auth"""
     try:
+        if not tenant.name or not tenant.contact_email or not tenant.password:
+            raise HTTPException(status_code=400, detail="Name, email, and password are required")
+        
         # Check if tenant name already exists
         db_tenant = db.query(Tenant).filter(Tenant.name == tenant.name).first()
         if db_tenant:
             raise HTTPException(status_code=400, detail="Username already registered")
         
-        # Create new tenant
+        # Check for existing email
+        existing_email = db.query(Tenant).filter(Tenant.contact_email == tenant.contact_email).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Create user in Supabase
+        supabase_result = await supabase_auth_service.create_user(
+            email=tenant.contact_email,
+            password=tenant.password,
+            metadata={
+                "tenant_name": tenant.name,
+                "role": "tenant_admin"
+            }
+        )
+        
+        if not supabase_result.get("success"):
+            error_msg = supabase_result.get("error", "Unknown error")
+            raise HTTPException(
+                status_code=400,
+                detail=f"User creation failed: {error_msg}"
+            )
+        
+        # Create local tenant record
         new_tenant = Tenant(
             name=tenant.name,
             description=tenant.description,
@@ -394,138 +500,92 @@ async def register_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
             is_active=True
         )
         
-        # Add tenant to database and flush to get ID
         db.add(new_tenant)
-        db.flush()  # This gets the ID without committing
         
-        # Create tenant credentials
-        hashed_password = get_password_hash(tenant.password)
-        tenant_credentials = TenantCredentials(
-            tenant_id=new_tenant.id,
-            hashed_password=hashed_password
-        )
-        db.add(tenant_credentials)
+        try:
+            db.commit()
+            db.refresh(new_tenant)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Database error during tenant creation")
         
-        # 🚀 BULLETPROOF SUBSCRIPTION CREATION
+        # Create subscription if pricing available
         subscription_created = False
-        subscription_error = None
         
         if PRICING_AVAILABLE:
             try:
-                logger.info(f"🎁 Creating Free subscription for new tenant: {new_tenant.name} (ID: {new_tenant.id})")
                 pricing_service = PricingService(db)
-                
-                # Ensure default plans exist first
                 pricing_service.create_default_plans()
-                
-                # Create free subscription
                 subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
                 
                 if subscription and subscription.plan:
                     subscription_created = True
-                    logger.info(f"✅ Successfully created Free subscription for {new_tenant.name}")
-                    logger.info(f"   📊 Plan: {subscription.plan.name}")
-                    logger.info(f"   💬 Conversations: {subscription.plan.max_messages_monthly}/month")
-                    logger.info(f"   🆔 Subscription ID: {subscription.id}")
-                else:
-                    subscription_error = "Subscription creation returned None or missing plan"
-                    logger.error(f"❌ Subscription creation failed for {new_tenant.name}: {subscription_error}")
                     
             except Exception as e:
-                subscription_error = str(e)
-                logger.error(f"💥 Failed to create subscription for new tenant {new_tenant.name}: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-        else:
-            subscription_error = "Pricing system not available"
-            logger.warning(f"⚠️ Pricing system not available, skipping subscription creation for {new_tenant.name}")
+                logger.error(f"Subscription creation error: {e}")
         
-        # Decision: Should we fail tenant creation if subscription fails?
-        # Option 1: Fail completely (recommended for production)
+        # Only fail if pricing is required and subscription creation failed
         if not subscription_created and PRICING_AVAILABLE:
-            db.rollback()
+            db.delete(new_tenant)
+            db.commit()
             raise HTTPException(
                 status_code=500, 
-                detail=f"Tenant registration failed: Could not create subscription. Error: {subscription_error}"
+                detail="Registration failed: Could not create subscription"
             )
         
-        # Option 2: Continue without subscription (use this for testing)
-        # if not subscription_created:
-        #     logger.warning(f"⚠️ Tenant {new_tenant.name} created without subscription: {subscription_error}")
-        
-        # Commit everything if we reach here
-        db.commit()
-        db.refresh(new_tenant)
-        
-        logger.info(f"🎉 Tenant registration completed: {new_tenant.name}")
         return new_tenant
         
     except HTTPException:
-        # Re-raise HTTP exceptions (like duplicate tenant name)
-        db.rollback()
         raise
     except Exception as e:
-        # Handle any other unexpected errors
+        logger.error(f"Registration error: {e}")
         db.rollback()
-        logger.error(f"💥 Unexpected error during tenant registration: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
-            detail=f"Registration failed due to system error: {str(e)}"
+            detail="Registration failed due to system error"
         )
 
-
-
-
-
-
+# CRUD endpoints
 @router.get("/{tenant_id}", response_model=TenantOut)
-async def get_tenant(tenant_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Get a specific tenant
-    """
+async def get_tenant(
+    tenant_id: int, 
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_user_hybrid)
+):
+    """Get a specific tenant"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    if not current_user.is_admin and current_user.tenant_id != tenant_id:
+    # Authorization logic
+    if hasattr(current_user, 'is_admin') and current_user.is_admin:
+        pass
+    elif hasattr(current_user, 'id') and current_user.id == tenant_id:
+        pass
+    else:
         raise HTTPException(status_code=403, detail="Not authorized to view this tenant")
     
     return tenant
-
-
-
 
 @router.put("/{tenant_id}", response_model=TenantOut)
 async def update_tenant(
     tenant_id: int, 
     tenant_update: TenantUpdate, 
     db: Session = Depends(get_db), 
-    current_admin = Depends(get_admin_user)  # This can be User or Admin
+    current_user = Depends(get_current_user_hybrid)
 ):
-    """
-    Update a tenant's details, including system prompt (admin only or authorized user)
-    """
+    """Update a tenant's details"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    # Authorization logic that handles both User and Admin objects
-    from app.admin.models import Admin
-    from app.auth.models import User
-    
-    # Check if current_admin is an Admin object (from admin login)
-    if isinstance(current_admin, Admin):
-        # Admin can update any tenant - no additional checks needed
+    # Authorization logic
+    if hasattr(current_user, 'is_admin') and current_user.is_admin:
         pass
-    elif isinstance(current_admin, User):
-        # User with admin privileges - check tenant ownership
-        if not current_admin.is_admin and (current_admin.tenant_id is None or current_admin.tenant_id != tenant_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this tenant")
+    elif hasattr(current_user, 'id') and current_user.id == tenant_id:
+        pass
     else:
-        # Should not happen, but safety check
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin credentials")
+        raise HTTPException(status_code=403, detail="Not authorized to update this tenant")
 
     # Apply updates
     update_data = tenant_update.model_dump(exclude_unset=True)
@@ -536,13 +596,16 @@ async def update_tenant(
     db.refresh(tenant)
     return tenant
 
-
-
 @router.delete("/{tenant_id}")
-async def delete_tenant(tenant_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """
-    Deactivate a tenant (admin only)
-    """
+async def delete_tenant(
+    tenant_id: int, 
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_user_hybrid)
+):
+    """Deactivate a tenant (admin only)"""
+    if not (hasattr(current_user, 'is_admin') and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
@@ -551,27 +614,21 @@ async def delete_tenant(tenant_id: int, db: Session = Depends(get_db), current_u
     db.commit()
     return {"message": "Tenant deactivated successfully"}
 
-
-
-
-@router.put("/{tenant_id}/prompt", response_model=TenantOut) # Changed response_model to TenantOut for consistency
+@router.put("/{tenant_id}/prompt", response_model=TenantOut)
 async def update_tenant_prompt(
     tenant_id: int,
-    prompt_data: dict, # Expects {"system_prompt": "new prompt"}
+    prompt_data: dict,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Update a tenant's system prompt using API key.
-    Returns the updated tenant details.
-    """
+    """Update a tenant's system prompt using API key."""
     tenant = get_tenant_from_api_key(api_key, db)
     
     if tenant.id != tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key does not match tenant ID")
     
     new_system_prompt = prompt_data.get("system_prompt")
-    if new_system_prompt is None: # Check if system_prompt key exists
+    if new_system_prompt is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="system_prompt field is required in request body")
 
     tenant.system_prompt = new_system_prompt
@@ -579,111 +636,64 @@ async def update_tenant_prompt(
     db.refresh(tenant)
     return tenant
 
-
-
-
+# Password reset endpoints
 @router.post("/forgot-password", response_model=MessageResponse)
 async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
-    """
-    Send password reset email to tenant contact
-    """
-    # Find tenant by name
+    """Send password reset email to tenant contact"""
+    from fastapi import Request
+    
     tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
     
-    # Always return success message, even if tenant not found (security best practice)
     if not tenant:
         return {"message": "If your account name exists in our system, you will receive a password reset link."}
     
-    # Check if tenant already has a valid token
+    # Check for existing valid token
     existing_token = db.query(TenantPasswordReset).filter(
         TenantPasswordReset.tenant_id == tenant.id,
         TenantPasswordReset.is_used == False,
         TenantPasswordReset.expires_at > datetime.utcnow()
     ).first()
     
-    # If token exists, reuse it, otherwise create a new one
     if existing_token:
         reset_token = existing_token.token
     else:
-        # Create new token
         password_reset = TenantPasswordReset.create_token(tenant.id)
         db.add(password_reset)
         db.commit()
         db.refresh(password_reset)
         reset_token = password_reset.token
     
-    # Get the contact email for the tenant
-    tenant_contact_email = tenant.contact_email
-    
-    if tenant_contact_email:
-        # Send email
+    if tenant.contact_email:
         reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password?token={reset_token}"
         
-        # Prepare email content
         email_body = f"""
         <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background-color: #f8f9fa; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
-                .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }}
-                .button {{ display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; }}
-                .footer {{ background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 5px 5px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h2>Password Reset Request</h2>
-                </div>
-                <div class="content">
-                    <p>Hello <strong>{tenant.name}</strong>,</p>
-                    <p>We received a request to reset your account password. If you didn't make this request, you can safely ignore this email.</p>
-                    <p>To reset your password, click the button below:</p>
-                    <p style="text-align: center; margin: 30px 0;">
-                        <a href="{reset_url}" class="button">Reset Password</a>
-                    </p>
-                    <p>Or copy and paste this link in your browser:</p>
-                    <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
-                        {reset_url}
-                    </p>
-                    <p><strong>This link will expire in 24 hours.</strong></p>
-                </div>
-                <div class="footer">
-                    <p>Best regards,<br>Your App Team</p>
-                    <p>If you have any questions, please contact our support team.</p>
-                </div>
+        <body style="font-family: Arial, sans-serif;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2>Password Reset Request</h2>
+                <p>Hello <strong>{tenant.name}</strong>,</p>
+                <p>We received a request to reset your account password.</p>
+                <p><a href="{reset_url}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">Reset Password</a></p>
+                <p>This link will expire in 24 hours.</p>
             </div>
         </body>
         </html>
         """
         
-        # Send email using SendGrid
         try:
-            success = email_service.send_email(
-                to_email=tenant_contact_email,
+            email_service.send_email(
+                to_email=tenant.contact_email,
                 subject="Password Reset Request",
                 html_content=email_body
             )
-            
-            if not success:
-                logger.error(f"Failed to send password reset email to {tenant_contact_email}")
-                
         except Exception as e:
-            # Log error, but don't reveal to user
-            logger.exception(f"Error sending password reset email: {e}")
+            logger.error(f"Error sending password reset email: {e}")
     
     return {"message": "If your account name exists in our system, you will receive a password reset link."}
 
-
-
 @router.post("/reset-password", response_model=MessageResponse)
 async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session = Depends(get_db)):
-    """
-    Reset tenant password using the token from email
-    """
-    # Find the password reset token
+    """Reset tenant password using the token from email"""
     reset_request = db.query(TenantPasswordReset).filter(
         TenantPasswordReset.token == request.token,
         TenantPasswordReset.is_used == False
@@ -695,14 +705,12 @@ async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session
             detail="Invalid or expired reset token"
         )
     
-    # Check if token is valid (not expired)
     if not reset_request.is_valid():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reset token has expired"
         )
     
-    # Get the tenant
     tenant = db.query(Tenant).filter(Tenant.id == reset_request.tenant_id).first()
     if not tenant:
         raise HTTPException(
@@ -710,10 +718,8 @@ async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session
             detail="Tenant not found"
         )
     
-    # Update the tenant's password
     hashed_password = get_password_hash(request.new_password)
     
-    # Update or create tenant credentials
     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
     if credentials:
         credentials.hashed_password = hashed_password
@@ -724,69 +730,26 @@ async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session
         )
         db.add(credentials)
     
-    # Mark the reset token as used
     reset_request.is_used = True
-    
-    # Commit changes
     db.commit()
-    
-    # Optional: Send confirmation email
-    if tenant.contact_email:
-        confirmation_email = f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background-color: #28a745; color: white; padding: 20px; text-align: center; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h2>Password Reset Successful</h2>
-                </div>
-                <div style="padding: 20px;">
-                    <p>Hello <strong>{tenant.name}</strong>,</p>
-                    <p>Your password has been successfully reset.</p>
-                    <p>If you didn't perform this action, please contact our support team immediately.</p>
-                    <p>Best regards,<br>Your App Team</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        try:
-            email_service.send_email(
-                to_email=tenant.contact_email,
-                subject="Password Reset Successful",
-                html_content=confirmation_email
-            )
-        except Exception as e:
-            logger.exception(f"Failed to send password reset confirmation email: {e}")
     
     return {"message": "Password reset successfully. You can now log in with your new password."}
 
-
-
-
+# Subscription endpoints (if pricing available)
 @router.post("/{tenant_id}/create-subscription")
 async def create_tenant_subscription(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)  # Admin only
+    current_user: User = Depends(get_admin_user)
 ):
-    """
-    Manually create a Free subscription for a tenant (Admin only)
-    Useful for fixing tenants created before auto-subscription was implemented
-    """
-    # Check if tenant exists
+    """Manually create a Free subscription for a tenant (Admin only)"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # Check if subscription already exists
+    if not PRICING_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Pricing system not available")
+    
     try:
         pricing_service = PricingService(db)
         existing_subscription = pricing_service.get_tenant_subscription(tenant_id)
@@ -798,7 +761,6 @@ async def create_tenant_subscription(
                 "status": existing_subscription.status
             }
         
-        # Create Free subscription
         subscription = pricing_service.create_free_subscription_for_tenant(tenant_id)
         
         return {
@@ -812,17 +774,13 @@ async def create_tenant_subscription(
         logger.error(f"Error creating subscription for tenant {tenant_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create subscription")
 
-
 @router.get("/{tenant_id}/subscription-status")
 async def get_tenant_subscription_status(
     tenant_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Enhanced subscription status check with detailed information
-    """
-    # Authorization check
+    """Enhanced subscription status check with detailed information"""
     if not current_user.is_admin and current_user.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
@@ -892,18 +850,13 @@ async def get_tenant_subscription_status(
             "pricing_system_enabled": PRICING_AVAILABLE
         }
 
-
-
 @router.post("/fix-all-subscriptions")
 async def fix_all_tenant_subscriptions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_admin_user)
 ):
-    """
-    Manual endpoint to fix all tenants without subscriptions (Admin only)
-    """
+    """Manual endpoint to fix all tenants without subscriptions (Admin only)"""
     try:
-        # Find tenants without active subscriptions
         from app.pricing.models import TenantSubscription
         
         tenants_without_subscriptions = db.query(Tenant).outerjoin(
@@ -928,8 +881,6 @@ async def fix_all_tenant_subscriptions(
             )
         
         pricing_service = PricingService(db)
-        
-        # Ensure default plans exist
         pricing_service.create_default_plans()
         
         fixed_tenants = []
@@ -937,8 +888,6 @@ async def fix_all_tenant_subscriptions(
         
         for tenant in tenants_without_subscriptions:
             try:
-                logger.info(f"🔧 Creating subscription for tenant: {tenant.name}")
-                
                 subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
                 
                 if subscription:
@@ -948,7 +897,6 @@ async def fix_all_tenant_subscriptions(
                         "plan": subscription.plan.name,
                         "subscription_id": subscription.id
                     })
-                    logger.info(f"✅ Fixed subscription for {tenant.name}")
                 else:
                     failed_tenants.append({
                         "tenant_id": tenant.id,
@@ -957,7 +905,7 @@ async def fix_all_tenant_subscriptions(
                     })
                     
             except Exception as e:
-                logger.error(f"💥 Error creating subscription for {tenant.name}: {e}")
+                logger.error(f"Error creating subscription for {tenant.name}: {e}")
                 failed_tenants.append({
                     "tenant_id": tenant.id,
                     "tenant_name": tenant.name,
@@ -975,11 +923,10 @@ async def fix_all_tenant_subscriptions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"💥 Error in fix_all_tenant_subscriptions: {e}")
+        logger.error(f"Error in fix_all_tenant_subscriptions: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fix subscriptions: {str(e)}")
-    
 
-
+# Email configuration endpoints
 @router.put("/{tenant_id}/email-config")
 async def update_tenant_email_config(
     tenant_id: int,
@@ -988,13 +935,10 @@ async def update_tenant_email_config(
     db: Session = Depends(get_db)
 ):
     """Update tenant email configuration for feedback system"""
-    
-    # Verify API key belongs to this tenant
     tenant = get_tenant_from_api_key(api_key, db)
     if tenant.id != tenant_id:
         raise HTTPException(status_code=403, detail="API key doesn't match tenant")
     
-    # Update email configuration
     if email_config.feedback_email:
         tenant.feedback_email = email_config.feedback_email
     if email_config.from_email:
@@ -1020,7 +964,6 @@ async def get_tenant_email_config(
     db: Session = Depends(get_db)
 ):
     """Get tenant email configuration"""
-    
     tenant = get_tenant_from_api_key(api_key, db)
     if tenant.id != tenant_id:
         raise HTTPException(status_code=403, detail="API key doesn't match tenant")
@@ -1034,8 +977,7 @@ async def get_tenant_email_config(
         "email_system_available": bool(os.getenv('EMAIL_PROVIDER'))
     }
 
-
-router.post("/{tenant_id}/test-email")
+@router.post("/{tenant_id}/test-email")
 async def test_tenant_email(
     tenant_id: int,
     test_email: str,
@@ -1043,7 +985,6 @@ async def test_tenant_email(
     db: Session = Depends(get_db)
 ):
     """Send a test email to verify email configuration"""
-    
     tenant = get_tenant_from_api_key(api_key, db)
     if tenant.id != tenant_id:
         raise HTTPException(status_code=403, detail="API key doesn't match tenant")
@@ -1054,7 +995,6 @@ async def test_tenant_email(
             detail="Email configuration incomplete. Please set feedback_email and from_email first."
         )
     
-    # Send test email
     from app.utils.email_service import email_service
     
     subject = f"Test Email from {tenant.name} Feedback System"
@@ -1089,3 +1029,115 @@ async def test_tenant_email(
         "sent_to": test_email,
         "from_email": tenant.from_email
     }
+
+# Supabase-specific endpoints
+@router.post("/forgot-password-v2", response_model=MessageResponse)
+async def tenant_forgot_password_supabase(
+    request: TenantForgotPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    """Enhanced password reset using Supabase"""
+    tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
+    
+    if not tenant or not tenant.contact_email:
+        return {"message": "If your account name exists in our system, you will receive a password reset link."}
+    
+    result = await supabase_auth_service.reset_password(tenant.contact_email)
+    
+    if result["success"]:
+        logger.info(f"Supabase password reset sent for tenant: {tenant.name}")
+    else:
+        logger.error(f"Supabase password reset failed for {tenant.name}: {result.get('error')}")
+    
+    return {"message": "If your account name exists in our system, you will receive a password reset link."}
+
+@router.post("/reset-password-v2", response_model=MessageResponse)
+async def tenant_reset_password_supabase(
+    request: TenantResetPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    """Reset password using Supabase token"""
+    result = await supabase_auth_service.verify_reset_token(
+        request.token, 
+        request.new_password
+    )
+    
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Invalid or expired reset token")
+        )
+    
+    return {"message": "Password reset successfully. You can now log in with your new password."}
+
+@router.post("/create-supabase-user", response_model=MessageResponse)
+async def create_supabase_user_endpoint(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """Create Supabase user for existing tenant"""
+    tenant_name = data.get("tenant_name")
+    if not tenant_name:
+        raise HTTPException(status_code=400, detail="tenant_name is required")
+    
+    tenant = db.query(Tenant).filter(Tenant.name == tenant_name).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    if not tenant.contact_email:
+        raise HTTPException(status_code=400, detail="Tenant has no email address")
+    
+    result = await supabase_auth_service.create_user(
+        email=tenant.contact_email,
+        password="temp_password_123",
+        metadata={
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "role": "tenant_admin"
+        }
+    )
+    
+    if result["success"]:
+        return {"message": f"Supabase user created for {tenant.name}. Check Supabase dashboard."}
+    else:
+        logger.error(f"Failed to create Supabase user: {result.get('error')}")
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+@router.post("/create-supabase-user-by-name", response_model=MessageResponse)
+async def create_supabase_user_by_name(
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """Create Supabase user for existing tenant by name"""
+    tenant_name = request.get("tenant_name")
+    if not tenant_name:
+        raise HTTPException(status_code=400, detail="tenant_name is required")
+    
+    tenant = db.query(Tenant).filter(Tenant.name == tenant_name).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Tenant '{tenant_name}' not found")
+    
+    if not tenant.contact_email:
+        raise HTTPException(status_code=400, detail="Tenant has no email address")
+    
+    try:
+        from app.auth.supabase_service import supabase_auth_service
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Supabase service not available")
+    
+    result = await supabase_auth_service.create_user(
+        email=tenant.contact_email,
+        password="temp_password_123",
+        metadata={
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "role": "tenant"
+        }
+    )
+    
+    if result["success"]:
+        return {"message": f"Supabase user created for {tenant.name}. Check your Supabase dashboard!"}
+    else:
+        error_msg = result.get("error", "Unknown error")
+        logger.error(f"Failed to create Supabase user: {error_msg}")
+        raise HTTPException(status_code=400, detail=f"Supabase user creation failed: {error_msg}")

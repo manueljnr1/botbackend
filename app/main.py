@@ -2,6 +2,11 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+project_root = Path(__file__).parent.parent  # Go up from app/ to project root
+env_file = project_root / ".env"
+load_dotenv(env_file)
+
+
 from fastapi import FastAPI, Request, Depends, HTTPException
 from app.database import engine, Base, get_db
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import uvicorn
 import logging
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.chatbot.models import ChatSession, ChatMessage
 from app.tenants.models import Tenant
@@ -28,24 +35,67 @@ from app.live_chat.router import router as live_chat_router
 from app.slack.router import router as slack_router, get_bot_manager as get_slack_bot_manager
 from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 
+
+
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Multi-Tenant Customer Support Chatbot",
+    title="LYRA",
     description="AI-powered customer support chatbot for multiple businesses",
     version="1.0.0",
     debug=True
 )
 
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
+    raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Specify allowed origins in production
+    allow_origins=[
+        "https://agentlyra.com",
+        "https://www.agentlyra.com",
+        "https://frontier-j08o.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8000",  # Add this line
+        "http://127.0.0.1:8001",  # Add this line
+        "file://",  # Add this for local HTML files
+        "null"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
+
+# HTTPS redirect for production
+if os.getenv("ENVIRONMENT") == "production":
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+# Add trusted host middleware
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=[
+        "agentlyra.com",
+        "www.agentlyra.com", 
+        "frontier-j08o.onrender.com",
+        "localhost",
+        "127.0.0.1"
+    ]
+)
+
+# Add security headers
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 # Add pricing middleware
 app.add_middleware(PricingMiddleware)
@@ -133,14 +183,17 @@ async def debug_env():
         "DEFAULT_API_KEY": os.getenv("DEFAULT_API_KEY", "Not set")[:5] + "..." if os.getenv("DEFAULT_API_KEY") else "Not set"
     }
 
-# SINGLE STARTUP EVENT - NO DUPLICATES
+
+
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Start Discord and Slack bots on application startup"""
+    """Combined startup event"""
     try:
-        logger.info("🚀 Starting bot integrations...")
+        logger.info("🚀 Starting application initialization...")
         
-        # Start Discord bots
+        # 1. Start Discord and Slack bots
         try:
             discord_manager = get_discord_bot_manager()
             await discord_manager.start_all_bots()
@@ -148,7 +201,6 @@ async def startup_event():
         except Exception as e:
             logger.error(f"❌ Error starting Discord bots: {e}")
         
-        # Start Slack bots
         try:
             slack_manager = get_slack_bot_manager()
             db = next(get_db())
@@ -157,12 +209,65 @@ async def startup_event():
         except Exception as e:
             logger.error(f"❌ Error starting Slack bots: {e}")
         
-        logger.info("🎉 Bot integration startup completed")
+        # 2. Ensure all tenants have subscriptions
+        try:
+            from app.database import SessionLocal
+            from app.tenants.models import Tenant
+            from app.pricing.models import TenantSubscription
+            from app.pricing.service import PricingService
+            
+            db = SessionLocal()
+            
+            try:
+                logger.info("🔍 Checking for tenants without subscriptions...")
+                
+                tenants_without_subscriptions = db.query(Tenant).outerjoin(
+                    TenantSubscription,
+                    (Tenant.id == TenantSubscription.tenant_id) & (TenantSubscription.is_active == True)
+                ).filter(
+                    TenantSubscription.id.is_(None),
+                    Tenant.is_active == True
+                ).all()
+                
+                if tenants_without_subscriptions:
+                    logger.info(f"📊 Found {len(tenants_without_subscriptions)} tenants without subscriptions")
+                    
+                    pricing_service = PricingService(db)
+                    pricing_service.create_default_plans()
+                    
+                    fixed_count = 0
+                    for tenant in tenants_without_subscriptions:
+                        try:
+                            logger.info(f"🔧 Fixing subscription for tenant: {tenant.name} (ID: {tenant.id})")
+                            subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
+                            
+                            if subscription:
+                                fixed_count += 1
+                                logger.info(f"✅ Fixed subscription for {tenant.name}")
+                            else:
+                                logger.error(f"❌ Failed to create subscription for {tenant.name}")
+                                
+                        except Exception as e:
+                            logger.error(f"💥 Error fixing tenant {tenant.name}: {e}")
+                    
+                    logger.info(f"🎉 Fixed subscriptions for {fixed_count}/{len(tenants_without_subscriptions)} tenants")
+                else:
+                    logger.info("✅ All tenants have subscriptions")
+                    
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"💥 Error in startup subscription check: {e}")
+        
+        logger.info("🎉 Application startup completed")
         
     except Exception as e:
         logger.error(f"💥 Error in startup event: {e}")
 
-# SINGLE SHUTDOWN EVENT - NO DUPLICATES
+
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop Discord and Slack bots on application shutdown"""
@@ -185,66 +290,10 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"💥 Error in shutdown event: {e}")
 
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
     
+if __name__ == "__main__":
+    # Add environment check for security
+    host = "0.0.0.0" if os.getenv("ENVIRONMENT") == "development" else "127.0.0.1"
+    uvicorn.run("app.main:app", host=host, port=8000, reload=True)
 
-
-@app.on_event("startup")
-async def ensure_all_tenants_have_subscriptions():
-    """
-    Startup event to ensure all existing tenants have subscriptions
-    """
-    try:
-        from app.database import SessionLocal
-        from app.tenants.models import Tenant
-        from app.pricing.models import TenantSubscription
-        from app.pricing.service import PricingService
-        
-        db = SessionLocal()
-        
-        try:
-            logger.info("🔍 Checking for tenants without subscriptions...")
-            
-            # Find tenants without active subscriptions
-            tenants_without_subscriptions = db.query(Tenant).outerjoin(
-                TenantSubscription,
-                (Tenant.id == TenantSubscription.tenant_id) & (TenantSubscription.is_active == True)
-            ).filter(
-                TenantSubscription.id.is_(None),
-                Tenant.is_active == True
-            ).all()
-            
-            if tenants_without_subscriptions:
-                logger.info(f"📊 Found {len(tenants_without_subscriptions)} tenants without subscriptions")
-                
-                pricing_service = PricingService(db)
-                
-                # Ensure default plans exist
-                pricing_service.create_default_plans()
-                
-                fixed_count = 0
-                for tenant in tenants_without_subscriptions:
-                    try:
-                        logger.info(f"🔧 Fixing subscription for tenant: {tenant.name} (ID: {tenant.id})")
-                        
-                        subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
-                        
-                        if subscription:
-                            fixed_count += 1
-                            logger.info(f"✅ Fixed subscription for {tenant.name}")
-                        else:
-                            logger.error(f"❌ Failed to create subscription for {tenant.name}")
-                            
-                    except Exception as e:
-                        logger.error(f"💥 Error fixing tenant {tenant.name}: {e}")
-                
-                logger.info(f"🎉 Fixed subscriptions for {fixed_count}/{len(tenants_without_subscriptions)} tenants")
-            else:
-                logger.info("✅ All tenants have subscriptions")
-                
-        finally:
-            db.close()
-            
-    except Exception as e:
-        logger.error(f"💥 Error in startup subscription check: {e}")
