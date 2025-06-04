@@ -55,19 +55,8 @@ if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://agentlyra.com",
-        "https://www.agentlyra.com",
-        "https://frontier-j08o.onrender.com",
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://127.0.0.1:8000",  # Add this line
-        "http://127.0.0.1:8001",  # Add this line
-        "file://",  # Add this for local HTML files
-        "null"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
