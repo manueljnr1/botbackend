@@ -18,7 +18,7 @@ class Tenant(Base):
     api_key = Column(String, unique=True, index=True)
     # hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    contact_email = Column(String, nullable=True)
+     contact_email = Column(String, nullable=False, unique=True, index=True)
     system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()) # Added server_default for creation as well, often useful
