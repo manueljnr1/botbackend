@@ -92,7 +92,7 @@ if settings.requires_security_validation():  # Both staging and production
     # Add trusted host middleware
     trusted_hosts = settings.get_allowed_domains_list()
     if trusted_hosts:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+        # app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
         logger.info(f"🔒 Trusted hosts configured: {trusted_hosts}")
     elif settings.is_production():  # Only warn for production
         logger.warning("⚠️ No trusted hosts configured for production")
