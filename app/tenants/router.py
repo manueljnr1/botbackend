@@ -426,7 +426,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             email=tenant.email,
             password=tenant.password,
             metadata={
-                "display_name": tenant.name,  # Shows as display name in Supabase
+                "display_name": tenant.name,
                 "full_name": tenant.name,
                 "tenant_name": tenant.name,
                 "tenant_description": tenant.description or "",
@@ -445,7 +445,10 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 detail=f"Account creation failed: {supabase_result.get('error')}"
             )
         
-        supabase_user_id = supabase_result["user"].get("id")
+        # === THIS IS THE FIX ===
+        supabase_user_id = supabase_result["user"].id
+        # =======================
+
         logger.info(f"✅ Supabase user created: {supabase_user_id}")
         
         # Step 4: Create local tenant (no manual transaction - FastAPI handles it)
@@ -528,7 +531,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         
         raise HTTPException(
             status_code=500,
-            detail=f"Registration failed: {str(e)}"  # More detailed error
+            detail=f"Registration failed: {str(e)}"
         )
 
 
@@ -695,7 +698,11 @@ async def tenant_reset_password_supabase(
     
     # Optional: Update local tenant credentials if needed
     if result.get("user"):
-        user_email = result["user"].get("email")
+
+        # === THIS IS THE FIX ===
+        user_email = result["user"].email
+        # =======================
+
         if user_email:
             tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
             if tenant:
