@@ -19,6 +19,8 @@ class Tenant(Base):
     # hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     email = Column(String, nullable=False, unique=True, index=True)  # ← Just 'email'
+    supabase_user_id = Column(String, nullable=True, index=True)
+    
     system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()) # Added server_default for creation as well, often useful
@@ -28,6 +30,8 @@ class Tenant(Base):
     company_name = Column(String, nullable=True)
     enable_feedback_system = Column(Boolean, default=True)
     feedback_notification_enabled = Column(Boolean, default=True)
+
+    contact_email = Column(String, nullable=True)  # ← Keep this for now
 
     # Relationships
     users = relationship("User", back_populates="tenant") # Assuming User model has a back_populates="tenant"

@@ -4,6 +4,8 @@ import logging
 from typing import Dict, Optional, Any
 import httpx
 from datetime import datetime
+from supabase import create_client, Client
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,8 @@ class SupabaseAuthService:
         
         if not self.supabase_url:
             raise ValueError("SUPABASE_URL is required")
+        
+        self.supabase_key = supabase_key or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
         
         if not self.supabase_key:
             raise ValueError("SUPABASE_KEY/SUPABASE_ANON_KEY is required")
@@ -124,6 +128,67 @@ class SupabaseAuthService:
                 "session": None,
                 "user": None
             }
+
+
+    async def delete_user(self, user_id: str):
+        """Delete a user from Supabase (for cleanup)"""
+        try:
+            response = self.supabase.auth.admin.delete_user(user_id)
+            logger.info(f"Deleted Supabase user: {user_id}")
+            return {"success": True, "response": response}
+        except Exception as e:
+            logger.error(f"Failed to delete Supabase user {user_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+
+    async def update_user_metadata(self, user_id: str, additional_metadata: dict):
+        """Update user metadata in Supabase"""
+        try:
+            # Get current user metadata
+            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            
+            if not user_response.user:
+                return {"success": False, "error": "User not found"}
+            
+            # Merge existing metadata with new metadata
+            current_metadata = user_response.user.user_metadata or {}
+            updated_metadata = {**current_metadata, **additional_metadata}
+            
+            # Update user metadata
+            update_response = self.supabase.auth.admin.update_user_by_id(
+                user_id,
+                {"user_metadata": updated_metadata}
+            )
+            
+            return {
+                "success": True,
+                "user": update_response.user,
+                "metadata": updated_metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to update user metadata: {e}")
+            return {"success": False, "error": str(e)}
+        
+    
+    async def get_user_metadata(self, user_id: str):
+        """Get user metadata from Supabase"""
+        try:
+            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            
+            if not user_response.user:
+                return {"success": False, "error": "User not found"}
+            
+            return {
+                "success": True,
+                "user": user_response.user,
+                "metadata": user_response.user.user_metadata or {}
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get user metadata: {e}")
+            return {"success": False, "error": str(e)}
+        
 
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """

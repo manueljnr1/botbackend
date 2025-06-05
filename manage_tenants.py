@@ -59,7 +59,7 @@ def create_tenant_with_password():
     # Get tenant information
     name = input("Tenant Name: ").strip()
     description = input("Description (optional): ").strip() or None
-    contact_email = input("Contact Email: ").strip()
+    email = input("Contact Email: ").strip()
     company_name = input("Company Name (optional, defaults to tenant name): ").strip() or name
     password = getpass("Password: ")
     confirm_password = getpass("Confirm Password: ")
@@ -76,7 +76,7 @@ def create_tenant_with_password():
         print("❌ Error: Passwords don't match")
         return
     
-    if not contact_email:
+    if not email:
         print("⚠️ Warning: No contact email provided. It's recommended to add one for password recovery.")
         proceed = input("Do you want to proceed without a contact email? (y/n): ")
         if proceed.lower() != 'y':
@@ -105,12 +105,12 @@ def create_tenant_with_password():
         # Create tenant using raw SQL to ensure compatibility
         tenant_insert = text("""
             INSERT INTO tenants (
-                name, description, api_key, is_active, contact_email, company_name,
+                name, description, api_key, is_active, email, company_name,
                 enable_feedback_system, feedback_notification_enabled,
                 discord_enabled, slack_enabled, created_at, updated_at
             )
             VALUES (
-                :name, :description, :api_key, :is_active, :contact_email, :company_name,
+                :name, :description, :api_key, :is_active, :email, :company_name,
                 :enable_feedback_system, :feedback_notification_enabled,
                 :discord_enabled, :slack_enabled, :created_at, :updated_at
             )
@@ -122,7 +122,7 @@ def create_tenant_with_password():
             "description": description,
             "api_key": api_key,
             "is_active": True,
-            "contact_email": contact_email,
+            "email": email,
             "company_name": company_name,
             "enable_feedback_system": True,
             "feedback_notification_enabled": True,
@@ -156,7 +156,7 @@ def create_tenant_with_password():
         print(f"Tenant ID: {tenant_id}")
         print(f"Tenant Name: {name}")
         print(f"Company Name: {company_name}")
-        print(f"Contact Email: {contact_email if contact_email else 'Not provided'}")
+        print(f"Contact Email: {email if email else 'Not provided'}")
         print(f"API Key: {api_key}")
         print(f"Password: ✅ Set and encrypted")
         print(f"Password Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
@@ -260,7 +260,7 @@ def list_tenants():
     try:
         # Get all tenants with credential info
         tenants_query = text("""
-            SELECT t.id, t.name, t.company_name, t.contact_email, t.api_key, 
+            SELECT t.id, t.name, t.company_name, t.email, t.api_key, 
                    t.is_active, t.description, t.created_at,
                    CASE WHEN tc.hashed_password IS NOT NULL THEN 1 ELSE 0 END as has_password
             FROM tenants t
@@ -303,7 +303,7 @@ def list_tenants():
             print(f"   🆔 ID: {tenant.id}")
             print(f"   🔵 Status: {status}")
             print(f"   🔐 Password: {password_status}")
-            print(f"   📧 Email: {tenant.contact_email or 'Not provided'}")
+            print(f"   📧 Email: {tenant.email or 'Not provided'}")
             print(f"   🔑 API Key: {tenant.api_key[:10]}...")
             print(f"   📅 Created: {created}")
             
@@ -445,7 +445,7 @@ def reset_tenant_password():
     finally:
         db.close()
 
-def update_tenant_contact_email():
+def update_tenant_email():
     """Update a tenant's contact email"""
     try:
         from app.database import SessionLocal
@@ -468,9 +468,9 @@ def update_tenant_contact_email():
     try:
         # Find tenant
         if identifier.isdigit():
-            tenant_query = text("SELECT id, name, contact_email FROM tenants WHERE id = :identifier")
+            tenant_query = text("SELECT id, name, email FROM tenants WHERE id = :identifier")
         else:
-            tenant_query = text("SELECT id, name, contact_email FROM tenants WHERE name = :identifier")
+            tenant_query = text("SELECT id, name, email FROM tenants WHERE name = :identifier")
         
         tenant = db.execute(tenant_query, {"identifier": identifier}).fetchone()
         
@@ -481,8 +481,8 @@ def update_tenant_contact_email():
         print(f"Found tenant: {tenant.name} (ID: {tenant.id})")
         
         # Show current email
-        if tenant.contact_email:
-            print(f"Current contact email: {tenant.contact_email}")
+        if tenant.email:
+            print(f"Current contact email: {tenant.email}")
         else:
             print("No contact email currently set")
         
@@ -490,7 +490,7 @@ def update_tenant_contact_email():
         new_email = input("New Contact Email (or press Enter to clear): ").strip()
         
         # Update email
-        update_query = text("UPDATE tenants SET contact_email = :email WHERE id = :tenant_id")
+        update_query = text("UPDATE tenants SET email = :email WHERE id = :tenant_id")
         db.execute(update_query, {
             "email": new_email if new_email else None,
             "tenant_id": tenant.id
@@ -578,7 +578,7 @@ def show_tenant_details():
         print(f"🆔 ID: {tenant.id}")
         print(f"🏢 Name: {tenant.name}")
         print(f"🏭 Company: {tenant.company_name or 'Not set'}")
-        print(f"📧 Contact Email: {tenant.contact_email or 'Not set'}")
+        print(f"📧 Contact Email: {tenant.email or 'Not set'}")
         print(f"📝 Description: {tenant.description or 'Not set'}")
         print(f"🔑 API Key: {tenant.api_key}")
         print(f"🔵 Status: {'🟢 Active' if tenant.is_active else '🔴 Inactive'}")
@@ -652,7 +652,7 @@ def main():
         elif choice == "4":
             reset_tenant_password()
         elif choice == "5":
-            update_tenant_contact_email()
+            update_tenant_email()
         elif choice == "6":
             show_tenant_details()
         elif choice == "0":

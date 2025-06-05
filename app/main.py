@@ -35,8 +35,26 @@ from app.live_chat.router import router as live_chat_router
 from app.slack.router import router as slack_router, get_bot_manager as get_slack_bot_manager
 from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 
+from app.config import settings
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# ✅ Validate production configuration at startup
+try:
+    settings.validate_production_config()
+    env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
+    logger.info(f"{env_emoji} Configuration validated for environment: {settings.ENVIRONMENT}")
+except ValueError as e:
+    logger.error(f"❌ Configuration error: {e}")
+    if settings.requires_security_validation():  # Both production AND staging
+        raise  # Fail fast in production and staging
+    else:
+        logger.warning("⚠️ Configuration issues detected but continuing in development mode")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -45,7 +63,7 @@ app = FastAPI(
     title="LYRA",
     description="AI-powered customer support chatbot for multiple businesses",
     version="1.0.0",
-    debug=True
+    debug=settings.is_development()
 )
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -53,19 +71,33 @@ if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
     raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
 
 # CORS middleware
+allowed_origins = settings.get_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=settings.is_development(),  # Only in development
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# HTTPS redirect for production
-if os.getenv("ENVIRONMENT") == "production":
-    app.add_middleware(HTTPSRedirectMiddleware)
+logger.info(f"🌐 CORS configured for {settings.ENVIRONMENT}: {len(allowed_origins)} origins")
 
-# Add trusted host middleware
+
+
+# HTTPS redirect for production
+if settings.requires_security_validation():  # Both staging and production
+    app.add_middleware(HTTPSRedirectMiddleware)
+    
+    # Add trusted host middleware
+    trusted_hosts = settings.get_allowed_domains_list()
+    if trusted_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+        logger.info(f"🔒 Trusted hosts configured: {trusted_hosts}")
+    elif settings.is_production():  # Only warn for production
+        logger.warning("⚠️ No trusted hosts configured for production")
+
+
 
 # Add security headers
 @app.middleware("http")
@@ -74,7 +106,16 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    
+    if settings.requires_security_validation():
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
     return response
+
+
+
 
 # Add pricing middleware
 app.add_middleware(PricingMiddleware)
@@ -101,16 +142,22 @@ app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 
+
+
+
 # Initialize WhatsApp router
-try:
-    include_whatsapp_router(app)
-    logger.info("WhatsApp router initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize WhatsApp router: {e}")
+# try:
+#     include_whatsapp_router(app)
+#     logger.info("WhatsApp router initialized successfully")
+# except Exception as e:
+#     logger.error(f"Failed to initialize WhatsApp router: {e}")
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to Multi-Tenant Customer Support Chatbot API"}
+    return {"message": "LYRA is saying Hello!"}
+
+
+
 
 @app.get("/health")
 def health_check():
@@ -119,9 +166,14 @@ def health_check():
         "TWILIO_ACCOUNT_SID": os.getenv("TWILIO_ACCOUNT_SID", "Not set"),
         "TWILIO_AUTH_TOKEN": os.getenv("TWILIO_AUTH_TOKEN", "Not set") != "Not set",
         "Database URL": os.getenv("DATABASE_URL", "Default SQLite"),
-        "OpenAI API Key": os.getenv("OPENAI_API_KEY", "Not set") != "Not set"
+        "OpenAI API Key": os.getenv("OPENAI_API_KEY", "Not set") != "Not set",
+        "Frontend URL": settings.FRONTEND_URL or "Using default localhost:3000",  # ✅ Show config
+        "Environment": settings.ENVIRONMENT
     }
+
     
+
+
     # WhatsApp numbers with API keys
     whatsapp_keys = {}
     for key in os.environ:
@@ -151,16 +203,6 @@ async def whatsapp_test(request: Request):
         logger.error(f"Error in WhatsApp test webhook: {e}")
         return {"error": str(e)}
 
-@app.get("/debug/env")
-async def debug_env():
-    """Debug endpoint to check environment variables"""
-    # Only show part of the key for security
-    whatsapp_key = os.getenv("WHATSAPP_NUMBER_14155238886_API_KEY", "")
-    masked_key = whatsapp_key[:5] + "..." if whatsapp_key else "Not set"
-    return {
-        "WHATSAPP_NUMBER_14155238886_API_KEY": masked_key,
-        "DEFAULT_API_KEY": os.getenv("DEFAULT_API_KEY", "Not set")[:5] + "..." if os.getenv("DEFAULT_API_KEY") else "Not set"
-    }
 
 
 
@@ -170,7 +212,8 @@ async def debug_env():
 async def startup_event():
     """Combined startup event"""
     try:
-        logger.info("🚀 Starting application initialization...")
+        env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
+        logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
         
         # 1. Start Discord and Slack bots
         try:
@@ -272,7 +315,24 @@ async def shutdown_event():
 
     
 if __name__ == "__main__":
-    # Add environment check for security
-    host = "0.0.0.0" if os.getenv("ENVIRONMENT") == "development" else "127.0.0.1"
-    uvicorn.run("app.main:app", host=host, port=8000, reload=True)
-
+    # Enhanced environment check for security
+    if settings.is_production():
+        host = "127.0.0.1"  # More secure for production
+        reload = False
+        logger.info("🔒 Starting in production mode")
+    elif settings.is_staging():
+        host = "0.0.0.0"  # Allow external connections for staging
+        reload = False  # No reload in staging
+        logger.info("🧪 Starting in staging mode")
+    else:
+        host = "0.0.0.0"  # Allow external connections in development
+        reload = True
+        logger.info("🔧 Starting in development mode")
+    
+    uvicorn.run(
+        "app.main:app", 
+        host=host, 
+        port=8000, 
+        reload=reload,
+        log_level="info"
+    )
