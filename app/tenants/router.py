@@ -1011,28 +1011,6 @@ async def get_tenant_email_config(
 
 
 
-    
-    # Optional: Update local tenant credentials if needed
-    if result.get("user"):
-        user_email = result["user"].get("email")
-        if user_email:
-            tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
-            if tenant:
-                # Update local credentials
-                credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
-                if credentials:
-                    credentials.hashed_password = get_password_hash(request.new_password)
-                else:
-                    credentials = TenantCredentials(
-                        tenant_id=tenant.id,
-                        hashed_password=get_password_hash(request.new_password)
-                    )
-                    db.add(credentials)
-                db.commit()
-                logger.info(f"Local password updated for tenant: {tenant.name}")
-    
-    return {"message": "Password reset successfully. You can now log in with your new password."}
-
 
 
 
