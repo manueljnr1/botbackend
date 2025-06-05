@@ -32,18 +32,52 @@ class SupabaseAuthService:
         Initialize Supabase Auth Service with environment variables as fallback
         """
         self.supabase_url = supabase_url or os.getenv("SUPABASE_URL")
-        self.supabase_key = supabase_key or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+        self.supabase_key = supabase_key or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
         
         if not self.supabase_url:
             raise ValueError("SUPABASE_URL is required")
         
-        self.supabase_key = supabase_key or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
-        
         if not self.supabase_key:
-            raise ValueError("SUPABASE_KEY/SUPABASE_ANON_KEY is required")
+            raise ValueError("SUPABASE_KEY/SUPABASE_ANON_KEY/SUPABASE_SERVICE_KEY is required")
         
         self.supabase_url = self.supabase_url.rstrip('/')
+        
+        # 🔥 THIS WAS MISSING! Create the actual Supabase client
+        try:
+            self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+            logger.info("✅ Supabase client initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Supabase client: {e}")
+            raise
+        
         logger.info("Supabase auth service initialized")
+
+    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
+        """Get user information from access token"""
+        try:
+            # Use the Supabase client to get user from token
+            user_response = self.supabase.auth.get_user(token)
+            
+            if user_response.user:
+                return {
+                    "success": True,
+                    "user": user_response.user,
+                    "error": None
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Invalid token or user not found",
+                    "user": None
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get user from token: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "user": None
+            }
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """
@@ -58,90 +92,60 @@ class SupabaseAuthService:
                     "user": None
                 }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.supabase_url}/auth/v1/token?grant_type=password",
-                    headers={
-                        "apikey": self.supabase_key,
-                        "Authorization": f"Bearer {self.supabase_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "email": email,
-                        "password": password
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
+            # Use Supabase client for sign in
+            auth_response = self.supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+            
+            if auth_response.user and auth_response.session:
+                return {
+                    "success": True,
+                    "session": auth_response.session,
+                    "user": auth_response.user,
+                    "error": None
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Invalid credentials",
+                    "session": None,
+                    "user": None
+                }
                     
-                    session_obj = SimpleSession(
-                        access_token=data.get("access_token"),
-                        expires_at=data.get("expires_at")
-                    )
-                    
-                    user_obj = SimpleUser(
-                        id=data.get("user", {}).get("id"),
-                        email=data.get("user", {}).get("email")
-                    )
-                    
-                    return {
-                        "success": True,
-                        "session": session_obj,
-                        "user": user_obj,
-                        "error": None
-                    }
-                else:
-                    try:
-                        error_data = response.json()
-                    except:
-                        error_data = {"error": response.text}
-                    
-                    error_messages = {
-                        400: "Invalid credentials",
-                        401: "Invalid credentials",
-                        422: "Email not confirmed or user doesn't exist",
-                        429: "Too many requests - rate limited"
-                    }
-                    
-                    friendly_error = error_messages.get(response.status_code, "Authentication failed")
-                    
-                    return {
-                        "success": False,
-                        "error": friendly_error,
-                        "session": None,
-                        "user": None
-                    }
-                    
-        except httpx.TimeoutException:
-            return {
-                "success": False,
-                "error": "Authentication request timed out",
-                "session": None,
-                "user": None
-            }
         except Exception as e:
             logger.error(f"Supabase sign-in error: {e}")
+            
+            # Handle common Supabase errors
+            error_message = str(e).lower()
+            if "invalid" in error_message or "credentials" in error_message:
+                friendly_error = "Invalid email or password"
+            elif "rate" in error_message or "too many" in error_message:
+                friendly_error = "Too many login attempts. Please try again later."
+            elif "email not confirmed" in error_message:
+                friendly_error = "Please confirm your email address"
+            else:
+                friendly_error = "Authentication failed"
+            
             return {
                 "success": False,
-                "error": "Authentication service error",
+                "error": friendly_error,
                 "session": None,
                 "user": None
             }
 
-
-    async def delete_user(self, user_id: str):
+    async def delete_user(self, user_id: str) -> Dict[str, Any]:
         """Delete a user from Supabase (for cleanup)"""
         try:
+            # Use admin client to delete user
             response = self.supabase.auth.admin.delete_user(user_id)
-            logger.info(f"Deleted Supabase user: {user_id}")
+            logger.info(f"✅ Deleted Supabase user: {user_id}")
             return {"success": True, "response": response}
         except Exception as e:
-            logger.error(f"Failed to delete Supabase user {user_id}: {e}")
+            logger.error(f"❌ Failed to delete Supabase user {user_id}: {e}")
             return {"success": False, "error": str(e)}
 
-
-    async def update_user_metadata(self, user_id: str, additional_metadata: dict):
+    async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
         """Update user metadata in Supabase"""
         try:
             # Get current user metadata
@@ -167,11 +171,10 @@ class SupabaseAuthService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to update user metadata: {e}")
+            logger.error(f"❌ Failed to update user metadata: {e}")
             return {"success": False, "error": str(e)}
         
-    
-    async def get_user_metadata(self, user_id: str):
+    async def get_user_metadata(self, user_id: str) -> Dict[str, Any]:
         """Get user metadata from Supabase"""
         try:
             user_response = self.supabase.auth.admin.get_user_by_id(user_id)
@@ -186,9 +189,8 @@ class SupabaseAuthService:
             }
             
         except Exception as e:
-            logger.error(f"Failed to get user metadata: {e}")
+            logger.error(f"❌ Failed to get user metadata: {e}")
             return {"success": False, "error": str(e)}
-        
 
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -207,57 +209,43 @@ class SupabaseAuthService:
                     "error": "Password must be at least 6 characters"
                 }
             
-            payload = {
+            # Use Supabase client to create user
+            auth_response = self.supabase.auth.admin.create_user({
                 "email": email,
-                "password": password
-            }
+                "password": password,
+                "user_metadata": metadata or {},
+                "email_confirm": True  # Auto-confirm email for admin-created users
+            })
             
-            if metadata:
-                payload["data"] = metadata
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.supabase_url}/auth/v1/signup",
-                    headers={
-                        "apikey": self.supabase_key,
-                        "Authorization": f"Bearer {self.supabase_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json=payload
-                )
-                
-                if response.status_code in [200, 201]:
-                    data = response.json()
-                    return {
-                        "success": True,
-                        "user": data.get("user"),
-                        "session": data.get("session"),
-                        "error": None
-                    }
-                else:
-                    try:
-                        error_data = response.json()
-                    except:
-                        error_data = {"error": response.text}
-                    
-                    error_messages = {
-                        400: "Invalid email or password format",
-                        422: "Email already registered or invalid format",
-                        429: "Too many registration attempts"
-                    }
-                    
-                    friendly_error = error_messages.get(response.status_code, "User creation failed")
-                    
-                    return {
-                        "success": False,
-                        "error": friendly_error
-                    }
+            if auth_response.user:
+                return {
+                    "success": True,
+                    "user": auth_response.user,
+                    "error": None
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Failed to create user"
+                }
                     
         except Exception as e:
-            logger.error(f"Supabase create_user error: {e}")
+            logger.error(f"❌ Supabase create_user error: {e}")
+            
+            # Handle common Supabase errors
+            error_message = str(e).lower()
+            if "already registered" in error_message or "email" in error_message:
+                friendly_error = "Email already registered"
+            elif "password" in error_message:
+                friendly_error = "Invalid password format"
+            elif "rate" in error_message:
+                friendly_error = "Too many registration attempts"
+            else:
+                friendly_error = "User creation failed"
+            
             return {
                 "success": False,
-                "error": "User creation service error"
+                "error": friendly_error
             }
 
     async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
@@ -271,59 +259,34 @@ class SupabaseAuthService:
                     "error": "Email is required"
                 }
             
-            payload = {"email": email}
+            # Use Supabase client to send password reset
+            options = {}
             if redirect_to:
-                payload["redirect_to"] = redirect_to
+                options["redirect_to"] = redirect_to
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.supabase_url}/auth/v1/recover",
-                    headers={
-                        "apikey": self.supabase_key,
-                        "Authorization": f"Bearer {self.supabase_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json=payload
-                )
-                
-                if response.status_code == 200:
-                    return {
-                        "success": True,
-                        "error": None,
-                        "message": "Password reset email sent successfully"
-                    }
-                else:
-                    try:
-                        error_data = response.json()
-                        logger.error(f"Supabase password reset error response: {error_data}")
-                    except:
-                        error_data = {"error": response.text}
-                        logger.error(f"Supabase password reset error text: {response.text}")
-                    
-                    error_messages = {
-                        400: "Invalid email format",
-                        404: "User not found", 
-                        422: "Email not found or invalid",
-                        429: "Too many password reset requests - rate limited"
-                    }
-                    
-                    friendly_error = error_messages.get(response.status_code, "Failed to send password reset email")
-                    
-                    return {
-                        "success": False,
-                        "error": friendly_error
-                    }
-                    
-        except httpx.TimeoutException:
+            self.supabase.auth.reset_password_email(email, options)
+            
             return {
-                "success": False,
-                "error": "Password reset request timed out"
+                "success": True,
+                "error": None,
+                "message": "Password reset email sent successfully"
             }
+                    
         except Exception as e:
-            logger.error(f"Supabase password reset error: {e}")
+            logger.error(f"❌ Supabase password reset error: {e}")
+            
+            # Handle common errors
+            error_message = str(e).lower()
+            if "not found" in error_message:
+                friendly_error = "Email not found"
+            elif "rate" in error_message:
+                friendly_error = "Too many password reset requests"
+            else:
+                friendly_error = "Failed to send password reset email"
+            
             return {
                 "success": False,
-                "error": "Password reset service error"
+                "error": friendly_error
             }
         
     async def reset_password(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
@@ -351,55 +314,41 @@ class SupabaseAuthService:
                     "error": "Password must be at least 6 characters"
                 }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.supabase_url}/auth/v1/verify",
-                    headers={
-                        "apikey": self.supabase_key,
-                        "Authorization": f"Bearer {self.supabase_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "type": "recovery",
-                        "token": token,
-                        "password": new_password
-                    }
-                )
+            # Use Supabase client to verify and update password
+            auth_response = self.supabase.auth.verify_otp({
+                "token": token,
+                "type": "recovery"
+            })
+            
+            if auth_response.user:
+                # Update the password
+                update_response = self.supabase.auth.update({
+                    "password": new_password
+                })
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        "success": True,
-                        "error": None,
-                        "user": data.get("user"),
-                        "session": data.get("session")
-                    }
-                else:
-                    try:
-                        error_data = response.json()
-                        logger.error(f"Supabase password reset verification error: {error_data}")
-                    except:
-                        error_data = {"error": response.text}
-                        logger.error(f"Supabase password reset verification error text: {response.text}")
-                    
-                    error_messages = {
-                        400: "Invalid or expired token",
-                        401: "Invalid or expired token",
-                        422: "Invalid token or password format"
-                    }
-                    
-                    friendly_error = error_messages.get(response.status_code, "Failed to reset password")
-                    
-                    return {
-                        "success": False,
-                        "error": friendly_error
-                    }
+                return {
+                    "success": True,
+                    "error": None,
+                    "user": update_response.user
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Invalid or expired token"
+                }
                     
         except Exception as e:
-            logger.error(f"Supabase password reset verification error: {e}")
+            logger.error(f"❌ Supabase password reset verification error: {e}")
+            
+            error_message = str(e).lower()
+            if "invalid" in error_message or "expired" in error_message:
+                friendly_error = "Invalid or expired reset token"
+            else:
+                friendly_error = "Failed to reset password"
+            
             return {
                 "success": False,
-                "error": "Password reset verification service error"
+                "error": friendly_error
             }
 
 
@@ -408,7 +357,7 @@ class DummySupabaseService:
     
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """Dummy sign in method"""
-        logger.warning("Using dummy Supabase service - sign_in")
+        logger.warning("⚠️ Using dummy Supabase service - sign_in")
         return {
             "success": False,
             "error": "Supabase not configured",
@@ -418,7 +367,7 @@ class DummySupabaseService:
     
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """Dummy create user method"""
-        logger.warning("Using dummy Supabase service - create_user")
+        logger.warning("⚠️ Using dummy Supabase service - create_user")
         return {
             "success": False,
             "error": "Supabase not configured"
@@ -426,7 +375,7 @@ class DummySupabaseService:
     
     async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
         """Dummy send password reset method"""
-        logger.warning("Using dummy Supabase service - send_password_reset")
+        logger.warning("⚠️ Using dummy Supabase service - send_password_reset")
         return {
             "success": False,
             "error": "Supabase not configured"
@@ -434,7 +383,24 @@ class DummySupabaseService:
     
     async def verify_password_reset(self, token: str, new_password: str) -> Dict[str, Any]:
         """Dummy verify password reset method"""
-        logger.warning("Using dummy Supabase service - verify_password_reset")
+        logger.warning("⚠️ Using dummy Supabase service - verify_password_reset")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
+        """Dummy get user from token method"""
+        logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
+        return {
+            "success": False,
+            "error": "Supabase not configured",
+            "user": None
+        }
+    
+    async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
+        """Dummy update user metadata method"""
+        logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
         return {
             "success": False,
             "error": "Supabase not configured"
@@ -449,7 +415,7 @@ def check_supabase_config() -> bool:
         bool: True if both URL and key are configured, False otherwise
     """
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
     
     return bool(supabase_url and supabase_key)
 
@@ -458,10 +424,10 @@ def check_supabase_config() -> bool:
 try:
     if check_supabase_config():
         supabase_auth_service = SupabaseAuthService()
-        logger.info("Supabase auth service created successfully")
+        logger.info("✅ Supabase auth service created successfully")
     else:
-        logger.warning("Supabase not configured, using dummy service")
+        logger.warning("⚠️ Supabase not configured, using dummy service")
         supabase_auth_service = DummySupabaseService()
 except Exception as e:
-    logger.error(f"Failed to create Supabase service: {e}")
+    logger.error(f"❌ Failed to create Supabase service: {e}")
     supabase_auth_service = DummySupabaseService()
