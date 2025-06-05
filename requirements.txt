@@ -143,3 +143,5 @@ wheel
 yarl
 zstandard
 supabase
+psycopg2-binary
+asyncpg

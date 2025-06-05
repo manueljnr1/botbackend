@@ -740,34 +740,7 @@ async def get_tenant(
     
     return tenant
 
-@router.put("/{tenant_id}", response_model=TenantOut)
-async def update_tenant(
-    tenant_id: int, 
-    tenant_update: TenantUpdate, 
-    db: Session = Depends(get_db), 
-    current_user = Depends(get_current_user_hybrid)
-):
-    """Update a tenant's details"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
 
-    # Authorization logic
-    if hasattr(current_user, 'is_admin') and current_user.is_admin:
-        pass
-    elif hasattr(current_user, 'id') and current_user.id == tenant_id:
-        pass
-    else:
-        raise HTTPException(status_code=403, detail="Not authorized to update this tenant")
-
-    # Apply updates
-    update_data = tenant_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(tenant, key, value)
-    
-    db.commit()
-    db.refresh(tenant)
-    return tenant
 
 @router.delete("/{tenant_id}")
 async def delete_tenant(
@@ -787,26 +760,7 @@ async def delete_tenant(
     db.commit()
     return {"message": "Tenant deactivated successfully"}
 
-@router.get("/{tenant_id}", response_model=TenantOut)
-async def get_tenant(
-    tenant_id: int, 
-    db: Session = Depends(get_db), 
-    current_user = Depends(get_current_user_hybrid)
-):
-    """Get tenant - no mapping needed"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Authorization logic
-    if hasattr(current_user, 'is_admin') and current_user.is_admin:
-        pass
-    elif hasattr(current_user, 'id') and current_user.id == tenant_id:
-        pass
-    else:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
-    return tenant  # Direct return
+
 
 
 
@@ -1054,52 +1008,9 @@ async def get_tenant_email_config(
     }
 
 
-# Supabase-specific endpoints
-@router.post("/forgot-password", response_model=MessageResponse)
-async def tenant_forgot_password_supabase(
-    request: TenantForgotPasswordRequest, 
-    db: Session = Depends(get_db)
-):
-    """Enhanced password reset using Supabase"""
-    tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
-    
-    if not tenant or not tenant.email:
-        return {"message": "If your account name exists in our system, you will receive a password reset link."}
-    
-    # Use the correct method name from your service
-    result = await supabase_auth_service.send_password_reset(
-        email=tenant.email,
-        redirect_to=f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password"
-    )
-    
-    if result["success"]:
-        logger.info(f"Supabase password reset sent for tenant: {tenant.name}")
-    else:
-        logger.error(f"Supabase password reset failed for {tenant.name}: {result.get('error')}")
-    
-    return {"message": "If your account name exists in our system, you will receive a password reset link."}
 
 
 
-
-
-@router.post("/reset-password", response_model=MessageResponse)
-async def tenant_reset_password_supabase(
-    request: TenantResetPasswordRequest, 
-    db: Session = Depends(get_db)
-):
-    """Reset password using Supabase token"""
-    # Use the correct method name from your service
-    result = await supabase_auth_service.verify_password_reset(
-        token=request.token, 
-        new_password=request.new_password
-    )
-    
-    if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result.get("error", "Invalid or expired reset token")
-        )
     
     # Optional: Update local tenant credentials if needed
     if result.get("user"):
