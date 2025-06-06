@@ -97,6 +97,7 @@ class TenantForgotPasswordRequest(BaseModel):
 class TenantResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+    confirm_password: str
 
 class MessageResponse(BaseModel):
     message: str
@@ -683,8 +684,16 @@ async def tenant_reset_password_supabase(
     request: TenantResetPasswordRequest, 
     db: Session = Depends(get_db)
 ):
-    """Reset password using Supabase token"""
-    # Use the correct method name from your service
+    """Reset password using Supabase token with confirmation"""
+
+    # Step 1: Add validation to check if passwords match
+    if request.new_password != request.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match."
+        )
+
+    # Step 2: Call the Supabase service (the rest of the logic is the same)
     result = await supabase_auth_service.verify_password_reset(
         token=request.token, 
         new_password=request.new_password
@@ -698,11 +707,7 @@ async def tenant_reset_password_supabase(
     
     # Optional: Update local tenant credentials if needed
     if result.get("user"):
-
-        # === THIS IS THE FIX ===
         user_email = result["user"].email
-        # =======================
-
         if user_email:
             tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
             if tenant:
