@@ -755,17 +755,30 @@ async def delete_tenant(
     db: Session = Depends(get_db), 
     current_user = Depends(get_current_user_hybrid)
 ):
-    """Deactivate a tenant (admin only)"""
+    """Deletes a tenant from PostgreSQL and Supabase (Admin only)"""
     if not (hasattr(current_user, 'is_admin') and current_user.is_admin):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Step 1: Delete the user from Supabase first
+    if tenant.supabase_user_id:
+        logger.info(f"Attempting to delete user {tenant.supabase_user_id} from Supabase.")
+        delete_result = await supabase_auth_service.delete_user(tenant.supabase_user_id) #
+        if not delete_result["success"]:
+            # Decide if you want to stop or continue if Supabase deletion fails
+            logger.error(f"Could not delete user from Supabase: {delete_result.get('error')}")
+            # Optionally, you could raise an exception here
+            # raise HTTPException(status_code=500, detail="Failed to delete user from authentication service.")
     
-    tenant.is_active = False
+    # Step 2: Delete the user from your PostgreSQL database
+    logger.info(f"Deleting tenant {tenant.id} from PostgreSQL.")
+    db.delete(tenant)
     db.commit()
-    return {"message": "Tenant deactivated successfully"}
+
+    return {"message": "Tenant permanently deleted from all systems successfully"}
 
 
 
