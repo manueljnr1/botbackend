@@ -230,7 +230,8 @@ class SupabaseAuthService:
                 }
                     
         except Exception as e:
-            logger.error(f"❌ Supabase create_user error: {e}")
+    # Log the raw, detailed error message from Supabase
+            logger.error(f"❌ Supabase create_user raw error: {e}")
             
             # Handle common Supabase errors
             error_message = str(e).lower()
@@ -241,7 +242,8 @@ class SupabaseAuthService:
             elif "rate" in error_message:
                 friendly_error = "Too many registration attempts"
             else:
-                friendly_error = "User creation failed"
+                # Pass the raw error through for better debugging
+                friendly_error = str(e)
             
             return {
                 "success": False,
