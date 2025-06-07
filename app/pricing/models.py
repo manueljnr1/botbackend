@@ -10,9 +10,9 @@ from enum import Enum
 class PlanType(str, Enum):
     FREE = "free"
     BASIC = "basic"
-    GROWTH = "growth"        # New plan type
-    AGENCY = "agency"        # New plan type  
-    LIVECHAT_ADDON = "livechat_addon"  # New add-on type
+    GROWTH = "growth"
+    PRO = "pro"  # NEW PLAN TYPE
+    AGENCY = "agency"
 
 
 class PricingPlan(Base):

@@ -127,6 +127,18 @@ def check_feature_access_dependency(tenant_id: int, feature: str, db: Session = 
     """Dependency function to check feature access"""
     logger.info(f"🔍 Checking feature access for tenant {tenant_id}, feature: {feature}")
     
+    # Temporarily block WhatsApp and Live Chat features
+    if feature in ["whatsapp", "live_chat"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Feature temporarily unavailable",
+                "message": f"The {feature} feature is temporarily disabled while we prepare exciting updates. Please check back soon!",
+                "feature": feature,
+                "status": "coming_soon"
+            }
+        )
+    
     try:
         pricing_service = PricingService(db)
         
@@ -140,13 +152,11 @@ def check_feature_access_dependency(tenant_id: int, feature: str, db: Session = 
                 
                 # Suggest appropriate upgrade based on feature
                 upgrade_suggestions = {
-                    "live_chat": "Agency plan",
                     "advanced_analytics": "Basic plan or higher",
                     "priority_support": "Growth plan or higher",
-                    "whatsapp": "Agency plan",
-                    "custom_prompt": "Free plan or higher",
-                    "slack": "Free plan or higher",
-                    "discord": "Free plan or higher"
+                    "api_access": "Pro plan or higher",
+                    "white_label": "Agency plan",
+                    "custom_integrations": "Agency plan"
                 }
                 
                 suggested_plan = upgrade_suggestions.get(feature, "a higher plan")

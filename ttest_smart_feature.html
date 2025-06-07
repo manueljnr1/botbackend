@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lyra Webchat Endpoint Tester</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 900px;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #6633cc 0%, #4c1d95 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: #6633cc;
+            box-shadow: 0 0 0 3px rgba(102, 51, 204, 0.1);
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #6633cc 0%, #4c1d95 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 51, 204, 0.3);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .response-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .response-title {
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .response-content {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+            min-height: 100px;
+            white-space: pre-wrap;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .streaming-output {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            min-height: 200px;
+            overflow-y: auto;
+            max-height: 400px;
+        }
+        
+        .streaming-chunk {
+            margin-bottom: 10px;
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+        }
+        
+        .chunk-meta {
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .chunk-content {
+            color: #00ff00;
+            margin-top: 5px;
+        }
+        
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-idle { background: #6c757d; }
+        .status-connecting { background: #ffc107; animation: pulse 1s infinite; }
+        .status-streaming { background: #28a745; animation: pulse 1s infinite; }
+        .status-complete { background: #17a2b8; }
+        .status-error { background: #dc3545; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .endpoint-info {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .endpoint-info h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        
+        .endpoint-info code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                margin: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Lyra Webchat Tester</h1>
+            <p>Test your webchat endpoint with streaming and smart feedback</p>
+        </div>
+        
+        <div class="content">
+            <div class="endpoint-info">
+                <h3>Testing Endpoint: <code>/chat/webchatbot</code></h3>
+                <p>This endpoint supports streaming responses, smart feedback system, email collection, and conversation memory.</p>
+            </div>
+            
+            <form id="testForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="baseUrl">Base URL:</label>
+                        <input type="url" id="baseUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="apiKey">API Key:</label>
+                        <input type="text" id="apiKey" placeholder="your-api-key-here" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="userIdentifier">User Identifier:</label>
+                        <input type="text" id="userIdentifier" value="test-user-123" placeholder="unique-user-id">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxContext">Max Context:</label>
+                        <input type="number" id="maxContext" value="20" min="1" max="200">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableStreaming" checked>
+                        <label for="enableStreaming">Enable Streaming</label>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="message">Message:</label>
+                    <textarea id="message" rows="3" placeholder="Enter your test message here..." required>Hello! Can you help me with something I don't think you'll know about?</textarea>
+                </div>
+                
+                <button type="submit" class="btn" id="sendBtn">
+                    <span class="status-indicator status-idle"></span>
+                    Send Message
+                </button>
+            </form>
+            
+            <div class="response-section">
+                <div class="response-title">
+                    Response (<span id="responseType">Ready</span>)
+                </div>
+                <div id="responseContent" class="response-content">
+                    Click "Send Message" to test your endpoint...
+                </div>
+            </div>
+            
+            <div class="response-section" id="streamingSection" style="display: none;">
+                <div class="response-title">Streaming Output</div>
+                <div id="streamingOutput" class="streaming-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('testForm');
+        const sendBtn = document.getElementById('sendBtn');
+        const responseContent = document.getElementById('responseContent');
+        const responseType = document.getElementById('responseType');
+        const streamingSection = document.getElementById('streamingSection');
+        const streamingOutput = document.getElementById('streamingOutput');
+        const statusIndicator = document.querySelector('.status-indicator');
+        
+        function updateStatus(status, text) {
+            statusIndicator.className = `status-indicator status-${status}`;
+            responseType.textContent = text;
+        }
+        
+        function addStreamingChunk(data) {
+            const chunkDiv = document.createElement('div');
+            chunkDiv.className = 'streaming-chunk';
+            
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'chunk-meta';
+            metaDiv.textContent = `[${data.type}] ${new Date().toLocaleTimeString()}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'chunk-content';
+            contentDiv.textContent = JSON.stringify(data, null, 2);
+            
+            chunkDiv.appendChild(metaDiv);
+            chunkDiv.appendChild(contentDiv);
+            streamingOutput.appendChild(chunkDiv);
+            streamingOutput.scrollTop = streamingOutput.scrollHeight;
+        }
+        
+        function clearStreamingOutput() {
+            streamingOutput.innerHTML = '';
+        }
+        
+        async function testWebchatEndpoint(data) {
+            const baseUrl = document.getElementById('baseUrl').value.replace(/\/$/, '');
+            const apiKey = document.getElementById('apiKey').value;
+            const enableStreaming = document.getElementById('enableStreaming').checked;
+            
+            if (!apiKey) {
+                throw new Error('API Key is required');
+            }
+            
+            const url = `${baseUrl}/chatbot/chat/webchatbot`;
+            
+            const requestBody = {
+                message: data.message,
+                user_identifier: data.userIdentifier,
+                max_context: parseInt(data.maxContext),
+                enable_streaming: enableStreaming
+            };
+            
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-API-Key': apiKey
+            };
+            
+            console.log('🚀 Sending request to:', url);
+            console.log('📝 Request body:', requestBody);
+            console.log('🔑 Headers:', headers);
+            
+            if (enableStreaming) {
+                return await handleStreamingResponse(url, requestBody, headers);
+            } else {
+                return await handleRegularResponse(url, requestBody, headers);
+            }
+        }
+        
+        async function handleStreamingResponse(url, requestBody, headers) {
+            updateStatus('connecting', 'Connecting...');
+            streamingSection.style.display = 'block';
+            clearStreamingOutput();
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestBody)
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            updateStatus('streaming', 'Streaming...');
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let result = '';
+            let fullResponse = '';
+            
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n').filter(line => line.trim());
+                    
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            addStreamingChunk(data);
+                            
+                            if (data.type === 'chunk' && data.content) {
+                                fullResponse += data.content + ' ';
+                            } else if (data.type === 'complete' && data.content) {
+                                fullResponse = data.content;
+                            }
+                            
+                            if (data.type === 'error') {
+                                throw new Error(data.error);
+                            }
+                            
+                            if (data.type === 'complete') {
+                                updateStatus('complete', 'Complete');
+                                result = fullResponse || 'Streaming completed successfully';
+                                break;
+                            }
+                        } catch (parseError) {
+                            console.warn('Failed to parse streaming chunk:', line);
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+            
+            return {
+                success: true,
+                response: result,
+                type: 'streaming'
+            };
+        }
+        
+        async function handleRegularResponse(url, requestBody, headers) {
+            updateStatus('connecting', 'Sending...');
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestBody)
+            });
+            
+            const responseData = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(responseData.detail || `HTTP ${response.status}`);
+            }
+            
+            updateStatus('complete', 'Complete');
+            return responseData;
+        }
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                message: document.getElementById('message').value,
+                userIdentifier: document.getElementById('userIdentifier').value,
+                maxContext: document.getElementById('maxContext').value
+            };
+            
+            sendBtn.disabled = true;
+            responseContent.textContent = 'Processing...';
+            
+            try {
+                const result = await testWebchatEndpoint(formData);
+                
+                if (result.success) {
+                    responseContent.textContent = JSON.stringify(result, null, 2);
+                    responseContent.parentElement.querySelector('.response-title').innerHTML = 
+                        `✅ Response (${result.type || 'success'})`;
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+                
+            } catch (error) {
+                console.error('❌ Test failed:', error);
+                responseContent.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+                responseContent.parentElement.querySelector('.response-title').textContent = '❌ Error';
+                updateStatus('error', 'Error');
+            } finally {
+                sendBtn.disabled = false;
+            }
+        });
+        
+        // Enable/disable streaming section based on checkbox
+        document.getElementById('enableStreaming').addEventListener('change', (e) => {
+            if (!e.target.checked) {
+                streamingSection.style.display = 'none';
+            }
+        });
+        
+        // Pre-fill some test messages
+        const testMessages = [
+            "Hello! Can you help me with something I don't think you'll know about?",
+            "What's your email address?", // Should trigger email request
+            "my.email@example.com", // Should capture email
+            "I need help with a very specific technical question about quantum computing",
+            "Sorry, I don't understand. Can someone help me?",
+            "Thank you for your help!"
+        ];
+        
+        let currentMessageIndex = 0;
+        document.getElementById('message').addEventListener('click', (e) => {
+            if (e.target.value === '' || confirm('Load next test message?')) {
+                e.target.value = testMessages[currentMessageIndex % testMessages.length];
+                currentMessageIndex++;
+            }
+        });
+    </script>
+</body>
+</html>

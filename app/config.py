@@ -111,10 +111,18 @@ class Settings(BaseSettings):
         """Get CORS origins based on environment"""
         if self.is_development():
             return ["*"]  # Allow all in development
+
         
         origins = []
         if self.FRONTEND_URL:
             origins.append(self.FRONTEND_URL)
+
+        origins.extend([
+            "https://frontier-j08o.onrender.com",  # Your Render frontend
+            "https://agentlyra.com",               # Your custom domain
+            "http://localhost:3000",               # Local development
+            "http://localhost:3001"                # Alternative local port
+        ])
         
         # Add allowed domains
         for domain in self.get_allowed_domains_list():

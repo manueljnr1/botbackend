@@ -64,13 +64,14 @@ async def list_pricing_plans(
 @router.get("/plans/detailed", response_model=List[PlanFeaturesDetail])
 async def get_detailed_plans(
     db: Session = Depends(get_db),
-    include_addons: bool = True
+    include_inactive: bool = False
 ):
     """Get detailed plan information with features breakdown"""
-    plans = db.query(PricingPlan).filter(PricingPlan.is_active == True).all()
+    query = db.query(PricingPlan).filter(PricingPlan.is_active == True)
+    if include_inactive:
+        query = db.query(PricingPlan)
     
-    if not include_addons:
-        plans = [p for p in plans if p.plan_type != "livechat_addon"]
+    plans = query.order_by(PricingPlan.display_order).all()
     
     detailed_plans = []
     
@@ -82,7 +83,7 @@ async def get_detailed_plans(
         except:
             features_list = []
         
-        # Build integrations list
+        # Build integrations list (excluding temporarily disabled ones)
         integrations = []
         if plan.website_api_allowed:
             integrations.append("Web Integration")
@@ -90,12 +91,10 @@ async def get_detailed_plans(
             integrations.append("Slack Integration")
         if plan.discord_allowed:
             integrations.append("Discord Integration")
-        if plan.whatsapp_allowed:
-            integrations.append("WhatsApp Integration")
+        # WhatsApp and Live Chat temporarily removed
         
-        # Determine if plan is popular (Growth plan)
-        is_popular = plan.plan_type == "growth"
-        is_addon = plan.plan_type == "livechat_addon"
+        # Determine if plan is popular
+        is_popular = plan.is_popular or plan.plan_type == "growth"
         
         detailed_plan = PlanFeaturesDetail(
             plan_name=plan.name,
@@ -106,18 +105,12 @@ async def get_detailed_plans(
             features=features_list,
             integrations=integrations,
             is_popular=is_popular,
-            is_addon=is_addon
+            is_addon=False  # All plans are standalone
         )
         
         detailed_plans.append(detailed_plan)
     
-    # Sort plans by price (excluding add-ons)
-    main_plans = [p for p in detailed_plans if not p.is_addon]
-    addon_plans = [p for p in detailed_plans if p.is_addon]
-    
-    main_plans.sort(key=lambda x: x.price_monthly)
-    
-    return main_plans + addon_plans
+    return detailed_plans
 
 
 @router.get("/plans/{plan_id}", response_model=PricingPlanOut)
