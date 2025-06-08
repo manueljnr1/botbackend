@@ -5,17 +5,21 @@ import jwt
 from jwt.exceptions import PyJWTError as JWTError
 from datetime import datetime, timedelta
 from typing import Optional
+from collections import defaultdict
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from fastapi import Request
 from typing import List, Optional
 from pydantic import BaseModel
+from pydantic import field_validator
 from app.core.security import get_password_hash
 from fastapi_limiter.depends import RateLimiter
 import uuid
 import time
 from collections import defaultdict
-
+import asyncio
 from app.database import get_db
 from app.tenants.models import Tenant
 from app.admin.models import Admin
@@ -31,6 +35,7 @@ from app.auth.supabase_service import supabase_auth_service
 import logging
 logger = logging.getLogger(__name__)
 rate_limit_storage = defaultdict(list)
+admin_rate_limit_storage = defaultdict(list)
 
 try:
     from app.pricing.service import PricingService
@@ -56,6 +61,13 @@ class TenantCreate(BaseModel):
     description: Optional[str] = None
     password: str
     email: str
+    
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.lower().strip()
+        return v
 
 class TenantLogin(BaseModel):
     username: str
@@ -93,6 +105,13 @@ class TenantOut(BaseModel):
 
 class TenantForgotPasswordRequest(BaseModel):
     email: str
+    
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.lower().strip()
+        return v
 
 class TenantResetPasswordRequest(BaseModel):
     token: str
@@ -110,6 +129,13 @@ class TenantEmailConfig(BaseModel):
 class SupabaseLoginRequest(BaseModel):
     email: str
     password: str
+    
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.lower().strip()
+        return v
 
 class SupabaseTokenResponse(BaseModel):
     access_token: str
@@ -122,6 +148,7 @@ class SupabaseTokenResponse(BaseModel):
     api_key: Optional[str]
 
 # Rate limiting
+
 def check_rate_limit(identifier: str, max_attempts: int = 5, window_minutes: int = 15) -> bool:
     """Simple rate limiting check"""
     now = time.time()
@@ -137,6 +164,23 @@ def check_rate_limit(identifier: str, max_attempts: int = 5, window_minutes: int
     
     rate_limit_storage[identifier].append(now)
     return True
+
+def check_admin_rate_limit(email: str, max_attempts: int = 3, window_minutes: int = 10) -> bool:
+    """Enhanced rate limiting specifically for admin logins"""
+    now = time.time()
+    window_seconds = window_minutes * 60
+    
+    admin_rate_limit_storage[email] = [
+        timestamp for timestamp in admin_rate_limit_storage[email] 
+        if now - timestamp < window_seconds
+    ]
+    
+    if len(admin_rate_limit_storage[email]) >= max_attempts:
+        return False
+    
+    admin_rate_limit_storage[email].append(now)
+    return True
+
 
 def verify_password(plain_password, hashed_password):
     """Verify password against the hashed version"""
@@ -224,7 +268,7 @@ async def get_current_tenant_supabase(
         
         # Direct field access
         tenant = db.query(Tenant).filter(
-            Tenant.email == user.email,  # Clean and simple
+            func.lower(Tenant.email) == user.email.lower(),
             Tenant.is_active == True
         ).first()
         
@@ -405,7 +449,10 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         logger.info(f"🚀 Starting registration for: {tenant.name} ({tenant.email})")
         
         # Step 1: Validate inputs
-        existing_email = db.query(Tenant).filter(Tenant.email == tenant.email).first()
+        normalized_email = tenant.email.lower().strip()
+        existing_email = db.query(Tenant).filter(
+            func.lower(Tenant.email) == normalized_email
+        ).first()
         if existing_email:
             logger.warning(f"❌ Email already registered: {tenant.email}")
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -424,7 +471,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         # Step 3: Create Supabase user
         logger.info("🔄 Creating Supabase user...")
         supabase_result = await supabase_auth_service.create_user(
-            email=tenant.email,
+            email=normalized_email,
             password=tenant.password,
             metadata={
                 "display_name": tenant.name,
@@ -456,7 +503,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         logger.info("🔄 Creating local tenant record...")
         new_tenant = Tenant(
             name=tenant.name,
-            email=tenant.email,
+            email=normalized_email,
             description=tenant.description,
             api_key=api_key,
             is_active=True,
@@ -542,23 +589,40 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
 @router.post("/login", response_model=SupabaseTokenResponse)
 async def login_with_supabase(
     login_data: SupabaseLoginRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    """Clean login with email field"""
+    """Clean login with enhanced security layers"""
     try:
-        if not login_data.email or not login_data.password:
-            raise HTTPException(status_code=400, detail="Email and password required")
+        normalized_email = login_data.email.lower().strip()
+        client_ip = request.client.host
         
-        # Try admin authentication first
+        if not check_admin_rate_limit(f"admin_{normalized_email}", max_attempts=3, window_minutes=10):
+            logger.warning(f"🚨 Admin rate limit exceeded: {normalized_email} from {client_ip}")
+            await asyncio.sleep(2)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Please try again later."
+            )
+        
         admin = db.query(Admin).filter(
-            (Admin.username == login_data.email) | (Admin.email == login_data.email),
+            (func.lower(Admin.username) == normalized_email) |
+            (func.lower(Admin.email) == normalized_email),
             Admin.is_active == True
         ).first()
         
         if admin and verify_password(login_data.password, admin.hashed_password):
+            logger.info(f"🔐 Admin login successful: {admin.username} ({admin.email}) from {client_ip}")
+            admin_rate_limit_storage[f"admin_{normalized_email}"].clear()
+            
             access_token, expires_at = create_access_token(
-                data={"sub": str(admin.id), "is_admin": True},
-                expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+                data={
+                    "sub": str(admin.id), 
+                    "is_admin": True,
+                    "login_ip": client_ip,
+                    "login_time": datetime.utcnow().isoformat()
+                },
+                expires_delta=timedelta(minutes=30)
             )
             
             return {
@@ -572,29 +636,42 @@ async def login_with_supabase(
                 "api_key": None
             }
         
-        # Try Supabase tenant authentication
+        if admin:
+            logger.warning(f"🚨 Failed admin login (wrong password): {normalized_email} from {client_ip}")
+        
+        if not check_rate_limit(f"tenant_{normalized_email}", max_attempts=5, window_minutes=15):
+            logger.warning(f"⚠️ Tenant rate limit exceeded: {normalized_email} from {client_ip}")
+            await asyncio.sleep(1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Please try again later."
+            )
+        
         supabase_result = await supabase_auth_service.sign_in(
-            email=login_data.email,
+            email=normalized_email,
             password=login_data.password
         )
         
         if not supabase_result["success"]:
+            logger.warning(f"⚠️ Failed tenant login: {normalized_email} from {client_ip}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
         
-        # Find corresponding tenant
         tenant = db.query(Tenant).filter(
-            Tenant.email == login_data.email,  # Direct field access
+            func.lower(Tenant.email) == normalized_email,
             Tenant.is_active == True
         ).first()
         
         if not tenant:
+            logger.error(f"❌ Tenant not found after successful Supabase auth: {normalized_email}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No tenant found with this email address"
             )
+        
+        logger.info(f"✅ Tenant login successful: {tenant.name} ({tenant.email}) from {client_ip}")
         
         session = supabase_result["session"]
         user = supabase_result["user"]
@@ -613,7 +690,8 @@ async def login_with_supabase(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Login error: {e}")
+        logger.error(f"❌ Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
+        await asyncio.sleep(1)
         raise HTTPException(status_code=500, detail="Login failed")
 
 
@@ -633,12 +711,12 @@ async def tenant_forgot_password_supabase(
     """Enhanced password reset using email with centralized configuration"""
     
     # Input validation (Pydantic handles basic validation)
-    email = str(request.email).strip().lower()
+    normalized_email = str(request.email).strip().lower()
     
     # Find tenant by email
     try:
         tenant = db.query(Tenant).filter(
-            Tenant.email.ilike(email),  # Case-insensitive search
+            func.lower(Tenant.email) == normalized_email,
             Tenant.is_active == True
         ).first()
     except Exception as e:
@@ -650,7 +728,7 @@ async def tenant_forgot_password_supabase(
     
     if not tenant:
         # Log attempt for monitoring (partial email for privacy)
-        logger.info(f"Password reset attempted for non-existent email: {email[:3]}***@{email.split('@')[1] if '@' in email else 'unknown'}")
+        logger.info(f"Password reset attempted for non-existent email: {normalized_email[:3]}***@{normalized_email.split('@')[1] if '@' in normalized_email else 'unknown'}")
         return {"message": standard_message}
     
     try:
@@ -659,7 +737,7 @@ async def tenant_forgot_password_supabase(
         
         # Send password reset via Supabase
         result = await supabase_auth_service.send_password_reset(
-            email=tenant.email,  # Use stored email (preserves original case)
+            email=tenant.email,  # Use stored email (preserves original case for display)
             redirect_to=redirect_to
         )
         
@@ -1221,3 +1299,14 @@ async def get_tenant_email_config(
 #     }
 
 
+def normalize_email(email: str) -> str:
+    """Utility function to normalize email addresses"""
+    if not email:
+        return email
+    return email.lower().strip()
+
+def emails_match(email1: str, email2: str) -> bool:
+    """Utility function to compare emails case-insensitively"""
+    if not email1 or not email2:
+        return False
+    return normalize_email(email1) == normalize_email(email2)

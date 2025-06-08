@@ -1,5 +1,6 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, event
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from app.database import Base
 from datetime import datetime, timedelta
@@ -60,6 +61,21 @@ class Tenant(Base):
     slack_enabled = Column(Boolean, default=False)
     slack_team_id = Column(String, nullable=True)  # Slack workspace ID
     slack_bot_user_id = Column(String, nullable=True)  # Bot user ID in Slack
+
+    @validates('email')
+    def normalize_email(self, key, email):
+        """Automatically normalize email to lowercase"""
+        if email:
+            return email.lower().strip()
+        return email
+
+# ADD this event listener AFTER your Tenant class definition
+@event.listens_for(Tenant.email, 'set')
+def normalize_tenant_email(target, value, oldvalue, initiator):
+    """Event listener to normalize email before setting"""
+    if value:
+        return value.lower().strip()
+    return value
 
 
     
