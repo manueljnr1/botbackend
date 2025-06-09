@@ -145,4 +145,4 @@ zstandard
 supabase
 psycopg2-binary
 asyncpg
-svix
+svix==1.24.0
