@@ -120,14 +120,18 @@ class Settings(BaseSettings):
         origins.extend([
             "https://frontier-j08o.onrender.com",  # Your Render frontend
             "https://agentlyra.com",               # Your custom domain
-            "http://localhost:3000",               # Local development
+            "http://localhost:3000",
+            "https://www.agentlyra.com",                # Local development
             "http://localhost:3001"                # Alternative local port
         ])
         
-        # Add allowed domains
         for domain in self.get_allowed_domains_list():
-            origins.extend([f"https://{domain}", f"http://{domain}"])
-        
+            origins.extend([
+                f"https://{domain}", 
+                f"http://{domain}",
+                f"https://www.{domain}",  # ✅ ADD www versions
+                f"http://www.{domain}"    # ✅ ADD www versions
+        ])
         # Remove duplicates
         return list(set(origins)) if origins else ["*"]
 

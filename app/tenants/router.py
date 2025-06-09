@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import Request
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel,  EmailStr
 from pydantic import field_validator
 from app.core.security import get_password_hash
 from fastapi_limiter.depends import RateLimiter
@@ -126,7 +126,6 @@ class MessageResponse(BaseModel):
 
 class TenantEmailConfig(BaseModel):
     feedback_email: Optional[str] = None
-    from_email: Optional[str] = None
     enable_feedback_system: bool = True
 
 class SupabaseLoginRequest(BaseModel):
@@ -149,6 +148,12 @@ class SupabaseTokenResponse(BaseModel):
     tenant_id: Optional[int]
     tenant_name: Optional[str]
     api_key: Optional[str]
+
+
+class TenantEmailConfigUpdate(BaseModel):
+    feedback_email: Optional[EmailStr] = None
+    enable_feedback_system: Optional[bool] = None
+    feedback_notification_enabled: Optional[bool] = None
 
 # Rate limiting
 
@@ -1015,7 +1020,7 @@ async def get_tenant_email_config(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Get tenant email configuration"""
+    """Get tenant email configuration - UPDATED"""
     tenant = get_tenant_from_api_key(api_key, db)
     if tenant.id != tenant_id:
         raise HTTPException(status_code=403, detail="API key doesn't match tenant")
@@ -1024,11 +1029,49 @@ async def get_tenant_email_config(
         "tenant_id": tenant_id,
         "tenant_name": tenant.name,
         "feedback_email": tenant.feedback_email,
-        "from_email": tenant.from_email,
-        "feedback_enabled": tenant.enable_feedback_system,
-        "email_system_available": bool(os.getenv('EMAIL_PROVIDER'))
+        "from_email": os.getenv("FROM_EMAIL", "feedback@agentlyra.com"),  # ✅ Centralized
+        "feedback_enabled": getattr(tenant, 'enable_feedback_system', True),
+        "email_system_available": bool(os.getenv('RESEND_API_KEY')),
+        "note": "from_email is managed centrally"
     }
 
+# 2. ADD this new PUT endpoint 
+@router.put("/{tenant_id}/email-config")
+async def update_tenant_email_config(
+    tenant_id: int,
+    config_update: TenantEmailConfigUpdate,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update tenant email configuration - NEW"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    try:
+        # Update only the fields tenants can control
+        if config_update.feedback_email is not None:
+            tenant.feedback_email = config_update.feedback_email
+        
+        if config_update.enable_feedback_system is not None:
+            tenant.enable_feedback_system = config_update.enable_feedback_system
+        
+        db.commit()
+        db.refresh(tenant)
+        
+        return {
+            "success": True,
+            "message": "Email configuration updated successfully",
+            "config": {
+                "feedback_email": tenant.feedback_email,
+                "from_email": os.getenv("FROM_EMAIL", "feedback@agentlyra.com"),  # Read-only
+                "enable_feedback_system": tenant.enable_feedback_system
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating email config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update configuration")
 
 
 @router.put("/{tenant_id}/prompt", response_model=TenantOut)
@@ -1068,186 +1111,6 @@ async def update_tenant_prompt(
 
 
 
-# ----------------------------------------------------
-        # Password reset endpoints
-# @router.post("/forgot-password", response_model=MessageResponse)
-# async def tenant_forgot_password(request: TenantForgotPasswordRequest, db: Session = Depends(get_db)):
-#     """Send password reset email to tenant contact"""
-#     from fastapi import Request
-    
-#     tenant = db.query(Tenant).filter(Tenant.name == request.name).first()
-    
-#     if not tenant:
-#         return {"message": "If your account name exists in our system, you will receive a password reset link."}
-    
-#     # Check for existing valid token
-#     existing_token = db.query(TenantPasswordReset).filter(
-#         TenantPasswordReset.tenant_id == tenant.id,
-#         TenantPasswordReset.is_used == False,
-#         TenantPasswordReset.expires_at > datetime.utcnow()
-#     ).first()
-    
-#     if existing_token:
-#         reset_token = existing_token.token
-#     else:
-#         password_reset = TenantPasswordReset.create_token(tenant.id)
-#         db.add(password_reset)
-#         db.commit()
-#         db.refresh(password_reset)
-#         reset_token = password_reset.token
-    
-#     if tenant.email:
-#         reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/tenant-reset-password?token={reset_token}"
-        
-#         email_body = f"""
-#         <html>
-#         <body style="font-family: Arial, sans-serif;">
-#             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-#                 <h2>Password Reset Request</h2>
-#                 <p>Hello <strong>{tenant.name}</strong>,</p>
-#                 <p>We received a request to reset your account password.</p>
-#                 <p><a href="{reset_url}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">Reset Password</a></p>
-#                 <p>This link will expire in 24 hours.</p>
-#             </div>
-#         </body>
-#         </html>
-#         """
-        
-#         try:
-#             email_service.send_email(
-#                 to_email=tenant.email,
-#                 subject="Password Reset Request",
-#                 html_content=email_body
-#             )
-#         except Exception as e:
-#             logger.error(f"Error sending password reset email: {e}")
-    
-#     return {"message": "If your account name exists in our system, you will receive a password reset link."}
-
-# @router.post("/reset-password", response_model=MessageResponse)
-# async def tenant_reset_password(request: TenantResetPasswordRequest, db: Session = Depends(get_db)):
-#     """Reset tenant password using the token from email"""
-#     reset_request = db.query(TenantPasswordReset).filter(
-#         TenantPasswordReset.token == request.token,
-#         TenantPasswordReset.is_used == False
-#     ).first()
-    
-#     if not reset_request:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Invalid or expired reset token"
-#         )
-    
-#     if not reset_request.is_valid():
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Reset token has expired"
-#         )
-    
-#     tenant = db.query(Tenant).filter(Tenant.id == reset_request.tenant_id).first()
-#     if not tenant:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Tenant not found"
-#         )
-    
-#     hashed_password = get_password_hash(request.new_password)
-    
-#     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
-#     if credentials:
-#         credentials.hashed_password = hashed_password
-#     else:
-#         credentials = TenantCredentials(
-#             tenant_id=tenant.id,
-#             hashed_password=hashed_password
-#         )
-#         db.add(credentials)
-    
-#     reset_request.is_used = True
-#     db.commit()
-    
-#     return {"message": "Password reset successfully. You can now log in with your new password."}
-
-
-
-
-
-# Legacy login endpoint
-# @router.post("/login-legacy", response_model=TokenResponse)
-# async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-#     """Universal login endpoint for both admins and tenants"""
-#     # Try admin authentication first
-#     admin = db.query(Admin).filter(
-#         (Admin.username == form_data.username) | (Admin.email == form_data.username),
-#         Admin.is_active == True
-#     ).first()
-    
-#     if admin and verify_password(form_data.password, admin.hashed_password):
-#         access_token, expires_at = create_access_token(
-#             data={
-#                 "sub": str(admin.id),
-#                 "is_admin": True
-#             },
-#             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-#         )
-        
-#         return {
-#             "access_token": access_token,
-#             "token_type": "bearer",
-#             "is_admin": True,
-#             "admin_id": str(admin.id),
-#             "name": admin.name,
-#             "email": admin.email,
-#             "expires_at": expires_at,
-#             "tenant_id": 0,
-#             "tenant_name": "ADMIN",
-#             "api_key": None
-#         }
-    
-#     # Try tenant authentication
-#     tenant = db.query(Tenant).filter(Tenant.name == form_data.username, Tenant.is_active == True).first()
-    
-#     if not tenant:
-#         user = db.query(User).filter(
-#             (User.username == form_data.username) | (User.email == form_data.username),
-#             User.is_active == True
-#         ).first()
-        
-#         if user and user.tenant_id:
-#             tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id, Tenant.is_active == True).first()
-    
-#     if not tenant:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Incorrect username or password",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-    
-#     credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
-    
-#     if not credentials or not credentials.hashed_password or not verify_password(form_data.password, credentials.hashed_password):
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Incorrect username or password",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-    
-#     access_token, expires_at = create_access_token(
-#         data={
-#             "sub": str(tenant.id),
-#             "is_admin": False
-#         },
-#         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-#     )
-    
-#     return {
-#         "access_token": access_token,
-#         "token_type": "bearer",
-#         "tenant_id": int(tenant.id),
-#         "tenant_name": str(tenant.id),
-#         "expires_at": expires_at,
-#         "api_key": tenant.api_key
-#     }
 
 
 def normalize_email(email: str) -> str:

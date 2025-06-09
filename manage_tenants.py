@@ -577,7 +577,7 @@ def show_tenant_details():
         print("=" * 50)
         print(f"🆔 ID: {tenant.id}")
         print(f"🏢 Name: {tenant.name}")
-        print(f"🏭 Company: {tenant.company_name or 'Not set'}")
+        print(f"🏭 Business: {tenant.business_name or 'Not set'}")
         print(f"📧 Contact Email: {tenant.email or 'Not set'}")
         print(f"📝 Description: {tenant.description or 'Not set'}")
         print(f"🔑 API Key: {tenant.api_key}")
