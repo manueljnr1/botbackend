@@ -18,6 +18,12 @@ class ChatSession(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     user_email = Column(String, nullable=True) 
     
+    # === FIX START ===
+    # Add the missing fields for the smart feedback system
+    email_captured_at = Column(DateTime, nullable=True)
+    email_expires_at = Column(DateTime, nullable=True)
+    # === FIX END ===
+
     # Relationships
     tenant = relationship("Tenant", back_populates="chat_sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -44,4 +50,3 @@ class ChatMessage(Base):
     
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
-

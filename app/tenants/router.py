@@ -29,7 +29,7 @@ from app.auth.models import TenantCredentials
 from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
-from app.core.email_service import email_service
+
 from app.auth.supabase_service import supabase_auth_service
 
 import logging
@@ -58,6 +58,7 @@ router = APIRouter()
 # Pydantic models
 class TenantCreate(BaseModel):
     name: str
+    business_name: str
     description: Optional[str] = None
     password: str
     email: str
@@ -87,6 +88,7 @@ class TokenResponse(BaseModel):
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
+    business_name: Optional[str] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
     system_prompt: Optional[str] = None
@@ -94,6 +96,7 @@ class TenantUpdate(BaseModel):
 class TenantOut(BaseModel):
     id: int
     name: str
+    business_name: str
     description: Optional[str] = None
     api_key: str
     is_active: bool
@@ -362,91 +365,18 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
 
 
 
-# @router.post("/register", response_model=TenantOut)
-# async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(get_db)):
-#     """Tenant Registration"""
-    
-#     # Start database transaction
-#     db.begin()
-    
-#     try:
-#         # Step 1: Validate inputs
-#         if db.query(Tenant).filter(Tenant.email == tenant.email).first():
-#             raise HTTPException(status_code=400, detail="Email already registered")
-        
-#         if db.query(Tenant).filter(Tenant.name == tenant.name).first():
-#             raise HTTPException(status_code=400, detail="Username already taken")
-        
-#         # Step 2: Create Supabase user first
-#         supabase_result = await supabase_auth_service.create_user(
-#             email=tenant.email,
-#             password=tenant.password,
-#             metadata={
-#                 "tenant_name": tenant.name,
-#                 "role": "tenant_admin"
-#             }
-#         )
-        
-#         if not supabase_result["success"]:
-#             raise HTTPException(
-#                 status_code=400, 
-#                 detail=f"Account creation failed: {supabase_result.get('error')}"
-#             )
-        
-#         # Step 3: Create local tenant
-#         new_tenant = Tenant(
-#             name=tenant.name,
-#             email=tenant.email,
-#             description=tenant.description,
-#             api_key=f"sk-{str(uuid.uuid4()).replace('-', '')}",
-#             is_active=True,
-#             supabase_user_id=supabase_result["user"].get("id")  # Link to Supabase
-#         )
-        
-#         db.add(new_tenant)
-#         db.flush()  # Get ID without committing
-        
-#         # Step 4: Create subscription
-#         if PRICING_AVAILABLE:
-#             pricing_service = PricingService(db)
-#             pricing_service.create_default_plans()
-#             subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
-            
-#             if not subscription:
-#                 raise Exception("Failed to create subscription")
-        
-#         # Step 5: Commit everything
-#         db.commit()
-#         db.refresh(new_tenant)
-        
-#         logger.info(f"✅ Successfully registered tenant: {new_tenant.name}")
-#         return new_tenant
-        
-#     except HTTPException:
-#         db.rollback()
-#         raise
-#     except Exception as e:
-#         db.rollback()
-#         logger.error(f"Registration failed: {e}")
-        
-#         # TODO: Cleanup orphaned Supabase user
-#         raise HTTPException(
-#             status_code=500,
-#             detail="Registration failed. Please try again or contact support."
-#         )
-
 
 
 
 
 @router.post("/register", response_model=TenantOut)
 async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(get_db)):
-    """Tenant Registration with Fixed Transaction Handling"""
+    """Tenant Registration """
     
-    supabase_user_id = None  # Track for cleanup
+    supabase_user_id = None
     
     try:
-        logger.info(f"🚀 Starting registration for: {tenant.name} ({tenant.email})")
+        logger.info(f"🚀 Starting registration for: {tenant.name} ({tenant.email}) - Business: {tenant.business_name}")
         
         # Step 1: Validate inputs
         normalized_email = tenant.email.lower().strip()
@@ -468,7 +398,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
         logger.info(f"✅ Generated API key: {api_key[:15]}...")
         
-        # Step 3: Create Supabase user
+        # Step 3: Create Supabase user with business info
         logger.info("🔄 Creating Supabase user...")
         supabase_result = await supabase_auth_service.create_user(
             email=normalized_email,
@@ -477,6 +407,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 "display_name": tenant.name,
                 "full_name": tenant.name,
                 "tenant_name": tenant.name,
+                "business_name": tenant.business_name,  # NEW: Include business name
                 "tenant_description": tenant.description or "",
                 "role": "tenant_admin",
                 "account_type": "tenant",
@@ -493,16 +424,14 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 detail=f"Account creation failed: {supabase_result.get('error')}"
             )
         
-        # === THIS IS THE FIX ===
         supabase_user_id = supabase_result["user"].id
-        # =======================
-
         logger.info(f"✅ Supabase user created: {supabase_user_id}")
         
-        # Step 4: Create local tenant (no manual transaction - FastAPI handles it)
+        # Step 4: Create local tenant with business name
         logger.info("🔄 Creating local tenant record...")
         new_tenant = Tenant(
             name=tenant.name,
+            business_name=tenant.business_name,  # NEW: Include business name
             email=normalized_email,
             description=tenant.description,
             api_key=api_key,
@@ -511,7 +440,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         )
         
         db.add(new_tenant)
-        db.flush()  # Get ID without committing
+        db.flush()
         logger.info(f"✅ Local tenant created with ID: {new_tenant.id}")
         
         # Step 5: Update Supabase with tenant ID
@@ -532,7 +461,6 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 logger.warning(f"⚠️ Failed to update Supabase metadata: {update_result.get('error')}")
         except Exception as meta_error:
             logger.warning(f"⚠️ Supabase metadata update failed: {meta_error}")
-            # Don't fail registration for metadata issues
         
         # Step 6: Create subscription if available
         if PRICING_AVAILABLE:
@@ -548,35 +476,26 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                     logger.warning("⚠️ Subscription creation returned None")
             except Exception as e:
                 logger.error(f"❌ Subscription creation failed: {e}")
-                # Don't fail registration for subscription issues
         else:
             logger.info("ℹ️ Pricing system not available, skipping subscription")
         
-        # Step 7: FastAPI will auto-commit the transaction
+        # Step 7: Commit
         db.commit()
         db.refresh(new_tenant)
         
-        logger.info(f"🎉 Registration successful for: {new_tenant.name} (ID: {new_tenant.id})")
+        logger.info(f"🎉 Registration successful for: {new_tenant.name} - Business: {new_tenant.business_name} (ID: {new_tenant.id})")
         return new_tenant
         
     except HTTPException as he:
         logger.error(f"❌ HTTP Exception during registration: {he.detail}")
-        
-        # Cleanup orphaned Supabase user
         if supabase_user_id:
             await cleanup_supabase_user(supabase_user_id)
-        
         raise he
         
     except Exception as e:
         logger.error(f"❌ Unexpected error during registration: {str(e)}")
-        logger.error(f"❌ Error type: {type(e).__name__}")
-        logger.error(f"❌ Full traceback:", exc_info=True)
-        
-        # Cleanup orphaned Supabase user
         if supabase_user_id:
             await cleanup_supabase_user(supabase_user_id)
-        
         raise HTTPException(
             status_code=500,
             detail=f"Registration failed: {str(e)}"

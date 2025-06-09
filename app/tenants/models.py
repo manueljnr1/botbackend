@@ -15,24 +15,25 @@ class Tenant(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
+    business_name = Column(String, nullable=False, index=True) 
     description = Column(Text, nullable=True)
     api_key = Column(String, unique=True, index=True)
-    # hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     email = Column(String, nullable=False, unique=True, index=True)  # ← Just 'email'
     supabase_user_id = Column(String, nullable=True, index=True)
-    
+
     system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()) # Added server_default for creation as well, often useful
-    # feedback_email = Column(String, nullable=True)
+    
+    
+    #Email settings
     feedback_email = Column(String, nullable=True)      # Where tenant receives feedback emails
     from_email = Column(String, nullable=True)          # What users see as sender
-    company_name = Column(String, nullable=True)
     enable_feedback_system = Column(Boolean, default=True)
     feedback_notification_enabled = Column(Boolean, default=True)
 
-    contact_email = Column(String, nullable=True)  # ← Keep this for now
+    
 
     # Relationships
     users = relationship("User", back_populates="tenant") # Assuming User model has a back_populates="tenant"
@@ -46,13 +47,13 @@ class Tenant(Base):
     live_chats = relationship("LiveChat", back_populates="tenant", cascade="all, delete-orphan")
    
 
-    # Discord integration fields
+    # Integration fields
     discord_bot_token = Column(String, nullable=True)
     discord_application_id = Column(String, nullable=True)
     discord_enabled = Column(Boolean, default=False)
     discord_status_message = Column(String, nullable=True, default="Chatting with customers")
 
-    # Slack integration fields (NEW - ADD THESE)
+    
     slack_bot_token = Column(String, nullable=True)
     slack_signing_secret = Column(String, nullable=True)
     slack_app_id = Column(String, nullable=True)

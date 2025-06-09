@@ -895,15 +895,17 @@ Your response:"""
 
     # ========================== SMART FEEDBACK SYSTEM ==========================
     
-    def process_message_with_smart_feedback(self, api_key: str, user_message: str, user_identifier: str, 
-                                        platform: str = "web", max_context: int = 20) -> Dict[str, Any]:
+    def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
+                                                    max_context: int = 20) -> Dict[str, Any]:
         """
-        Process message with smart feedback system that:
-        1. Asks for email on new conversations
-        2. Detects inadequate responses
-        3. Triggers tenant feedback loop
+        Process message with advanced smart feedback system featuring:
+        - Enhanced inadequate response detection
+        - Professional email templates
+        - Real-time tracking via Supabase
+        - Automatic webhook processing
+        - FIXED: Email extraction logic order
         """
-        from app.chatbot.smart_feedback import SmartFeedbackManager
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
         
         # Get tenant from API key
         tenant = self._get_tenant_by_api_key(api_key)
@@ -914,37 +916,25 @@ Your response:"""
         # Initialize managers
         from app.chatbot.simple_memory import SimpleChatbotMemory
         memory = SimpleChatbotMemory(self.db, tenant.id)
-        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
         
         # Get or create session
-        session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+        session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
         
-        # Check if we should ask for email (new conversations)
-        if feedback_manager.should_request_email(session_id, user_identifier):
-            email_request = feedback_manager.generate_email_request_message(tenant.name)
-            
-            # Store the email request as bot message
-            memory.store_message(session_id, email_request, False)
-            
-            return {
-                "session_id": session_id,
-                "response": email_request,
-                "success": True,
-                "is_new_session": is_new_session,
-                "email_requested": True,
-                "platform": platform
-            }
-        
-        # Check if user is providing email
+        # FIRST: Check if user is providing email (BEFORE checking if we should request)
         extracted_email = feedback_manager.extract_email_from_message(user_message)
         if extracted_email:
+            logger.info(f"📧 Extracted email from message: {extracted_email}")
+            
             # Store email and acknowledge
             if feedback_manager.store_user_email(session_id, extracted_email):
-                acknowledgment = f"Thank you! I've noted your email as {extracted_email}. How can I help you today?"
+                acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
                 
                 # Store both user message and bot response
                 memory.store_message(session_id, user_message, True)
                 memory.store_message(session_id, acknowledgment, False)
+                
+                logger.info(f"✅ Email captured and stored: {extracted_email}")
                 
                 return {
                     "session_id": session_id,
@@ -953,15 +943,33 @@ Your response:"""
                     "is_new_session": is_new_session,
                     "email_captured": True,
                     "user_email": extracted_email,
-                    "platform": platform
+                    "platform": "web"
                 }
         
-        # Process message normally with memory
+        # SECOND: Check if we should ask for email (new conversations without email)
+        if feedback_manager.should_request_email(session_id, user_identifier):
+            email_request = feedback_manager.generate_email_request_message(tenant.name)
+            
+            # Store the email request as bot message
+            memory.store_message(session_id, email_request, False)
+            
+            logger.info(f"📧 Requesting email for new conversation: {user_identifier}")
+            
+            return {
+                "session_id": session_id,
+                "response": email_request,
+                "success": True,
+                "is_new_session": is_new_session,
+                "email_requested": True,
+                "platform": "web"
+            }
+        
+        # THIRD: Process message normally with memory
         result = self.process_message_simple_memory(
             api_key=api_key,
             user_message=user_message,
             user_identifier=user_identifier,
-            platform=platform,
+            platform="web",
             max_context=max_context
         )
         
@@ -970,20 +978,20 @@ Your response:"""
         
         bot_response = result["response"]
         
-        # 🔔 FIXED: Add proper feedback detection with logging
-        logger.info(f"🔍 Checking bot response for inadequate patterns: '{bot_response[:100]}...'")
+        # Enhanced inadequate response detection with advanced scoring
+        logger.info(f"🔍 Advanced feedback: Analyzing bot response for inadequate patterns")
         
         try:
             is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
-            logger.info(f"🔍 Inadequate response detection result: {is_inadequate}")
+            logger.info(f"🔍 Advanced inadequate response detection result: {is_inadequate}")
             
             if is_inadequate:
-                logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                logger.info(f"🔔 Detected inadequate response, triggering advanced feedback system")
                 
                 # Get conversation context
                 conversation_history = memory.get_conversation_history(user_identifier, 10)
                 
-                # Create feedback request (this sends email to tenant)
+                # Create advanced feedback request (sends professional email to tenant)
                 feedback_id = feedback_manager.create_feedback_request(
                     session_id=session_id,
                     user_question=user_message,
@@ -992,76 +1000,67 @@ Your response:"""
                 )
                 
                 if feedback_id:
-                    logger.info(f"✅ Created feedback request {feedback_id} for inadequate response")
+                    logger.info(f"✅ Created advanced feedback request {feedback_id} with real-time tracking")
                     result["feedback_triggered"] = True
                     result["feedback_id"] = feedback_id
+                    result["feedback_system"] = "advanced"
                 else:
-                    logger.error(f"❌ Failed to create feedback request")
+                    logger.error(f"❌ Failed to create advanced feedback request")
             else:
                 logger.info(f"✅ Response appears adequate, no feedback needed")
                 
         except Exception as e:
-            logger.error(f"💥 Error in feedback detection: {e}")
+            logger.error(f"💥 Error in advanced feedback detection: {e}")
             import traceback
             logger.error(traceback.format_exc())
         
         return result
-    
-    def process_web_message_with_feedback(self, api_key: str, user_message: str, user_identifier: str, 
-                                        max_context: int = 20) -> Dict[str, Any]:
-        """
-        Web-specific message processing with smart feedback system
-        """
-        if not user_identifier.startswith("web:"):
-            user_identifier = f"web:{user_identifier}"
-        
-        return self.process_message_with_smart_feedback(
-            api_key=api_key,
-            user_message=user_message,
-            user_identifier=user_identifier,
-            platform="web",
-            max_context=max_context
-        )
-    
-    def handle_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
-        """
-        Handle tenant's email response to feedback request
-        """
-        from app.chatbot.smart_feedback import SmartFeedbackManager
-        
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
-        
-        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
-        
-        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
-        
-        return {
-            "success": success,
-            "feedback_id": feedback_id,
-            "message": "Tenant response processed and user notified" if success else "Failed to process response"
-        }
-    
-    def get_feedback_stats(self, api_key: str) -> Dict[str, Any]:
-        """
-        Get feedback system statistics for tenant
-        """
-        from app.chatbot.smart_feedback import SmartFeedbackManager
-        
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
-        
-        feedback_manager = SmartFeedbackManager(self.db, tenant.id)
-        stats = feedback_manager.get_pending_feedback_stats()
-        
-        return {
-            "success": True,
-            "tenant_id": tenant.id,
-            "stats": stats
-        }
+
+        def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
+            """
+            Handle tenant's email response using advanced feedback system
+            """
+            from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+            
+            # Get tenant from API key
+            tenant = self._get_tenant_by_api_key(api_key)
+            if not tenant:
+                return {"error": "Invalid API key", "success": False}
+            
+            feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+            
+            success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+            
+            return {
+                "success": success,
+                "feedback_id": feedback_id,
+                "system": "advanced",
+                "message": "Advanced tenant response processed and customer notified with professional follow-up" if success else "Failed to process response"
+            }
+
+        def get_advanced_feedback_stats(self, api_key: str) -> Dict[str, Any]:
+            """
+            Get advanced feedback system statistics with real-time data
+            """
+            from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+            
+            tenant = self._get_tenant_by_api_key(api_key)
+            if not tenant:
+                return {"error": "Invalid API key", "success": False}
+            
+            feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+            analytics = feedback_manager.get_feedback_analytics()
+            
+            return {
+                "success": True,
+                "tenant_id": tenant.id,
+                "tenant_name": tenant.name,
+                "system": "advanced",
+                "analytics": analytics
+            }
+
+
+
     
 
     def process_slack_message_simple(self, api_key: str, user_message: str, slack_user_id: str, 

@@ -1,18 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Request, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 from pydantic import EmailStr
+from fastapi import Form
+from pydantic import Field
 import logging
 import os
 import asyncio
 from datetime import datetime
+from svix import Webhook, WebhookVerificationError  # Add this import for Webhook and WebhookVerificationError
 import random
 import time
 import re
 
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 import json
 
 
@@ -23,6 +27,9 @@ from app.chatbot.engine import ChatbotEngine
 from app.chatbot.models import ChatSession, ChatMessage
 from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
+
+
+from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -36,6 +43,7 @@ from app.tenants.router import get_tenant_from_api_key
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+templates = Jinja2Templates(directory="templates")
 
 router = APIRouter()
 
@@ -134,6 +142,26 @@ class WebChatbotRequest(BaseModel):
     user_identifier: str
     max_context: int = 20
     enable_streaming: bool = True
+
+
+class ChatRequest(BaseModel):
+    message: str
+    user_identifier: str
+
+class ChatResponse(BaseModel):
+    session_id: str
+    response: str
+    success: bool
+    is_new_session: bool
+
+class ChatHistory(BaseModel):
+    session_id: str
+    messages: List[dict]
+
+class SmartChatRequest(BaseModel):
+    message: str
+    user_identifier: str
+    max_context: int = 200
 
 
 
@@ -419,7 +447,7 @@ async def chat_with_handoff_detection(
     try:
         # Check pricing limits first
         tenant = get_tenant_from_api_key(api_key, db)
-        check_message_limit_dependency(tenant.id, db)
+        check_conversation_limit_dependency(tenant.id, db)
         
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
@@ -611,162 +639,13 @@ async def cleanup_simple_memory(
     }
 
 
-@router.post("/chat/smart", response_model=ChatResponse)
-async def chat_with_smart_feedback(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Web chat endpoint with smart feedback system that:
-- Asks for email on new conversations
-- Detects when bot doesn't have good answers  
-- Automatically sends feedback requests to tenant
-- Delivers tenant responses as follow-ups
-- Remembers conversation context (last 200 messages by default)
-    """
-    try:
-        logger.info(f"🧠📧 Smart feedback chat for: {request.user_identifier}")
+
         
-        # Pricing check (UPDATED)
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)  # UPDATED
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process with smart feedback system
-        result = engine.process_web_message_with_feedback(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=request.user_identifier,
-            max_context=request.max_context
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Smart feedback chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track conversation usage (UPDATED)
-        track_conversation_started(
-            tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
-            platform="web",
-            db=db
-        )
-        
-        # Log special feedback events
-        if result.get("email_requested"):
-            logger.info("📧 Requested user email for feedback system")
-        elif result.get("email_captured"):
-            logger.info(f"📧 Captured user email: {result.get('user_email')}")
-        elif result.get("feedback_triggered"):
-            logger.info(f"🔔 Triggered feedback request: {result.get('feedback_id')}")
-        
-        logger.info(f"✅ Smart feedback chat successful")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
 
 
-@router.post("/feedback/respond")
-async def handle_tenant_feedback(
-    request: TenantFeedbackResponse,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Handle tenant's response to feedback request
-    This processes the tenant's email reply and sends follow-up to user
-    """
-    try:
-        engine = ChatbotEngine(db)
-        
-        result = engine.handle_tenant_feedback_response(
-            api_key=api_key,
-            feedback_id=request.feedback_id,
-            tenant_response=request.response
-        )
-        
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Failed to process feedback"))
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error handling tenant feedback: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/feedback/stats")
-async def get_feedback_statistics(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get feedback system statistics for tenant
-    """
-    try:
-        engine = ChatbotEngine(db)
-        result = engine.get_feedback_stats(api_key)
-        
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Failed to get stats"))
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting feedback stats: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    e
 
-@router.get("/feedback/pending")
-async def get_pending_feedback_requests(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get list of pending feedback requests for tenant
-    """
-    try:
-        from app.chatbot.smart_feedback import PendingFeedback
-        
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        pending_requests = db.query(PendingFeedback).filter(
-            PendingFeedback.tenant_id == tenant.id,
-            PendingFeedback.user_notified == False
-        ).order_by(PendingFeedback.created_at.desc()).all()
-        
-        requests_data = []
-        for request in pending_requests:
-            requests_data.append({
-                "feedback_id": request.feedback_id,
-                "user_question": request.user_question,
-                "bot_response": request.bot_response,
-                "user_email": request.user_email,
-                "created_at": request.created_at.isoformat(),
-                "tenant_email_sent": request.tenant_email_sent
-            })
-        
-        return {
-            "success": True,
-            "pending_requests": requests_data,
-            "total_count": len(requests_data)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting pending feedback: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/analytics/conversations")
@@ -887,155 +766,21 @@ async def slack_chat_simple(
         raise HTTPException(status_code=500, detail="Internal server error")
     
 
-@router.post("/chat/webchatbot")
-async def webchatbot_chat_enhanced(
-    request: WebChatbotRequest,
+@router.post("/chat/smart", response_model=ChatResponse)
+async def chat_with_advanced_smart_feedback(
+    request: SmartChatRequest,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Enhanced webchatbot endpoint that combines:
-    - Smart feedback system (email collection, inadequate response detection)
-    - Delayed streaming (human-like typing with sentence breaks)
-    - Advanced conversation memory
-    """
-    
-    if request.enable_streaming:
-        # Use streaming response with smart feedback
-        return await _webchatbot_with_streaming(request, api_key, db)
-    else:
-        # Use regular response with smart feedback
-        return await _webchatbot_without_streaming(request, api_key, db)
-
-async def _webchatbot_with_streaming(request: WebChatbotRequest, api_key: str, db: Session):
-    """Streaming version with smart feedback"""
-    
-    async def stream_smart_sentences():
-        try:
-            logger.info(f"🎬🧠 Starting enhanced webchatbot (streaming) for: {request.user_identifier}")
-            
-            # 🔒 PRICING CHECK
-            tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency(tenant.id, db)
-            logger.info(f"✅ Streaming limits OK for tenant: {tenant.name}")
-            
-            start_time = time.time()
-            
-            # Initialize chatbot engine
-            engine = ChatbotEngine(db)
-            
-            # Process with smart feedback system (this handles email requests, etc.)
-            result = engine.process_web_message_with_feedback(
-                api_key=api_key,
-                user_message=request.message,
-                user_identifier=request.user_identifier,
-                max_context=request.max_context
-            )
-            
-            if not result.get("success"):
-                logger.error(f"❌ Smart feedback processing failed: {result.get('error')}")
-                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-                return
-            
-            # 📊 PRICING TRACK
-            track_conversation_started(
-                tenant_id=tenant.id,
-                user_identifier=request.user_identifier,
-                platform="web",
-                db=db
-            )
-            
-            # Check if this was an email request/capture (don't stream these)
-            if result.get("email_requested") or result.get("email_captured"):
-                logger.info("📧 Email interaction - sending immediate response")
-                yield f"{json.dumps({'type': 'complete', 'content': result['response'], 'is_complete': True, 'special_action': result.get('email_requested', False) or result.get('email_captured', False)})}\n"
-                return
-            
-            bot_response = result["response"]
-            
-            # Log special feedback events
-            if result.get("feedback_triggered"):
-                logger.info(f"🔔 Feedback triggered during streaming: {result.get('feedback_id')}")
-            
-            # Break response into sentences for streaming
-            sentences = break_into_sentences(bot_response)
-            logger.info(f"📝 Split response into {len(sentences)} sentences for streaming")
-            
-            # Send initial metadata
-            yield f"{json.dumps({'type': 'start', 'total_sentences': len(sentences), 'session_id': result.get('session_id')})}\n"
-            
-            # Stream each sentence with delays
-            for i, sentence in enumerate(sentences):
-                is_last = (i == len(sentences) - 1)
-                
-                # Calculate delay for this sentence
-                delay = calculate_sentence_delay(sentence, is_last)
-                
-                # Wait for the calculated delay
-                logger.info(f"⏱️ Sentence {i+1}/{len(sentences)}: waiting {delay:.2f}s")
-                await asyncio.sleep(delay)
-                
-                # Send the sentence
-                chunk_data = {
-                    'type': 'chunk',
-                    'content': sentence,
-                    'chunk_index': i,
-                    'total_chunks': len(sentences),
-                    'delay_used': delay,
-                    'is_complete': is_last
-                }
-                
-                # Add feedback info to final chunk if applicable
-                if is_last and result.get("feedback_triggered"):
-                    chunk_data['feedback_triggered'] = True
-                    chunk_data['feedback_id'] = result.get('feedback_id')
-                
-                yield f"{json.dumps(chunk_data)}\n"
-            
-            # Send completion signal
-            total_time = time.time() - start_time
-            completion_data = {
-                'type': 'complete',
-                'total_processing_time': total_time,
-                'context_messages': result.get('context_messages', 0),
-                'is_new_session': result.get('is_new_session', False)
-            }
-            
-            yield f"{json.dumps(completion_data)}\n"
-            
-            logger.info(f"✅ Enhanced webchatbot streaming completed in {total_time:.2f}s")
-            
-        except HTTPException as e:
-            logger.error(f"🚫 HTTP error in enhanced streaming: {e.detail}")
-            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-        except Exception as e:
-            logger.error(f"💥 Error in enhanced streaming: {str(e)}")
-            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-    return StreamingResponse(
-        stream_smart_sentences(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
-
-async def _webchatbot_without_streaming(request: WebChatbotRequest, api_key: str, db: Session):
-    """Non-streaming version with smart feedback (fallback)"""
-    
+    """Advanced web chat endpoint with enhanced smart feedback system."""
     try:
-        logger.info(f"🧠 Enhanced webchatbot (non-streaming) for: {request.user_identifier}")
+        logger.info(f"🧠📧 Advanced smart feedback chat for: {request.user_identifier}")
         
-        # Pricing check
         tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency(tenant.id, db)
         
-        # Initialize chatbot engine
         engine = ChatbotEngine(db)
-        
-        # Process with smart feedback system
-        result = engine.process_web_message_with_feedback(
+        result = engine.process_web_message_with_advanced_feedback(
             api_key=api_key,
             user_message=request.message,
             user_identifier=request.user_identifier,
@@ -1043,11 +788,8 @@ async def _webchatbot_without_streaming(request: WebChatbotRequest, api_key: str
         )
         
         if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Enhanced webchatbot error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
+            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
         
-        # Track conversation usage
         track_conversation_started(
             tenant_id=tenant.id,
             user_identifier=request.user_identifier,
@@ -1055,52 +797,233 @@ async def _webchatbot_without_streaming(request: WebChatbotRequest, api_key: str
             db=db
         )
         
-        # Log special feedback events
-        if result.get("email_requested"):
-            logger.info("📧 Requested user email")
-        elif result.get("email_captured"):
-            logger.info(f"📧 Captured user email: {result.get('user_email')}")
-        elif result.get("feedback_triggered"):
-            logger.info(f"🔔 Triggered feedback request: {result.get('feedback_id')}")
-        
-        logger.info(f"✅ Enhanced webchatbot (non-streaming) successful")
-        
+        logger.info("✅ Advanced smart feedback chat successful")
         return result
         
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"HTTP exception in smart chat: {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"💥 Error in enhanced webchatbot: {str(e)}")
+        logger.error(f"💥 Error in advanced smart feedback chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-# Additional endpoint for checking streaming capability
-@router.get("/chat/webchatbot/capabilities")
-async def get_webchatbot_capabilities(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Get webchatbot capabilities and configuration"""
     
+
+# Add webhook endpoint for processing email replies
+@router.post("/webhook/email-reply")
+async def handle_email_reply_webhook(request: Request, db: Session = Depends(get_db)):
+    """Handle incoming events from Resend with Svix signature verification."""
+    headers = request.headers
+    try:
+        payload = await request.body()
+    except Exception as e:
+        logger.error(f"Could not read request body: {e}")
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    expected_secret = os.getenv("WEBHOOK_SECRET")
+    if not expected_secret:
+        logger.error("CRITICAL: WEBHOOK_SECRET environment variable not set.")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured on the server.")
+
+    try:
+        wh = Webhook(expected_secret)
+        webhook_data = wh.verify(payload, headers)
+        logger.info("✅ Webhook signature verified successfully.")
+    except WebhookVerificationError as e:
+        logger.warning(f"Webhook signature verification failed: {e}")
+        raise HTTPException(status_code=403, detail="Invalid signature.")
+
+    # Process only the inbound email event, ignore others like 'sent' or 'delivered'
+    if webhook_data.get("type") == "inbound.email.created":
+        try:
+            logger.info(f"📨 Received verified inbound email: {webhook_data.get('data', {}).get('subject')}")
+            # Logic to process the inbound email reply would go here if needed in the future.
+            # For the form-based system, we can just acknowledge receipt.
+            return {"success": True, "message": "Inbound email processed."}
+        except Exception as e:
+            logger.error(f"💥 Error processing inbound email: {e}")
+            raise HTTPException(status_code=500, detail="Webhook processing failed")
+    else:
+        # Acknowledge other event types without processing them
+        logger.info(f"Received and acknowledged non-critical webhook event: {webhook_data.get('type')}")
+        return {"success": True, "message": f"Event '{webhook_data.get('type')}' acknowledged."}
+
+# Enhanced feedback analytics endpoint
+@router.get("/feedback/analytics")
+async def get_advanced_feedback_analytics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days: int = 30
+):
+    """
+    Get comprehensive feedback analytics with real-time data
+    """
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
+        # Initialize advanced feedback manager
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        
+        # Get comprehensive analytics
+        analytics = feedback_manager.get_feedback_analytics(days)
+        
         return {
             "success": True,
-            "capabilities": {
-                "streaming": True,
-                "smart_feedback": True,
-                "email_collection": True,
-                "conversation_memory": True,
-                "delay_simulation": True,
-                "feedback_detection": True
-            },
-            "tenant_config": {
-                "name": tenant.name,
-                "feedback_enabled": getattr(tenant, 'enable_feedback_system', True),
-                "feedback_email": getattr(tenant, 'feedback_email', None) is not None
-            }
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "analytics": analytics
         }
         
     except Exception as e:
-        logger.error(f"Error getting webchatbot capabilities: {str(e)}")
+        logger.error(f"Error getting advanced feedback analytics: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+# Enhanced pending feedback endpoint
+@router.get("/feedback/pending/advanced")
+async def get_advanced_pending_feedback(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    limit: int = 20
+):
+    """
+    Get enhanced list of pending feedback requests with tracking info
+    """
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        pending_requests = feedback_manager.get_pending_feedback_list(limit)
+        
+        return {
+            "success": True,
+            "pending_requests": pending_requests,
+            "total_count": len(pending_requests),
+            "tenant_id": tenant.id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting advanced pending feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# Retry failed notification endpoint
+@router.post("/feedback/retry/{feedback_id}")
+async def retry_feedback_notification(
+    feedback_id: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Retry sending tenant notification for failed feedback
+    """
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        success = feedback_manager.retry_failed_notification(feedback_id)
+        
+        if success:
+            return {"success": True, "message": f"Notification retry successful for {feedback_id}"}
+        else:
+            return {"success": False, "message": f"Notification retry failed for {feedback_id}"}
+        
+    except Exception as e:
+        logger.error(f"Error retrying feedback notification: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# Test email endpoint for debugging
+@router.post("/feedback/test-email")
+async def test_feedback_email(
+    test_email: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Test endpoint to send a sample feedback email (for debugging)
+    """
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        
+        # Create test feedback request
+        test_feedback_id = str(uuid.uuid4())
+        test_context = [
+            {"role": "user", "content": "Hello, I need help with my account"},
+            {"role": "assistant", "content": "I'm sorry, I don't have information about account issues"}
+        ]
+        
+        # Mock tenant object for testing
+        class MockTenant:
+            def __init__(self, email, name):
+                self.email = email
+                self.name = name
+        
+        mock_tenant = MockTenant(test_email, tenant.name)
+        
+        # Send test notification
+        success, email_id = feedback_manager._send_tenant_notification_advanced(
+            feedback_id=test_feedback_id,
+            tenant=mock_tenant,
+            user_question="Test question: How do I reset my password?",
+            bot_response="I'm sorry, I don't have information about password reset procedures.",
+            conversation_context=test_context,
+            user_email="testuser@example.com"
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Test email sent successfully to {test_email}",
+                "email_id": email_id,
+                "feedback_id": test_feedback_id
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Failed to send test email to {test_email}"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error sending test email: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+    
+
+@router.get("/feedback/form/{feedback_id}", response_class=HTMLResponse)
+async def get_feedback_form(request: Request, feedback_id: str):
+    """Serves the HTML form to the tenant."""
+    logger.info(f"Serving feedback form for ID: {feedback_id}")
+    return templates.TemplateResponse(
+        "feedback_form.html", 
+        {"request": request, "feedback_id": feedback_id}
+    )
+
+@router.post("/feedback/submit")
+async def handle_feedback_submission(
+    feedback_id: str = Form(...),
+    tenant_response: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Receives the form submission and processes the answer."""
+    logger.info(f"Received feedback submission for ID: {feedback_id}")
+    
+    # FIX: Import PendingFeedback separately, don't access it through AdvancedSmartFeedbackManager
+    feedback_record = db.query(PendingFeedback).filter(
+        PendingFeedback.feedback_id == feedback_id
+    ).first()
+    
+    if not feedback_record:
+        raise HTTPException(status_code=404, detail="Feedback ID not found.")
+
+    feedback_manager = AdvancedSmartFeedbackManager(db, feedback_record.tenant_id)
+    success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+    
+    if success:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding-top: 50px;'>
+                <h1>Thank You!</h1>
+                <p>Your response has been sent to the customer.</p>
+            </div>
+        """, status_code=200)
+    else:
+        raise HTTPException(status_code=500, detail="Failed to process feedback.")

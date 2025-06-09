@@ -7,6 +7,13 @@ from datetime import datetime
 from supabase import create_client, Client
 
 
+from dotenv import load_dotenv, dotenv_values
+
+# Force reload the .env file
+load_dotenv(dotenv_path=".env", override=True)
+
+
+
 logger = logging.getLogger(__name__)
 
 

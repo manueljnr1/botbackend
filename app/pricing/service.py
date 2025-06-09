@@ -36,70 +36,90 @@ class PricingService:
                 "plan_type": "free",
                 "price_monthly": 0.00,
                 "price_yearly": 0.00,
-                "max_integrations": -1,  # Unlimited integrations now
-                "max_messages_monthly": 50,  # Changed to 50 conversations
-                "custom_prompt_allowed": True,  # Now allowed in Free plan
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 50,  # 50 conversations
+                "custom_prompt_allowed": True,
                 "website_api_allowed": True,
-                "slack_allowed": True,  # Now allowed in Free plan
-                "discord_allowed": True,  # Now allowed in Free plan
-                "whatsapp_allowed": False,
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Bot Memory"]'
+                "slack_allowed": True,
+                "discord_allowed": True,
+                "whatsapp_allowed": False,  # Temporarily removed
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Bot Memory"]',
+                "is_active": True,
+                "is_addon": False,
+                "is_popular": False,
+                "display_order": 1
             },
             {
                 "name": "Basic",
                 "plan_type": "basic",
-                "price_monthly": 19.00,  # Changed to $19
-                "price_yearly": 190.00,  # 10 months price for yearly
+                "price_monthly": 9.99,  # UPDATED PRICE
+                "price_yearly": 99.00,  # UPDATED PRICE
                 "max_integrations": -1,  # Unlimited integrations
-                "max_messages_monthly": 500,  # Changed to 500 conversations
+                "max_messages_monthly": 2000,  # UPDATED: 2,000 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
-                "whatsapp_allowed": False,
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Bot Memory"]'
+                "whatsapp_allowed": False,  # Temporarily removed
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Bot Memory"]',
+                "is_active": True,
+                "is_addon": False,
+                "is_popular": False,
+                "display_order": 2
             },
             {
                 "name": "Growth",
                 "plan_type": "growth",
-                "price_monthly": 39.00,  # New Growth plan
-                "price_yearly": 390.00,  # 10 months price for yearly
+                "price_monthly": 29.00,  # UPDATED PRICE
+                "price_yearly": 290.00,  # UPDATED PRICE
                 "max_integrations": -1,  # Unlimited integrations
-                "max_messages_monthly": 5000,  # 5000 conversations
+                "max_messages_monthly": 5000,  # 5,000 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
-                "whatsapp_allowed": False,
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Bot Memory"]'
+                "whatsapp_allowed": False,  # Temporarily removed
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Bot Memory"]',
+                "is_active": True,
+                "is_addon": False,
+                "is_popular": True,  # Popular plan
+                "display_order": 3
+            },
+            {
+                "name": "Pro",  # NEW PLAN
+                "plan_type": "pro",
+                "price_monthly": 59.00,
+                "price_yearly": 590.00,
+                "max_integrations": -1,  # Unlimited integrations
+                "max_messages_monthly": 20000,  # 20,000 conversations
+                "custom_prompt_allowed": True,
+                "website_api_allowed": True,
+                "slack_allowed": True,
+                "discord_allowed": True,
+                "whatsapp_allowed": False,  # Temporarily removed
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access"]',
+                "is_active": True,
+                "is_addon": False,
+                "is_popular": False,
+                "display_order": 4
             },
             {
                 "name": "Agency", 
                 "plan_type": "agency",
-                "price_monthly": 99.00,  # Agency plan
-                "price_yearly": 990.00,  # 10 months price for yearly
+                "price_monthly": 99.00,
+                "price_yearly": 990.00,
                 "max_integrations": -1,  # Unlimited integrations
                 "max_messages_monthly": 50000,  # 50,000 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
-                "whatsapp_allowed": True,
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Live Chat Integration", "Bot Memory"]'
-            },
-            {
-                "name": "Live Chat Add-on",
-                "plan_type": "livechat_addon",
-                "price_monthly": 30.00,  # Live chat add-on
-                "price_yearly": 300.00,  # 10 months price for yearly
-                "max_integrations": -1,  # Unlimited integrations
-                "max_messages_monthly": 5000,  # 5000 conversations
-                "custom_prompt_allowed": True,
-                "website_api_allowed": True,
-                "slack_allowed": True,
-                "discord_allowed": True,
-                "whatsapp_allowed": True,
-                "features": '["Live Chat Integration", "5000 conversations"]'
+                "whatsapp_allowed": False,  # Temporarily removed
+                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access", "White Label", "Custom Integrations"]',
+                "is_active": True,
+                "is_addon": False,
+                "is_popular": False,
+                "display_order": 5
             }
         ]
         
@@ -433,15 +453,22 @@ class PricingService:
             "custom_prompt": plan.custom_prompt_allowed,
             "slack": plan.slack_allowed,
             "discord": plan.discord_allowed,
-            "whatsapp": plan.whatsapp_allowed,
+            "whatsapp": False,  # Temporarily disabled for all plans
+            "live_chat": False,  # Temporarily disabled for all plans
             "website_api": plan.website_api_allowed,
-            "live_chat": "Live Chat Integration" in (plan.features or ""),
             "advanced_analytics": "Advanced Analytics" in (plan.features or ""),
             "priority_support": "Priority Support" in (plan.features or ""),
-            "bot_memory": "Bot Memory" in (plan.features or "")
+            "bot_memory": "Bot Memory" in (plan.features or ""),
+            "enhanced_bot_memory": "Enhanced Bot Memory" in (plan.features or ""),
+            "api_access": "API Access" in (plan.features or ""),
+            "white_label": "White Label" in (plan.features or ""),
+            "custom_integrations": "Custom Integrations" in (plan.features or "")
         }
-        
+    
         return feature_mapping.get(feature, False)
+
+        
+
     
     def get_plan_recommendations(self, tenant_id: int) -> dict:
         """Get plan recommendations based on current usage"""

@@ -145,3 +145,4 @@ zstandard
 supabase
 psycopg2-binary
 asyncpg
+svix

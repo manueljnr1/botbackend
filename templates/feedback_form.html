@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submit Feedback</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        p {
+            color: #555;
+            margin-bottom: 25px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+            margin-top: 10px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            background-color: #27ae60;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #219d53;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Provide an Improved Answer</h1>
+        <p>Please provide the correct response that should have been given to the customer. This will be sent to them and used for future training.</p>
+        
+        <!-- IMPORTANT: Update the form action to include the /chatbot prefix -->
+        <form action="/chatbot/feedback/submit" method="post">
+            <input type="hidden" name="feedback_id" value="{{ feedback_id }}">
+            
+            <textarea name="tenant_response" placeholder="Type the correct and complete answer here..." required></textarea>
+            
+            <button type="submit">Submit Response</button>
+        </form>
+    </div>
+</body>
+</html>

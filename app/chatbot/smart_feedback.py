@@ -1,28 +1,33 @@
 # app/chatbot/smart_feedback.py
 """
-Smart Feedback System - Human-in-the-loop for better responses
+Advanced Smart Feedback System - Supabase + Resend Integration
+Efficient, trackable, and production-ready with 30-day email memory
 """
-
-
 
 import logging
 import uuid
-from typing import Dict, Any, Optional, List, Tuple
+import re
+import json
+import requests
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
-from app.utils.email_service import EmailService
-
-
 from app.chatbot.models import ChatSession
-import re
+import os
+
+# Supabase integration
+try:
+    from supabase import create_client, Client
+except ImportError:
+    raise ImportError("Please install: pip install supabase")
 
 logger = logging.getLogger(__name__)
 
 class PendingFeedback(Base):
-    """Model to track pending feedback requests"""
+    """Enhanced model to track pending feedback requests"""
     __tablename__ = "pending_feedback"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -33,25 +38,59 @@ class PendingFeedback(Base):
     user_question = Column(Text)
     bot_response = Column(Text)
     conversation_context = Column(Text)  # JSON string of recent messages
+    
+    # Email tracking
     tenant_email_sent = Column(Boolean, default=False)
+    tenant_email_id = Column(String, nullable=True)  # Resend email ID
     tenant_response = Column(Text, nullable=True)
     user_notified = Column(Boolean, default=False)
+    user_email_id = Column(String, nullable=True)  # Follow-up email ID
+    
+    # Status tracking
+    status = Column(String, default="pending")  # pending, tenant_notified, responded, resolved
+    
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
+    tenant_notified_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     
     # Relationships
     tenant = relationship("Tenant")
     session = relationship("ChatSession")
 
-class SmartFeedbackManager:
-    """Manages the smart feedback system"""
+class AdvancedSmartFeedbackManager:
+    """
+    Production-ready smart feedback system with:
+    - Real-time email tracking via Supabase
+    - Direct Resend integration for reliability
+    - Automatic webhook processing
+    - Advanced analytics and monitoring
+    - 30-day email memory system
+    """
     
     def __init__(self, db: Session, tenant_id: int):
         self.db = db
         self.tenant_id = tenant_id
-        self.email_service = EmailService()
         
-        # Patterns that indicate the bot doesn't have a good answer
+        # Email memory configuration
+        self.EMAIL_MEMORY_DURATION = timedelta(days=30)  # 30-day memory
+        
+        # Initialize Supabase
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
+        if not self.supabase_url or not self.supabase_key:
+            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be set")
+        
+        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+        
+        # Initialize Resend
+        self.resend_api_key = os.getenv("RESEND_API_KEY")
+        if not self.resend_api_key:
+            raise ValueError("RESEND_API_KEY must be set")
+        
+        self.from_email = os.getenv("FROM_EMAIL", "feedback@agentlyra.com")
+        
+        # Enhanced inadequate response patterns
         self.inadequate_response_patterns = [
             r"i don't have.*information",
             r"i'm not sure",
@@ -65,125 +104,279 @@ class SmartFeedbackManager:
             r"please contact.*support",
             r"i'd recommend.*contacting",
             r"you may want to.*contact",
-            r"for more information.*contact"
+            r"for more information.*contact",
             r"sorry.*unable",
             r"sorry.*cannot",
             r"am unable to",
+            r"i'm not familiar with",
+            r"i don't understand",
+            r"could you clarify",
+            r"that's outside my knowledge"
         ]
+        
+        logger.info(f"✅ Advanced Smart Feedback Manager initialized for tenant {tenant_id} with 30-day email memory")
     
     def should_request_email(self, session_id: str, user_identifier: str) -> bool:
         """
-        Check if we should ask for email at the start of conversation
-        Returns True for new conversations without memory
+        Check if we should ask for email with 30-day memory logic
         """
-        from app.chatbot.simple_memory import SimpleChatbotMemory
-        
-        memory = SimpleChatbotMemory(self.db, self.tenant_id)
-        conversation_history = memory.get_conversation_history(user_identifier, max_messages=5)
-        
-        # Check if we already have email for this session
-        session = self.db.query(ChatSession).filter(
-            ChatSession.session_id == session_id
-        ).first()
-        
-        if session and hasattr(session, 'user_email') and session.user_email:
-            return False  # Already have email
-        
-        # Check if conversation is new (no meaningful history)
-        if len(conversation_history) <= 1:  # Only greeting or first message
-            return True
-        
-        return False
+        try:
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            
+            memory = SimpleChatbotMemory(self.db, self.tenant_id)
+            conversation_history = memory.get_conversation_history(user_identifier, max_messages=5)
+            
+            # Check if we already have email for this session
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and hasattr(session, 'user_email') and session.user_email:
+                # Check if email has expired (30 days)
+                if hasattr(session, 'email_captured_at') and session.email_captured_at:
+                    email_age = datetime.utcnow() - session.email_captured_at
+                    
+                    if email_age > self.EMAIL_MEMORY_DURATION:
+                        logger.info(f"📅 Email expired for session {session_id} (age: {email_age.days} days), requesting fresh email")
+                        # Clear expired email
+                        session.user_email = None
+                        session.email_captured_at = None
+                        if hasattr(session, 'email_expires_at'):
+                            session.email_expires_at = None
+                        self.db.commit()
+                        
+                        # Track email expiration in Supabase
+                        self._track_email_expired(session_id, session.user_email, email_age.days)
+                        
+                        return True  # Request fresh email
+                    else:
+                        days_remaining = (self.EMAIL_MEMORY_DURATION - email_age).days
+                        logger.debug(f"📧 Email still valid for session {session_id} ({days_remaining} days remaining)")
+                        return False  # Email still valid
+                else:
+                    # Legacy session without capture timestamp - assume it's old and request fresh
+                    logger.info(f"🔄 Legacy session {session_id} without timestamp, requesting fresh email")
+                    session.user_email = None
+                    self.db.commit()
+                    return True
+            
+            # Check if conversation is new (no meaningful history)
+            if len(conversation_history) <= 1:  # Only greeting or first message
+                logger.info(f"🆕 New conversation for {user_identifier}, requesting email")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking email request: {e}")
+            return False
     
     def generate_email_request_message(self, tenant_name: str) -> str:
-        """Generate a natural email request message"""
+        """Generate a natural, professional email request with memory context"""
         messages = [
-            f"Hi there! I'm {tenant_name}'s AI assistant. To ensure I can provide you with the best follow-up support if needed, could you please share your email address?",
-            f"Hello! Welcome to {tenant_name}. For feedback and follow-up purposes, may I have your email address before we start?",
-            f"Hi! I'm here to help you with {tenant_name}. To provide better service and follow-up, could you share your email with me?",
-            f"Welcome! I'm {tenant_name}'s virtual assistant. For quality assurance and follow-up, would you mind sharing your email address?"
+            f"Hi! I'm {tenant_name}'s AI assistant. To provide you with the best possible support and follow-up, could you please share your email address?",
+            f"Hello! Welcome to {tenant_name}. For quality service and follow-up support, may I have your email address?",
+            f"Hi there! I'm here to help you with {tenant_name}. To ensure I can provide complete assistance, could you share your email with me?",
+            f"Welcome! I'm {tenant_name}'s virtual assistant. For better service and support follow-up, would you mind sharing your email address?",
+            f"Good to see you! I'm {tenant_name}'s AI assistant. For the best experience and follow-up support, could you please provide your email?"
         ]
         import random
         return random.choice(messages)
     
     def extract_email_from_message(self, message: str) -> Optional[str]:
-        """Extract email address from user message"""
+        """Extract and validate email address from user message"""
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         matches = re.findall(email_pattern, message)
         return matches[0] if matches else None
     
     def store_user_email(self, session_id: str, email: str) -> bool:
-        """Store user email in session"""
+        """
+        Store user email with 30-day expiration tracking
+        """
         try:
             session = self.db.query(ChatSession).filter(
                 ChatSession.session_id == session_id
             ).first()
             
             if session:
-                # Add user_email field to ChatSession model if not exists
-                if not hasattr(session, 'user_email'):
-                    # You'll need to add this field to your ChatSession model
-                    logger.warning("user_email field not found in ChatSession model")
-                    return False
+                # Store email with timestamp
+                session.user_email = email.lower().strip()
+                session.email_captured_at = datetime.utcnow()
                 
-                session.user_email = email
+                # Set expiration date
+                if hasattr(session, 'email_expires_at'):
+                    session.email_expires_at = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
+                
                 self.db.commit()
-                logger.info(f"Stored email {email} for session {session_id}")
-                return True
                 
+                # Track in Supabase for analytics
+                self._track_email_capture(session_id, email)
+                
+                # Log memory duration
+                expiry_date = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
+                logger.info(f"✅ Stored email {email} for session {session_id} (expires: {expiry_date.strftime('%Y-%m-%d')})")
+                return True
         except Exception as e:
-            logger.error(f"Error storing email: {e}")
+            logger.error(f"❌ Error storing email: {e}")
             self.db.rollback()
-            
         return False
     
-    def detect_inadequate_response(self, bot_response: str) -> bool:
-        """
-        Detect if the bot's response indicates it doesn't have adequate information
-        """
-        response_lower = bot_response.lower()
-        
-        logger.info(f"🔍 Checking response: '{response_lower[:100]}...'")
-        
-        for pattern in self.inadequate_response_patterns:
-            if re.search(pattern, response_lower):
-                logger.info(f"✅ MATCHED inadequate response pattern: {pattern}")
-                return True
-            else:
-                logger.debug(f"❌ Pattern '{pattern}' did not match")
-        
-        # Additional checks
-        if len(bot_response) < 30:
-            if any(word in response_lower for word in ["sorry", "don't", "can't", "unable"]):
-                logger.info(f"✅ MATCHED short inadequate response with trigger words")
-                return True
-        
-        logger.info(f"❌ No inadequate patterns detected")
-        return False
-    
-    def create_feedback_request(self, session_id: str, user_question: str, 
-                              bot_response: str, conversation_context: List[Dict]) -> str:
-        """
-        Create a pending feedback request and send email to tenant
-        Returns feedback_id for tracking
-        """
+    def get_email_memory_status(self, session_id: str) -> Dict[str, Any]:
+        """Get email memory status for debugging"""
         try:
-            # Get session info
             session = self.db.query(ChatSession).filter(
                 ChatSession.session_id == session_id
             ).first()
             
             if not session:
-                logger.error(f"Session {session_id} not found")
+                return {"status": "session_not_found"}
+            
+            if not session.user_email:
+                return {"status": "no_email"}
+            
+            if hasattr(session, 'email_captured_at') and session.email_captured_at:
+                email_age = datetime.utcnow() - session.email_captured_at
+                days_remaining = (self.EMAIL_MEMORY_DURATION - email_age).days
+                
+                return {
+                    "status": "active" if email_age <= self.EMAIL_MEMORY_DURATION else "expired",
+                    "email": session.user_email,
+                    "captured_at": session.email_captured_at.isoformat(),
+                    "age_days": email_age.days,
+                    "days_remaining": max(0, days_remaining),
+                    "expires_at": (session.email_captured_at + self.EMAIL_MEMORY_DURATION).isoformat()
+                }
+            else:
+                return {
+                    "status": "legacy_no_timestamp",
+                    "email": session.user_email
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting email memory status: {e}")
+            return {"status": "error", "error": str(e)}
+    
+    def cleanup_expired_emails(self) -> int:
+        """Clean up expired emails across all sessions for this tenant"""
+        try:
+            cutoff_date = datetime.utcnow() - self.EMAIL_MEMORY_DURATION
+            
+            # Find expired sessions
+            expired_sessions = self.db.query(ChatSession).filter(
+                ChatSession.tenant_id == self.tenant_id,
+                ChatSession.user_email.isnot(None),
+                ChatSession.email_captured_at < cutoff_date
+            ).all()
+            
+            cleaned_count = 0
+            for session in expired_sessions:
+                old_email = session.user_email
+                session.user_email = None
+                session.email_captured_at = None
+                if hasattr(session, 'email_expires_at'):
+                    session.email_expires_at = None
+                
+                # Track cleanup in Supabase
+                email_age = datetime.utcnow() - session.email_captured_at if session.email_captured_at else None
+                self._track_email_expired(session.session_id, old_email, email_age.days if email_age else None)
+                
+                cleaned_count += 1
+            
+            self.db.commit()
+            logger.info(f"🧹 Cleaned up {cleaned_count} expired emails for tenant {self.tenant_id}")
+            return cleaned_count
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up expired emails: {e}")
+            self.db.rollback()
+            return 0
+    
+    def detect_inadequate_response(self, bot_response: str) -> bool:
+        """
+        Advanced inadequate response detection with scoring
+        """
+        response_lower = bot_response.lower().strip()
+        
+        logger.debug(f"🔍 Analyzing response: '{response_lower[:100]}...'")
+        
+        inadequate_score = 0
+        matched_patterns = []
+        
+        # Pattern matching with scoring
+        for pattern in self.inadequate_response_patterns:
+            if re.search(pattern, response_lower):
+                inadequate_score += 1
+                matched_patterns.append(pattern)
+        
+        # Additional heuristics
+        response_length = len(bot_response)
+        word_count = len(bot_response.split())
+        
+        # Very short responses with uncertainty words
+        if response_length < 50 and word_count < 10:
+            uncertainty_words = ["sorry", "don't", "can't", "unable", "unclear", "unsure"]
+            if any(word in response_lower for word in uncertainty_words):
+                inadequate_score += 2
+                matched_patterns.append("short_uncertain_response")
+        
+        # Question deflection patterns
+        deflection_patterns = [
+            r"you should.*contact",
+            r"please.*reach out",
+            r"i recommend.*speaking",
+            r"you might want to.*call"
+        ]
+        
+        for pattern in deflection_patterns:
+            if re.search(pattern, response_lower):
+                inadequate_score += 1
+                matched_patterns.append(pattern)
+        
+        is_inadequate = inadequate_score >= 1
+        
+        if is_inadequate:
+            logger.info(f"🔔 INADEQUATE RESPONSE DETECTED (score: {inadequate_score})")
+            logger.info(f"📝 Matched patterns: {matched_patterns}")
+        else:
+            logger.debug(f"✅ Response appears adequate (score: {inadequate_score})")
+        
+        return is_inadequate
+    
+    def create_feedback_request(self, session_id: str, user_question: str, 
+                              bot_response: str, conversation_context: List[Dict]) -> Optional[str]:
+        """
+        Create feedback request with advanced tracking and email sending
+        """
+        try:
+            # Get session and validate
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if not session:
+                logger.error(f"❌ Session {session_id} not found")
                 return None
             
             user_email = getattr(session, 'user_email', None)
             if not user_email:
-                logger.warning(f"No user email found for session {session_id}")
+                logger.warning(f"⚠️ No user email found for session {session_id}")
                 return None
+            
+            # Check if email is still valid (not expired)
+            if hasattr(session, 'email_captured_at') and session.email_captured_at:
+                email_age = datetime.utcnow() - session.email_captured_at
+                if email_age > self.EMAIL_MEMORY_DURATION:
+                    logger.warning(f"⚠️ User email expired for session {session_id}, cannot create feedback request")
+                    return None
             
             # Generate unique feedback ID
             feedback_id = str(uuid.uuid4())
+            
+            # Get tenant information
+            tenant = self._get_tenant()
+            if not tenant:
+                logger.error(f"❌ Tenant {self.tenant_id} not found")
+                return None
             
             # Create pending feedback record
             pending_feedback = PendingFeedback(
@@ -193,107 +386,275 @@ class SmartFeedbackManager:
                 user_email=user_email,
                 user_question=user_question,
                 bot_response=bot_response,
-                conversation_context=str(conversation_context)  # Convert to JSON string
+                conversation_context=json.dumps(conversation_context),
+                status="pending"
             )
             
             self.db.add(pending_feedback)
             self.db.commit()
             
-            # Send email to tenant
-            if self._send_tenant_notification_email(feedback_id, user_question, bot_response, conversation_context):
-                pending_feedback.tenant_email_sent = True
-                self.db.commit()
-                logger.info(f"Created feedback request {feedback_id} and sent tenant notification")
-                return feedback_id
-            
-        except Exception as e:
-            logger.error(f"Error creating feedback request: {e}")
-            self.db.rollback()
-        
-        return None
-    
-    def _send_tenant_notification_email(self, feedback_id: str, user_question: str, 
-                                  bot_response: str, conversation_context: List[Dict]) -> bool:
-        """Send notification email to tenant with feedback request"""
-        try:
-            # Get tenant info
-            from app.tenants.models import Tenant
-            tenant = self.db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
-            
-            if not tenant:
-                logger.error(f"Tenant {self.tenant_id} not found")
-                return False
-            
-            # Check if tenant has feedback system enabled
-            if not getattr(tenant, 'enable_feedback_system', True):
-                logger.info(f"Feedback system disabled for tenant {self.tenant_id}")
-                return False
-            
-            # Get tenant email configuration
-            feedback_email = getattr(tenant, 'feedback_email', None)
-            from_email = getattr(tenant, 'from_email', None)
-            company_name = getattr(tenant, 'company_name', tenant.name)
-            
-            if not feedback_email:
-                logger.warning(f"No feedback email configured for tenant {self.tenant_id}")
-                return False
-            
-            if not from_email:
-                # Fallback to a default format
-                from_email = f"assistant@{tenant.name.lower().replace(' ', '')}.com"
-            
-            # Build conversation context
-            context_text = ""
-            if conversation_context:
-                context_text = "\n".join([
-                    f"{'User' if msg.get('role') == 'user' else 'Bot'}: {msg.get('content', '')}"
-                    for msg in conversation_context[-5:]  # Last 5 messages
-                ])
-            
-            # Email content with tenant branding
-            subject = f"Feedback Needed - Question from {company_name} Customer"
-            
-            body = f"""
-    Hello {company_name} Team,
-
-    A customer asked a question that your AI assistant couldn't answer adequately. Your help is needed to provide a better response.
-
-    FEEDBACK ID: {feedback_id}
-
-    CUSTOMER QUESTION:
-    "{user_question}"
-
-    AI ASSISTANT'S RESPONSE:
-    "{bot_response}"
-
-    RECENT CONVERSATION CONTEXT:
-    {context_text}
-
-    TO RESPOND:
-    Simply reply to this email with your improved answer. The system will automatically format and send your response to the customer as a follow-up message.
-
-    This helps improve your AI assistant's knowledge base and provides better customer service.
-
-    Best regards,
-    {company_name} AI Assistant System
-    """
-            
-            # Send email using tenant's email configuration
-            return self.email_service.send_tenant_email(
-                tenant_from_email=from_email,
-                tenant_to_email=feedback_email,
-                subject=subject,
-                body=body
+            # Send notification email to tenant
+            email_sent, email_id = self._send_tenant_notification_advanced(
+                feedback_id=feedback_id,
+                tenant=tenant,
+                user_question=user_question,
+                bot_response=bot_response,
+                conversation_context=conversation_context,
+                user_email=user_email
             )
             
+            if email_sent:
+                # Update feedback record with email tracking
+                pending_feedback.tenant_email_sent = True
+                pending_feedback.tenant_email_id = email_id
+                pending_feedback.tenant_notified_at = datetime.utcnow()
+                pending_feedback.status = "tenant_notified"
+                self.db.commit()
+                
+                logger.info(f"✅ Created feedback request {feedback_id} and sent notification")
+                return feedback_id
+            else:
+                logger.error(f"❌ Failed to send tenant notification for {feedback_id}")
+                # Don't delete the record, allow manual retry
+                return None
+                
         except Exception as e:
-            logger.error(f"Error sending tenant notification email: {e}")
-            return False
+            logger.error(f"💥 Error creating feedback request: {e}")
+            self.db.rollback()
+            return None
+    
+    def _send_tenant_notification_advanced(self, feedback_id: str, tenant: Any, 
+                                         user_question: str, bot_response: str,
+                                         conversation_context: List[Dict], 
+                                         user_email: str) -> tuple[bool, Optional[str]]:
+        """
+        Send advanced tenant notification with enhanced template and tracking
+        """
+        try:
+            # Get tenant email configuration
+            tenant_email = getattr(tenant, 'email', None)
+            company_name = getattr(tenant, 'name', 'Your Company')
+            
+            if not tenant_email:
+                logger.error(f"❌ No email configured for tenant {self.tenant_id}")
+                return False, None
+            
+            # Build conversation context for email
+            context_html = ""
+            if conversation_context:
+                context_items = []
+                for msg in conversation_context[-5:]:  # Last 5 messages
+                    role = "Customer" if msg.get("role") == "user" else "AI Assistant"
+                    content = msg.get("content", "")[:200]  # Limit length
+                    context_items.append(f"""
+                        <div style="margin: 8px 0; padding: 8px; background: {'#f0f8ff' if role == 'Customer' else '#f8f8f8'}; border-radius: 4px;">
+                            <strong>{role}:</strong> {content}
+                        </div>
+                    """)
+                
+                if context_items:
+                    context_html = f"""
+                    <div style="margin: 20px 0;">
+                        <h3 style="color: #666; margin-bottom: 10px;">Recent Conversation:</h3>
+                        <div style="border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: #fafafa;">
+                            {''.join(context_items)}
+                        </div>
+                    </div>
+                    """
+            
+            # Create reply-to address for tracking
+           
+            
+            # Generate advanced email template
+            email_html = self._generate_tenant_email_template(
+                feedback_id=feedback_id,
+                company_name=getattr(tenant, 'name', 'Your Company'), # Use company name instead of the whole tenant object
+                user_question=user_question,
+                bot_response=bot_response,
+                context_html=context_html, # Assuming you create this variable
+                user_email=user_email
+            )
+            
+            # Send via Resend with enhanced configuration
+            resend_payload = {
+                "from": f"Lyra AI System <{self.from_email}>",
+                "to": [tenant_email],
+                "subject": f"🔔 Customer Feedback Needed - {company_name}",
+                "html": email_html,
+                "tags": [
+                    {"name": "type", "value": "feedback_notification"},
+                    {"name": "tenant_id", "value": str(self.tenant_id)},
+                    {"name": "feedback_id", "value": feedback_id}
+                ]
+            }
+            
+            response = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {self.resend_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=resend_payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                email_id = result.get("id")
+                
+                # Track in Supabase for real-time monitoring
+                self._track_email_sent(
+                    feedback_id=feedback_id,
+                    email_type="tenant_notification",
+                    recipient=tenant_email,
+                    provider_id=email_id,
+                )
+                
+                logger.info(f"✅ Tenant notification sent successfully: {email_id}")
+                return True, email_id
+            else:
+                error_msg = response.text
+                logger.error(f"❌ Resend API error: {response.status_code} - {error_msg}")
+                
+                # Track failed email
+                self._track_email_failed(
+                    feedback_id=feedback_id,
+                    email_type="tenant_notification",
+                    error_message=error_msg
+                )
+                return False, None
+                
+        except Exception as e:
+            logger.error(f"💥 Error sending tenant notification: {e}")
+            return False, None
+    
+    def _generate_tenant_email_template(self, feedback_id: str, company_name: str,
+                                   user_question: str, bot_response: str,
+                                    context_html: str, user_email: str) -> str:
+        """Generate email template with a link to the feedback form."""
         
+        # Get the base URL from environment variable
+        app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
         
+        # Since your router is registered with prefix="/chatbot", include it in the URL
+        feedback_url = f"{app_base_url}/chatbot/feedback/form/{feedback_id}"
+        
+        # Log the URL for debugging
+        logger.info(f"🔗 Generated feedback URL: {feedback_url}")
+
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Customer Feedback Request</title>
+        </head>
+        <body style="font-family: sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #2c3e50;">🔔 Customer Feedback Needed</h1>
+                <p>Your AI assistant was unable to answer a customer's question satisfactorily.</p>
+                
+                <h3 style="color: #3498db;">💬 Customer's Question:</h3>
+                <div style="background: #e3f2fd; padding: 15px; border-left: 4px solid #2196f3; border-radius: 8px;">"{user_question}"</div>
+                
+                <h3 style="color: #f39c12;">🤖 AI's Response:</h3>
+                <div style="background: #fff8e1; padding: 15px; border-left: 4px solid #ff9800; border-radius: 8px;">"{bot_response}"</div>
+
+                <h3 style="margin-top: 30px;">📧 How to Respond:</h3>
+                <p>Please click the button below to go to a secure form and provide the correct answer.</p>
+                
+                <a href="{feedback_url}" style="background-color: #27ae60; color: white; padding: 15px 25px; text-align: center; text-decoration: none; display: inline-block; border-radius: 8px; font-size: 16px; margin: 20px 0;">
+                    Provide Correct Answer
+                </a>
+                
+                <p style="font-size: 14px; color: #666; margin-top: 20px;">
+                    If the button doesn't work, copy and paste this URL into your browser:<br>
+                    <code style="background: #f0f0f0; padding: 5px; border-radius: 3px; font-size: 12px; word-break: break-all;">{feedback_url}</code>
+                </p>
+
+                <p style="font-size: 12px; color: #7f8c8d;">Feedback ID: {feedback_id}</p>
+            </div>
+        </body>
+        </html>
+        """
+    
+    def _track_email_sent(self, feedback_id: str, email_type: str, 
+                         recipient: str, provider_id: str, reply_to: str = None):
+        """Track successful email in Supabase for real-time monitoring"""
+        try:
+            tracking_data = {
+                "feedback_id": feedback_id,
+                "email_type": email_type,
+                "recipient": recipient,
+                "status": "sent",
+                "provider_id": provider_id,
+                "reply_to_email": reply_to,
+                "tenant_id": self.tenant_id,
+                "sent_at": datetime.utcnow().isoformat()
+            }
+            
+            self.supabase.table("email_tracking").insert(tracking_data).execute()
+            logger.debug(f"✅ Email tracking recorded in Supabase: {provider_id}")
+            
+        except Exception as e:
+            logger.error(f"⚠️ Failed to track email in Supabase: {e}")
+    
+    def _track_email_failed(self, feedback_id: str, email_type: str, error_message: str):
+        """Track failed email in Supabase"""
+        try:
+            tracking_data = {
+                "feedback_id": feedback_id,
+                "email_type": email_type,
+                "status": "failed",
+                "error_message": error_message,
+                "tenant_id": self.tenant_id,
+                "sent_at": datetime.utcnow().isoformat()
+            }
+            
+            self.supabase.table("email_tracking").insert(tracking_data).execute()
+            
+        except Exception as e:
+            logger.error(f"⚠️ Failed to track email failure: {e}")
+    
+    def _track_email_capture(self, session_id: str, email: str):
+        """Track when user provides email with 30-day expiration info"""
+        try:
+            expiry_date = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
+            
+            capture_data = {
+                "session_id": session_id,
+                "user_email": email,
+                "tenant_id": self.tenant_id,
+                "captured_at": datetime.utcnow().isoformat(),
+                "expires_at": expiry_date.isoformat(),
+                "memory_duration_days": self.EMAIL_MEMORY_DURATION.days
+            }
+            
+            self.supabase.table("email_captures").insert(capture_data).execute()
+            
+        except Exception as e:
+            logger.error(f"⚠️ Failed to track email capture: {e}")
+    
+    def _track_email_expired(self, session_id: str, email: str, age_days: Optional[int]):
+        """Track when email expires for analytics"""
+        try:
+            expiry_data = {
+                "session_id": session_id,
+                "user_email": email,
+                "tenant_id": self.tenant_id,
+                "expired_at": datetime.utcnow().isoformat(),
+                "age_days": age_days,
+                "memory_duration_days": self.EMAIL_MEMORY_DURATION.days,
+                "reason": "automatic_expiry"
+            }
+            
+            self.supabase.table("email_expirations").insert(expiry_data).execute()
+            
+        except Exception as e:
+            logger.error(f"⚠️ Failed to track email expiration: {e}")
+    
     def process_tenant_response(self, feedback_id: str, tenant_response: str) -> bool:
         """
-        Process tenant's email response and send follow-up to user
+        Process tenant's email response and send follow-up to customer
         """
         try:
             # Get pending feedback
@@ -303,102 +664,444 @@ class SmartFeedbackManager:
             ).first()
             
             if not pending:
-                logger.error(f"Feedback request {feedback_id} not found")
+                logger.error(f"❌ Feedback request {feedback_id} not found")
                 return False
             
             if pending.user_notified:
-                logger.warning(f"Feedback {feedback_id} already processed")
+                logger.warning(f"⚠️ Feedback {feedback_id} already processed")
                 return False
             
             # Store tenant response
-            pending.tenant_response = tenant_response
-            pending.resolved_at = datetime.utcnow()
+            pending.tenant_response = tenant_response.strip()
+            pending.status = "responded"
             
-            # Send follow-up email to user
-            if self._send_user_followup_email(pending):
+            # Send follow-up email to customer
+            email_sent, email_id = self._send_customer_followup_advanced(pending)
+            
+            if email_sent:
                 pending.user_notified = True
+                pending.user_email_id = email_id
+                pending.resolved_at = datetime.utcnow()
+                pending.status = "resolved"
                 self.db.commit()
-                logger.info(f"Processed tenant response for feedback {feedback_id}")
+                
+                logger.info(f"✅ Processed tenant response for feedback {feedback_id}")
                 return True
-            
-        except Exception as e:
-            logger.error(f"Error processing tenant response: {e}")
-            self.db.rollback()
-        
-        return False
-    
-    def _send_user_followup_email(self, pending: PendingFeedback) -> bool:
-        """Send follow-up email to user with tenant's improved response"""
-        try:
-            from app.tenants.models import Tenant
-            tenant = self.db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
-            
-            if not tenant:
+            else:
+                logger.error(f"❌ Failed to send customer follow-up for {feedback_id}")
                 return False
+                
+        except Exception as e:
+            logger.error(f"💥 Error processing tenant response: {e}")
+            self.db.rollback()
+            return False
+    
+    def _send_customer_followup_advanced(self, pending: PendingFeedback) -> tuple[bool, Optional[str]]:
+        """Send professional follow-up email to customer"""
+        try:
+            tenant = self._get_tenant()
+            if not tenant:
+                return False, None
             
-            # Get tenant email configuration
-            from_email = getattr(tenant, 'from_email', f"support@{tenant.name.lower()}.com")
-            company_name = getattr(tenant, 'company_name', tenant.name)
+            company_name = getattr(tenant, 'name', 'Our Company')
             
-            subject = f"Follow-up from {company_name} - Your Question Answered"
-            
-            body = f"""
-    Hello,
-
-    Thank you for your recent question to {company_name}. We've reviewed your inquiry and wanted to provide you with a more comprehensive answer.
-
-    YOUR ORIGINAL QUESTION:
-    "{pending.user_question}"
-
-    OUR IMPROVED RESPONSE:
-    {pending.tenant_response}
-
-    We appreciate your patience and hope this information is helpful. Please don't hesitate to reach out if you have any other questions.
-
-    Best regards,
-    {company_name} Customer Support Team
-
-    ---
-    This message was sent in response to your conversation with our AI assistant.
-    """
-            
-            # Send follow-up email to user
-            return self.email_service.send_user_followup(
-                tenant_from_email=from_email,
-                user_email=pending.user_email,
-                subject=subject,
-                body=body
+            # Generate customer follow-up email
+            email_html = self._generate_customer_followup_template(
+                pending=pending,
+                company_name=company_name
             )
             
+            # Send from company's perspective
+            from_name = f"{company_name} Support"
+            
+            resend_payload = {
+                "from": f"{from_name} <{self.from_email}>",
+                "to": [pending.user_email],
+                "subject": f"✅ Follow-up: Your {company_name} Question Answered",
+                "html": email_html,
+                "tags": [
+                    {"name": "type", "value": "customer_followup"},
+                    {"name": "feedback_id", "value": pending.feedback_id}
+                ]
+            }
+            
+            response = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {self.resend_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=resend_payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                email_id = result.get("id")
+                
+                # Track in Supabase
+                self._track_email_sent(
+                    feedback_id=pending.feedback_id,
+                    email_type="customer_followup",
+                    recipient=pending.user_email,
+                    provider_id=email_id
+                )
+                
+                logger.info(f"✅ Customer follow-up sent: {email_id}")
+                return True, email_id
+            else:
+                logger.error(f"❌ Failed to send customer follow-up: {response.text}")
+                return False, None
+                
         except Exception as e:
-            logger.error(f"Error sending user follow-up email: {e}")
-        return False
+            logger.error(f"💥 Error sending customer follow-up: {e}")
+            return False, None
     
+    def _generate_customer_followup_template(self, pending: PendingFeedback, company_name: str) -> str:
+        """Generate professional customer follow-up email"""
+        
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Your Question Has Been Answered</title>
+        </head>
+        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+            <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e1e5e9;">
+                    <h1 style="color: #27ae60; margin: 0; font-size: 24px;">✅ Your Question Has Been Answered</h1>
+                    <p style="color: #7f8c8d; margin: 10px 0 0 0; font-size: 16px;">{company_name}</p>
+                </div>
+                
+                <!-- Greeting -->
+                <div style="margin-bottom: 25px;">
+                    <p style="font-size: 16px; margin: 0;">Hello,</p>
+                    <p style="font-size: 16px;">Thank you for your recent question to <strong>{company_name}</strong>. We've reviewed your inquiry and wanted to provide you with a more comprehensive answer.</p>
+                </div>
+                
+                <!-- Original Question -->
+                <div style="margin-bottom: 25px;">
+                    <h3 style="color: #3498db; margin-bottom: 12px; font-size: 18px;">💬 Your Original Question:</h3>
+                    <div style="background: linear-gradient(135deg, #e3f2fd, #bbdefb); padding: 20px; border-left: 4px solid #2196f3; border-radius: 8px; font-size: 16px;">
+                        "{pending.user_question}"
+                    </div>
+                </div>
+                
+                <!-- Improved Response -->
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color: #27ae60; margin-bottom: 12px; font-size: 18px;">✨ Our Improved Response:</h3>
+                    <div style="background: linear-gradient(135deg, #e8f5e8, #c8e6c8); padding: 25px; border-left: 4px solid #27ae60; border-radius: 8px; font-size: 16px; line-height: 1.7;">
+                        {pending.tenant_response}
+                    </div>
+                </div>
+                
+                <!-- Call to Action -->
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: center;">
+                    <p style="margin: 0; font-size: 16px;">We appreciate your patience and hope this information is helpful.</p>
+                    <p style="margin: 10px 0 0 0; font-size: 16px;"><strong>Please don't hesitate to reach out if you have any other questions!</strong></p>
+                </div>
+                
+                <!-- Footer -->
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e5e9;">
+                    <p style="margin: 0 0 10px 0; font-size: 16px;">Best regards,<br><strong>{company_name} Customer Support Team</strong></p>
+                    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #f1f1f1; color: #7f8c8d; font-size: 12px; text-align: center;">
+                        <p style="margin: 0;">This message was sent in response to your conversation with our AI assistant.</p>
+                        <p style="margin: 5px 0 0 0;">We're committed to providing you with the best possible support.</p>
+                    </div>
+                </div>
+                
+            </div>
+        </body>
+        </html>
+        """
     
-    def get_pending_feedback_stats(self) -> Dict[str, Any]:
-        """Get statistics about pending feedback requests"""
+    def get_feedback_analytics(self, days: int = 30) -> Dict[str, Any]:
+        """Get comprehensive feedback analytics with email memory stats"""
         try:
-            total_pending = self.db.query(PendingFeedback).filter(
+            from datetime import timedelta
+            
+            start_date = datetime.utcnow() - timedelta(days=days)
+            
+            # Get feedback statistics from main database
+            total_requests = self.db.query(PendingFeedback).filter(
                 PendingFeedback.tenant_id == self.tenant_id,
-                PendingFeedback.user_notified == False
+                PendingFeedback.created_at >= start_date
             ).count()
             
-            total_resolved = self.db.query(PendingFeedback).filter(
+            resolved_requests = self.db.query(PendingFeedback).filter(
                 PendingFeedback.tenant_id == self.tenant_id,
-                PendingFeedback.user_notified == True
+                PendingFeedback.created_at >= start_date,
+                PendingFeedback.status == "resolved"
             ).count()
             
-            recent_requests = self.db.query(PendingFeedback).filter(
+            pending_requests = self.db.query(PendingFeedback).filter(
                 PendingFeedback.tenant_id == self.tenant_id,
-                PendingFeedback.created_at > datetime.utcnow() - timedelta(days=7)
+                PendingFeedback.status.in_(["pending", "tenant_notified", "responded"])
             ).count()
+            
+            # Get email analytics from Supabase
+            try:
+                supabase_analytics = self.supabase.table("email_tracking").select("*").gte(
+                    "sent_at", start_date.isoformat()
+                ).eq("tenant_id", self.tenant_id).execute()
+                
+                emails = supabase_analytics.data
+                successful_emails = len([e for e in emails if e["status"] == "sent"])
+                failed_emails = len([e for e in emails if e["status"] == "failed"])
+                
+                # Get email capture analytics
+                capture_analytics = self.supabase.table("email_captures").select("*").gte(
+                    "captured_at", start_date.isoformat()
+                ).eq("tenant_id", self.tenant_id).execute()
+                
+                email_captures = len(capture_analytics.data)
+                
+                # Get expiration analytics
+                expiry_analytics = self.supabase.table("email_expirations").select("*").gte(
+                    "expired_at", start_date.isoformat()
+                ).eq("tenant_id", self.tenant_id).execute()
+                
+                email_expirations = len(expiry_analytics.data)
+                
+            except Exception as e:
+                logger.warning(f"Could not fetch Supabase analytics: {e}")
+                emails = []
+                successful_emails = 0
+                failed_emails = 0
+                email_captures = 0
+                email_expirations = 0
+            
+            # Calculate metrics
+            resolution_rate = (resolved_requests / total_requests * 100) if total_requests > 0 else 0
+            email_success_rate = (successful_emails / len(emails) * 100) if emails else 0
             
             return {
-                "total_pending": total_pending,
-                "total_resolved": total_resolved,
-                "recent_requests_7_days": recent_requests
+                "success": True,
+                "period_days": days,
+                "email_memory_duration_days": self.EMAIL_MEMORY_DURATION.days,
+                "feedback_requests": {
+                    "total": total_requests,
+                    "resolved": resolved_requests,
+                    "pending": pending_requests,
+                    "resolution_rate": round(resolution_rate, 2)
+                },
+                "email_performance": {
+                    "total_sent": len(emails),
+                    "successful": successful_emails,
+                    "failed": failed_emails,
+                    "success_rate": round(email_success_rate, 2)
+                },
+                "email_memory": {
+                    "captures": email_captures,
+                    "expirations": email_expirations,
+                    "memory_duration_days": self.EMAIL_MEMORY_DURATION.days
+                },
+                "tenant_id": self.tenant_id
             }
             
         except Exception as e:
-            logger.error(f"Error getting feedback stats: {e}")
-            return {"error": str(e)}
+            logger.error(f"Error getting feedback analytics: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def get_pending_feedback_list(self, limit: int = 20) -> List[Dict]:
+        """Get list of pending feedback requests"""
+        try:
+            pending_requests = self.db.query(PendingFeedback).filter(
+                PendingFeedback.tenant_id == self.tenant_id,
+                PendingFeedback.status.in_(["pending", "tenant_notified", "responded"])
+            ).order_by(PendingFeedback.created_at.desc()).limit(limit).all()
+            
+            return [
+                {
+                    "feedback_id": req.feedback_id,
+                    "user_question": req.user_question,
+                    "bot_response": req.bot_response,
+                    "user_email": req.user_email,
+                    "status": req.status,
+                    "created_at": req.created_at.isoformat(),
+                    "tenant_email_sent": req.tenant_email_sent,
+                    "tenant_notified_at": req.tenant_notified_at.isoformat() if req.tenant_notified_at else None
+                }
+                for req in pending_requests
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting pending feedback list: {e}")
+            return []
+    
+    def retry_failed_notification(self, feedback_id: str) -> bool:
+        """Retry sending tenant notification for failed feedback"""
+        try:
+            pending = self.db.query(PendingFeedback).filter(
+                PendingFeedback.feedback_id == feedback_id,
+                PendingFeedback.tenant_id == self.tenant_id
+            ).first()
+            
+            if not pending:
+                logger.error(f"Feedback {feedback_id} not found")
+                return False
+            
+            if pending.tenant_email_sent:
+                logger.warning(f"Feedback {feedback_id} already sent")
+                return False
+            
+            # Get tenant and conversation context
+            tenant = self._get_tenant()
+            if not tenant:
+                return False
+            
+            try:
+                conversation_context = json.loads(pending.conversation_context) if pending.conversation_context else []
+            except:
+                conversation_context = []
+            
+            # Retry sending notification
+            email_sent, email_id = self._send_tenant_notification_advanced(
+                feedback_id=feedback_id,
+                tenant=tenant,
+                user_question=pending.user_question,
+                bot_response=pending.bot_response,
+                conversation_context=conversation_context,
+                user_email=pending.user_email
+            )
+            
+            if email_sent:
+                pending.tenant_email_sent = True
+                pending.tenant_email_id = email_id
+                pending.tenant_notified_at = datetime.utcnow()
+                pending.status = "tenant_notified"
+                self.db.commit()
+                
+                logger.info(f"✅ Retry successful for feedback {feedback_id}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error retrying notification: {e}")
+            return False
+    
+    def _get_tenant(self):
+        """Get tenant information"""
+        try:
+            from app.tenants.models import Tenant
+            return self.db.query(Tenant).filter(Tenant.id == self.tenant_id).first()
+        except Exception as e:
+            logger.error(f"Error getting tenant: {e}")
+            return None
+
+# Webhook handler for processing email replies
+class FeedbackWebhookHandler:
+    """Handle incoming email replies from Resend webhooks"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
+        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+    
+    def process_email_reply(self, webhook_data: Dict) -> bool:
+        """Process incoming email reply webhook"""
+        try:
+            # Extract email data
+            email_from = webhook_data.get("from", "")
+            email_to = webhook_data.get("to", "")
+            email_subject = webhook_data.get("subject", "")
+            email_text = webhook_data.get("text", "")
+            email_html = webhook_data.get("html", "")
+            
+            # Extract feedback ID from reply-to or to address
+            feedback_id = self._extract_feedback_id(email_to)
+            if not feedback_id:
+                logger.warning(f"Could not extract feedback ID from email: {email_to}")
+                return False
+            
+            # Clean email content
+            clean_response = self._clean_email_content(email_text or email_html)
+            if not clean_response.strip():
+                logger.warning(f"Empty response content for feedback {feedback_id}")
+                return False
+            
+            # Store response in Supabase for tracking
+            self._store_email_response(feedback_id, email_from, clean_response, webhook_data)
+            
+            # Get tenant from feedback record
+            pending = self.db.query(PendingFeedback).filter(
+                PendingFeedback.feedback_id == feedback_id
+            ).first()
+            
+            if not pending:
+                logger.error(f"Pending feedback {feedback_id} not found")
+                return False
+            
+            # Process with feedback manager
+            feedback_manager = AdvancedSmartFeedbackManager(self.db, pending.tenant_id)
+            success = feedback_manager.process_tenant_response(feedback_id, clean_response)
+            
+            if success:
+                logger.info(f"✅ Successfully processed email reply for feedback {feedback_id}")
+            else:
+                logger.error(f"❌ Failed to process email reply for feedback {feedback_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error processing email reply: {e}")
+            return False
+    
+    def _extract_feedback_id(self, email_address: str) -> Optional[str]:
+        """Extract feedback ID from email address"""
+        import re
+        match = re.search(r'feedback-([a-f0-9\-]+)@', email_address)
+        return match.group(1) if match else None
+    
+    def _clean_email_content(self, content: str) -> str:
+        """Clean email content removing quotes and signatures"""
+        if not content:
+            return ""
+        
+        import re
+        
+        # Remove HTML tags if present
+        content = re.sub(r'<[^>]+>', '', content)
+        
+        # Remove common email reply markers
+        patterns = [
+            r'On.*wrote:.*',
+            r'From:.*\n.*\n.*',
+            r'-----Original Message-----.*',
+            r'>.*',
+            r'\n\n.*\n.*wrote:.*',
+            r'Sent from my.*',
+            r'Get Outlook for.*'
+        ]
+        
+        for pattern in patterns:
+            content = re.sub(pattern, '', content, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Clean up whitespace
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
+        content = content.strip()
+        
+        return content
+    
+    def _store_email_response(self, feedback_id: str, sender: str, content: str, raw_data: Dict):
+        """Store email response in Supabase"""
+        try:
+            response_data = {
+                "feedback_id": feedback_id,
+                "sender_email": sender,
+                "response_content": content,
+                "raw_email_data": json.dumps(raw_data),
+                "received_at": datetime.utcnow().isoformat(),
+                "status": "received"
+            }
+            
+            self.supabase.table("email_responses").insert(response_data).execute()
+            
+        except Exception as e:
+            logger.error(f"Failed to store email response: {e}")
