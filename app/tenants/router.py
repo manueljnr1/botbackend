@@ -1031,7 +1031,39 @@ async def get_tenant_email_config(
 
 
 
+@router.put("/{tenant_id}/prompt", response_model=TenantOut)
+async def update_tenant_prompt(
+    tenant_id: int,
+    prompt_data: dict,  # Expects {"system_prompt": "new prompt"}
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update a tenant's system prompt using API key.
+    Returns the updated tenant details.
+    """
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    if tenant.id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="API key does not match tenant ID"
+        )
+    
+    new_system_prompt = prompt_data.get("system_prompt")
+    if new_system_prompt is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="system_prompt field is required in request body"
+        )
 
+    tenant.system_prompt = new_system_prompt
+    db.commit()
+    db.refresh(tenant)
+    
+    logger.info(f"✅ Updated system prompt for tenant {tenant.name} (ID: {tenant.id})")
+    
+    return tenant
 
 
 
