@@ -28,7 +28,7 @@ from app.chatbot.engine import ChatbotEngine
 from app.chatbot.models import ChatSession, ChatMessage
 from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
-from app.chatbot.smart_feedback import PendingFeedback
+
 from app.tenants.models import Tenant
 
 
@@ -1212,3 +1212,5 @@ async def get_tenant_info_for_frontend(
                 "welcome_message": "Hello! How can I assist you today?"
             }
         }
+
+
