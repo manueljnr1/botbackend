@@ -28,6 +28,9 @@ from app.chatbot.engine import ChatbotEngine
 from app.chatbot.models import ChatSession, ChatMessage
 from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
+from app.chatbot.smart_feedback import PendingFeedback
+from app.tenants.models import Tenant
+
 
 
 from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
