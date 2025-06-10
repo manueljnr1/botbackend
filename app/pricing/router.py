@@ -91,7 +91,7 @@ async def get_detailed_plans(
             integrations.append("Slack Integration")
         if plan.discord_allowed:
             integrations.append("Discord Integration")
-        # WhatsApp and Live Chat temporarily removed
+        # WhatsApp and Live Chat completely removed
         
         # Determine if plan is popular
         is_popular = plan.is_popular or plan.plan_type == "growth"
@@ -105,7 +105,7 @@ async def get_detailed_plans(
             features=features_list,
             integrations=integrations,
             is_popular=is_popular,
-            is_addon=False  # All plans are standalone
+            is_addon=False  # All livechat addon references removed
         )
         
         detailed_plans.append(detailed_plan)
@@ -260,68 +260,10 @@ async def compare_plans(
     tenant = get_tenant_from_api_key(api_key, db)
     pricing_service = PricingService(db)
     
-    # Get all active plans (excluding add-ons for main comparison)
+    # Get all active plans (no need to exclude addons since they're removed)
     plans = db.query(PricingPlan).filter(
-        PricingPlan.is_active == True,
-        PricingPlan.plan_type != "livechat_addon"
+        PricingPlan.is_active == True
     ).all()
-    
-    # Get current subscription and usage
-    subscription = pricing_service.get_tenant_subscription(tenant.id)
-    current_plan_detail = None
-    current_usage = pricing_service.get_usage_stats(tenant.id) if subscription else None
-    
-    # Convert plans to detailed format
-    detailed_plans = []
-    
-    for plan in plans:
-        # Parse features from JSON string
-        import json
-        try:
-            features_list = json.loads(plan.features) if plan.features else []
-        except:
-            features_list = []
-        
-        # Build integrations list
-        integrations = []
-        if plan.website_api_allowed:
-            integrations.append("Web Integration")
-        if plan.slack_allowed:
-            integrations.append("Slack Integration")
-        if plan.discord_allowed:
-            integrations.append("Discord Integration")
-        if plan.whatsapp_allowed:
-            integrations.append("WhatsApp Integration")
-        
-        # Determine if plan is popular (Growth plan)
-        is_popular = plan.plan_type == "growth"
-        
-        detailed_plan = PlanFeaturesDetail(
-            plan_name=plan.name,
-            plan_type=plan.plan_type,
-            price_monthly=plan.price_monthly,
-            price_yearly=plan.price_yearly,
-            conversations_limit=plan.max_messages_monthly,
-            features=features_list,
-            integrations=integrations,
-            is_popular=is_popular,
-            is_addon=False
-        )
-        
-        detailed_plans.append(detailed_plan)
-        
-        # Set current plan if it matches
-        if subscription and subscription.plan.id == plan.id:
-            current_plan_detail = detailed_plan
-    
-    # Sort plans by price
-    detailed_plans.sort(key=lambda x: x.price_monthly)
-    
-    return PlanComparisonDetailOut(
-        plans=detailed_plans,
-        current_plan=current_plan_detail,
-        current_usage=current_usage
-    )
 
 
 @router.get("/billing/history", response_model=List[BillingHistoryOut])
