@@ -454,7 +454,7 @@ class PricingService:
             "slack": plan.slack_allowed,
             "discord": plan.discord_allowed,
             "whatsapp": False,  # Temporarily disabled for all plans
-            "live_chat": False,  # Temporarily disabled for all plans
+            "live_chat": False,  # Completely removed
             "website_api": plan.website_api_allowed,
             "advanced_analytics": "Advanced Analytics" in (plan.features or ""),
             "priority_support": "Priority Support" in (plan.features or ""),
@@ -464,7 +464,7 @@ class PricingService:
             "white_label": "White Label" in (plan.features or ""),
             "custom_integrations": "Custom Integrations" in (plan.features or "")
         }
-    
+
         return feature_mapping.get(feature, False)
 
         
