@@ -108,40 +108,45 @@ class Settings(BaseSettings):
         return f"{frontend_url}/tenant-reset-password"
     
     def get_cors_origins(self) -> list:
-        """Get CORS origins based on environment."""
-        
-        # --- Development Environment ---
-        # For local testing, allow common local origins including local files (null).
-        if self.is_development():
-            return [
-                "null",                  # For local file:// access
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "http://localhost:5173", # Common for ViteJS
-                "http://localhost:8080", # Common for other local servers
-            ]
+    """Get CORS origins based on environment."""
+    
+    # --- Development Environment ---
+    # For local testing, allow common local origins including local files (null).
+    if self.is_development():
+        return [
+            "null",                  # For local file:// access
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173", # Common for ViteJS
+            "http://localhost:8080", # Common for other local servers
+        ]
 
-        # --- Production & Staging Environments ---
-        # For production and staging, use a strict, explicit list of domains.
-        origins = []
-        if self.FRONTEND_URL:
-            origins.append(self.FRONTEND_URL)
+    # --- Production & Staging Environments ---
+    # For production and staging, use a strict, explicit list of domains.
+    origins = []
+    
+    # TEMPORARY: Allow null origin for local file access
+    origins.append("null")
+    
+    if self.FRONTEND_URL:
+        origins.append(self.FRONTEND_URL)
 
-        # Add other specific production/staging domains
+    # Add other specific production/staging domains
+    origins.extend([
+        "https://frontier-j08o.onrender.com",
+        "https://agentlyra.com",
+        "https://www.agentlyra.com",
+    ])
+    
+    # Add domains from the environment configuration
+    for domain in self.get_allowed_domains_list():
         origins.extend([
-            "https://frontier-j08o.onrender.com",
-            "https://agentlyra.com",
-            "https://www.agentlyra.com",
+            f"https://{domain}",
+            f"https://www.{domain}",
         ])
         
-        # Add domains from the environment configuration
-        for domain in self.get_allowed_domains_list():
-            origins.extend([
-                f"https://{domain}",
-                f"https://www.{domain}",
-            ])
-            
-        # Remove duplicates and return the final list
-        return list(set(origins))
+    # Remove duplicates and return the final list
+    return list(set(origins))
+
 
 settings = Settings()
