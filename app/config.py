@@ -110,8 +110,13 @@ class Settings(BaseSettings):
     def get_cors_origins(self) -> list:
         """Get CORS origins based on environment"""
         if self.is_development():
-            return ["null"]  # Allow all in development
-
+            return [
+                "null",  # Allow access for local file:// requests
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:5173", # Common port for ViteJS
+                "http://localhost:8080", # Common port for local servers
+            ]
         
         origins = []
         if self.FRONTEND_URL:
