@@ -97,6 +97,26 @@ class DocumentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+
+class TenantStatsResponse(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    kb_count: int
+    faq_count: int
+    session_count: int
+    message_count: int
+    active_users: int
+    # Add subscription info safely
+    subscription_plan: Optional[str] = None
+    subscription_status: Optional[str] = None
+
+class TenantOverviewResponse(BaseModel):
+    total_tenants: int
+    active_tenants: int
+    tenant_stats: List[TenantStatsResponse]
+
 # =============================================================================
 # USER MANAGEMENT ENDPOINTS
 # =============================================================================
@@ -243,13 +263,13 @@ async def admin_delete_tenant(
     db.commit()
     return {"message": "Tenant deactivated successfully"}
 
-@router.get("/tenants/overview")
+@router.get("/tenants/overview", response_model=TenantOverviewResponse)
 async def get_tenant_overview(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_admin_user)
 ):
     """
-    Get overview of all tenants' usage (admin only)
+    Get overview of all tenants' usage with subscription info (admin only)
     """
     tenants = db.query(Tenant).all()
     
@@ -282,22 +302,46 @@ async def get_tenant_overview(
             ChatSession.tenant_id == tenant.id
         ).distinct().count()
         
-        tenant_stats.append({
-            "id": tenant.id,
-            "name": tenant.name,
-            "is_active": tenant.is_active,
-            "kb_count": kb_count,
-            "faq_count": faq_count,
-            "session_count": session_count,
-            "message_count": message_count,
-            "active_users": active_users
-        })
+        # Get subscription info safely
+        subscription_plan = None
+        subscription_status = None
+        try:
+            # Import here to avoid circular imports
+            from app.pricing.models import TenantSubscription
+            subscription = db.query(TenantSubscription).filter(
+                TenantSubscription.tenant_id == tenant.id,
+                TenantSubscription.is_active == True
+            ).first()
+            
+            if subscription and subscription.plan:
+                subscription_plan = subscription.plan.name
+                subscription_status = subscription.status
+            else:
+                subscription_plan = "No Plan"
+                subscription_status = "inactive"
+        except Exception as e:
+            # If there's any issue with subscription data, use defaults
+            subscription_plan = "Unknown"
+            subscription_status = "unknown"
+        
+        tenant_stats.append(TenantStatsResponse(
+            id=tenant.id,
+            name=tenant.name,
+            is_active=tenant.is_active,
+            kb_count=kb_count,
+            faq_count=faq_count,
+            session_count=session_count,
+            message_count=message_count,
+            active_users=active_users,
+            subscription_plan=subscription_plan,
+            subscription_status=subscription_status
+        ))
     
-    return {
-        "total_tenants": len(tenants),
-        "active_tenants": sum(1 for t in tenants if t.is_active),
-        "tenant_stats": tenant_stats
-    }
+    return TenantOverviewResponse(
+        total_tenants=len(tenants),
+        active_tenants=sum(1 for t in tenants if t.is_active),
+        tenant_stats=tenant_stats
+    )
 
 # =============================================================================
 # SYSTEM PROMPT MANAGEMENT
