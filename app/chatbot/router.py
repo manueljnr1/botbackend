@@ -7,6 +7,7 @@ from fastapi import Form
 from pydantic import Field
 import logging
 import os
+import uuid
 import asyncio
 from datetime import datetime
 from svix import Webhook, WebhookVerificationError  # Add this import for Webhook and WebhookVerificationError
@@ -57,6 +58,8 @@ class ChatResponse(BaseModel):
     response: str
     success: bool
     is_new_session: bool
+    user_id: str  # 🆕 NEW
+    auto_generated_user_id: bool = False  # 🆕 NEW
 
 class ChatHistory(BaseModel):
     session_id: str
@@ -776,6 +779,17 @@ async def chat_with_advanced_smart_feedback(
     try:
         logger.info(f"🧠📧 Advanced smart feedback chat for: {request.user_identifier}")
         
+        # 🆕 NEW: Auto-generate UUID if user_identifier is missing or looks temporary
+        user_id = request.user_identifier
+        auto_generated = False
+        
+        if not user_id or len(user_id) < 10 or user_id.startswith('temp_') or user_id.startswith('session_'):
+            user_id = f"auto_{str(uuid.uuid4())}"
+            auto_generated = True
+            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
+        else:
+            logger.info(f"👤 Using provided user_identifier: {user_id}")
+        
         tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency(tenant.id, db)
         
@@ -783,7 +797,7 @@ async def chat_with_advanced_smart_feedback(
         result = engine.process_web_message_with_advanced_feedback(
             api_key=api_key,
             user_message=request.message,
-            user_identifier=request.user_identifier,
+            user_identifier=user_id,  # 🆕 Use the processed user_id
             max_context=request.max_context
         )
         
@@ -792,12 +806,17 @@ async def chat_with_advanced_smart_feedback(
         
         track_conversation_started(
             tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
+            user_identifier=user_id,  # 🆕 Use the processed user_id
             platform="web",
             db=db
         )
         
         logger.info("✅ Advanced smart feedback chat successful")
+        
+        # 🆕 NEW: Add the user_id to response so frontend can store it
+        result["user_id"] = user_id
+        result["auto_generated_user_id"] = auto_generated
+        
         return result
         
     except HTTPException as e:
