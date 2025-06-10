@@ -1154,3 +1154,58 @@ async def handle_enhanced_feedback_submission(
         logger.error(f"Error processing enhanced feedback: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to process feedback.")
+
+
+
+@router.get("/tenant-info")
+async def get_tenant_info_for_frontend(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get tenant information for frontend chatbot widget
+    Returns business name and branding info for the chatbot header
+    """
+    try:
+        # Get tenant from API key
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Return essential info for frontend
+        return {
+            "success": True,
+            "business_name": tenant.business_name,
+            "tenant_name": tenant.name,  # Fallback if business_name is empty
+            "display_name": tenant.business_name or tenant.name,
+            "branding": {
+                "primary_color": "#6d28d9",  # Default purple, could be customizable later
+                "logo_text": (tenant.business_name or tenant.name)[:2].upper(),  # First 2 letters for logo
+                "welcome_message": f"Hey there! I'm the AI assistant for {tenant.business_name or tenant.name}. How can I help you today?"
+            }
+        }
+        
+    except HTTPException as e:
+        # Return error for invalid API key
+        return {
+            "success": False,
+            "error": "Invalid API key",
+            "business_name": "Chatbot",  # Fallback
+            "display_name": "Chatbot",
+            "branding": {
+                "primary_color": "#6d28d9",
+                "logo_text": "AI",
+                "welcome_message": "Hello! How can I assist you today?"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting tenant info: {str(e)}")
+        return {
+            "success": False,
+            "error": "Server error",
+            "business_name": "Chatbot",
+            "display_name": "Chatbot", 
+            "branding": {
+                "primary_color": "#6d28d9",
+                "logo_text": "AI",
+                "welcome_message": "Hello! How can I assist you today?"
+            }
+        }
