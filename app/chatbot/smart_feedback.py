@@ -16,6 +16,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Foreign
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.chatbot.models import ChatSession
+from app.knowledge_base.models import FAQ 
 import os
 
 # Supabase integration
@@ -46,6 +47,18 @@ class PendingFeedback(Base):
     user_notified = Column(Boolean, default=False)
     user_email_id = Column(String, nullable=True)  # Follow-up email ID
     
+
+    
+    form_accessed = Column(Boolean, default=False)
+    form_accessed_at = Column(DateTime, nullable=True)
+    form_expired = Column(Boolean, default=False)
+    
+    
+    add_to_faq = Column(Boolean, default=False)
+    faq_question = Column(Text, nullable=True)
+    faq_answer = Column(Text, nullable=True)
+    faq_created = Column(Boolean, default=False)
+
     # Status tracking
     status = Column(String, default="pending")  # pending, tenant_notified, responded, resolved
     
@@ -529,49 +542,73 @@ class AdvancedSmartFeedbackManager:
             return False, None
     
     def _generate_tenant_email_template(self, feedback_id: str, company_name: str,
-                                   user_question: str, bot_response: str,
+                                    user_question: str, bot_response: str,
                                     context_html: str, user_email: str) -> str:
-        """Generate email template with a link to the feedback form."""
+        """Generate enhanced email template with business name"""
         
-        # Get the base URL from environment variable
         app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
-        
-        # Since your router is registered with prefix="/chatbot", include it in the URL
         feedback_url = f"{app_base_url}/chatbot/feedback/form/{feedback_id}"
         
-        # Log the URL for debugging
-        logger.info(f"🔗 Generated feedback URL: {feedback_url}")
-
         return f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Customer Feedback Request</title>
+            <title>Customer Feedback Request - {company_name}</title>
+            <style>
+                .lyra-header {{
+                    background: linear-gradient(135deg, #6B46C1, #9333EA);
+                    color: white;
+                    padding: 20px;
+                    text-align: center;
+                    border-radius: 12px 12px 0 0;
+                }}
+                .business-badge {{
+                    background: rgba(255, 255, 255, 0.2);
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    display: inline-block;
+                    margin-top: 10px;
+                    font-weight: 600;
+                }}
+            </style>
         </head>
         <body style="font-family: sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h1 style="color: #2c3e50;">🔔 Customer Feedback Needed</h1>
-                <p>Your AI assistant was unable to answer a customer's question satisfactorily.</p>
+                <div class="lyra-header">
+                    <h1 style="margin: 0; font-size: 28px;">LYRA AI</h1>
+                    <div class="business-badge">{company_name}</div>
+                </div>
                 
-                <h3 style="color: #3498db;">💬 Customer's Question:</h3>
-                <div style="background: #e3f2fd; padding: 15px; border-left: 4px solid #2196f3; border-radius: 8px;">"{user_question}"</div>
-                
-                <h3 style="color: #f39c12;">🤖 AI's Response:</h3>
-                <div style="background: #fff8e1; padding: 15px; border-left: 4px solid #ff9800; border-radius: 8px;">"{bot_response}"</div>
+                <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                    <h2 style="color: #1a1a2e; margin-top: 0;">🔔 Customer Feedback Needed</h2>
+                    <p>Hello <strong>{company_name}</strong>!</p>
+                    <p>Your AI assistant was unable to answer a customer's question satisfactorily.</p>
+                    
+                    <h3 style="color: #3498db;">💬 Customer's Question:</h3>
+                    <div style="background: #e3f2fd; padding: 15px; border-left: 4px solid #2196f3; border-radius: 8px;">"{user_question}"</div>
+                    
+                    <h3 style="color: #f39c12;">🤖 AI's Response:</h3>
+                    <div style="background: #fff8e1; padding: 15px; border-left: 4px solid #ff9800; border-radius: 8px;">"{bot_response}"</div>
 
-                <h3 style="margin-top: 30px;">📧 How to Respond:</h3>
-                <p>Please click the button below to go to a secure form and provide the correct answer.</p>
-                
-                <a href="{feedback_url}" style="background-color: #27ae60; color: white; padding: 15px 25px; text-align: center; text-decoration: none; display: inline-block; border-radius: 8px; font-size: 16px; margin: 20px 0;">
-                    Provide Correct Answer
-                </a>
-                
-                <p style="font-size: 14px; color: #666; margin-top: 20px;">
-                    If the button doesn't work, copy and paste this URL into your browser:<br>
-                    <code style="background: #f0f0f0; padding: 5px; border-radius: 3px; font-size: 12px; word-break: break-all;">{feedback_url}</code>
-                </p>
-
-                <p style="font-size: 12px; color: #7f8c8d;">Feedback ID: {feedback_id}</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{feedback_url}" style="background: linear-gradient(135deg, #6B46C1, #9333EA); color: white; padding: 16px 32px; text-align: center; text-decoration: none; display: inline-block; border-radius: 12px; font-size: 18px; font-weight: 600;">
+                            Provide Improved Answer
+                        </a>
+                    </div>
+                    
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-size: 14px; color: #666;">
+                        <p><strong>✨ New Features:</strong></p>
+                        <ul style="margin: 5px 0; padding-left: 20px;">
+                            <li>Enhanced form with your business branding</li>
+                            <li>Option to add responses to your FAQ automatically</li>
+                            <li>Secure one-time use form that expires after submission</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="font-size: 12px; color: #7f8c8d; margin-top: 20px;">
+                        Feedback ID: {feedback_id} | Powered by Lyra AI
+                    </p>
+                </div>
             </div>
         </body>
         </html>
@@ -703,7 +740,7 @@ class AdvancedSmartFeedbackManager:
             if not tenant:
                 return False, None
             
-            company_name = getattr(tenant, 'name', 'Our Company')
+            company_name = getattr(tenant, 'business_name', 'Our Company')
             
             # Generate customer follow-up email
             email_html = self._generate_customer_followup_template(
@@ -717,7 +754,7 @@ class AdvancedSmartFeedbackManager:
             resend_payload = {
                 "from": f"{from_name} <{self.from_email}>",
                 "to": [pending.user_email],
-                "subject": f"✅ Follow-up: Your {company_name} Question Answered",
+                "subject": f"Follow up from {company_name}",
                 "html": email_html,
                 "tags": [
                     {"name": "type", "value": "customer_followup"},
@@ -767,14 +804,33 @@ class AdvancedSmartFeedbackManager:
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Your Question Has Been Answered</title>
+            <!-- ✅ ADDED EMAIL PREVIEW TEXT -->
+            <meta name="description" content="Your question has been answered, thank you for reaching out">
+            <style type="text/css">
+                /* Email client preview text */
+                .preheader {{
+                    display: none !important;
+                    visibility: hidden;
+                    opacity: 0;
+                    color: transparent;
+                    height: 0;
+                    width: 0;
+                    line-height: 0;
+                    font-size: 0;
+                }}
+            </style>
         </head>
         <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+            
+            <!-- ✅ PREVIEW TEXT FOR EMAIL CLIENTS -->
+            <div class="preheader">Your question has been answered, thank you for reaching out</div>
+            
             <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
                 
-                <!-- Header -->
+                <!-- ✅ UPDATED HEADER: Business name bold and prominent, no green tick -->
                 <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e1e5e9;">
-                    <h1 style="color: #27ae60; margin: 0; font-size: 24px;">✅ Your Question Has Been Answered</h1>
-                    <p style="color: #7f8c8d; margin: 10px 0 0 0; font-size: 16px;">{company_name}</p>
+                    <h1 style="color: #2c3e50; margin: 0; font-size: 28px; font-weight: bold;">{company_name}</h1>
+                    <h2 style="color: #27ae60; margin: 15px 0 0 0; font-size: 20px; font-weight: normal;">Your Question Has Been Answered</h2>
                 </div>
                 
                 <!-- Greeting -->

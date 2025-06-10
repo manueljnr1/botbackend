@@ -1009,40 +1009,148 @@ async def test_feedback_email(
     
 
 @router.get("/feedback/form/{feedback_id}", response_class=HTMLResponse)
-async def get_feedback_form(request: Request, feedback_id: str):
-    """Serves the HTML form to the tenant."""
-    logger.info(f"Serving feedback form for ID: {feedback_id}")
-    return templates.TemplateResponse(
-        "feedback_form.html", 
-        {"request": request, "feedback_id": feedback_id}
-    )
+async def get_feedback_form(request: Request, feedback_id: str, db: Session = Depends(get_db)):
+    """Serves the enhanced HTML form to the tenant with business info"""
+    logger.info(f"Serving enhanced feedback form for ID: {feedback_id}")
+    
+    # Get feedback record to check status and get business info
+    feedback_record = db.query(PendingFeedback).filter(
+        PendingFeedback.feedback_id == feedback_id
+    ).first()
+    
+    if not feedback_record:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>Form Not Found</h1>
+                <p>This feedback form does not exist or has been removed.</p>
+            </div>
+        """, status_code=404)
+    
+    # Check if form is already expired/submitted
+    if feedback_record.form_expired or feedback_record.user_notified:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>⏰ Form Expired</h1>
+                <p>This feedback form has already been used or has expired for security reasons.</p>
+                <p>If you need to provide additional feedback, please contact support.</p>
+            </div>
+        """, status_code=410)
+    
+    # Mark form as accessed
+    if not feedback_record.form_accessed:
+        feedback_record.form_accessed = True
+        feedback_record.form_accessed_at = datetime.utcnow()
+        db.commit()
+    
+    # Get business name
+    tenant = db.query(Tenant).filter(Tenant.id == feedback_record.tenant_id).first()
+    business_name = getattr(tenant, 'business_name', 'Your Business') if tenant else 'Your Business'
+    
+    # Read the enhanced template file
+    try:
+        with open("templates/enhanced_feedback_form.html", "r") as f:
+            template_content = f.read()
+        
+        # Replace template variables
+        template_content = template_content.replace("{{ feedback_id }}", feedback_id)
+        template_content = template_content.replace("{{ business_name | default('Your Business') }}", business_name)
+        template_content = template_content.replace("{{ user_question | default('') }}", feedback_record.user_question or "")
+        
+        return HTMLResponse(content=template_content)
+        
+    except FileNotFoundError:
+        # Fallback to inline template if file not found
+        logger.warning("Enhanced feedback form template file not found, using inline template")
+        return templates.TemplateResponse(
+            "feedback_form.html",  # Your existing template
+            {
+                "request": request, 
+                "feedback_id": feedback_id,
+                "business_name": business_name,
+                "user_question": feedback_record.user_question
+            }
+        )
 
 @router.post("/feedback/submit")
-async def handle_feedback_submission(
+async def handle_enhanced_feedback_submission(
     feedback_id: str = Form(...),
     tenant_response: str = Form(...),
+    add_to_faq: bool = Form(False),
     db: Session = Depends(get_db)
 ):
-    """Receives the form submission and processes the answer."""
-    logger.info(f"Received feedback submission for ID: {feedback_id}")
+    """Enhanced feedback submission with simplified FAQ integration"""
+    logger.info(f"Received enhanced feedback submission for ID: {feedback_id}")
     
-    # FIX: Import PendingFeedback separately, don't access it through AdvancedSmartFeedbackManager
     feedback_record = db.query(PendingFeedback).filter(
         PendingFeedback.feedback_id == feedback_id
     ).first()
     
     if not feedback_record:
         raise HTTPException(status_code=404, detail="Feedback ID not found.")
-
-    feedback_manager = AdvancedSmartFeedbackManager(db, feedback_record.tenant_id)
-    success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
     
-    if success:
+    # Check if already processed
+    if feedback_record.form_expired or feedback_record.user_notified:
         return HTMLResponse(content="""
-            <div style='font-family: sans-serif; text-align: center; padding-top: 50px;'>
-                <h1>Thank You!</h1>
-                <p>Your response has been sent to the customer.</p>
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>⏰ Form Already Processed</h1>
+                <p>This feedback form has already been submitted.</p>
             </div>
-        """, status_code=200)
-    else:
+        """, status_code=410)
+    
+    try:
+        # Store the enhanced response data
+        feedback_record.tenant_response = tenant_response.strip()
+        feedback_record.add_to_faq = add_to_faq
+        
+        # If user wants to add to FAQ, use the original question and tenant response
+        if add_to_faq:
+            feedback_record.faq_question = feedback_record.user_question
+            feedback_record.faq_answer = tenant_response.strip()
+            
+            # Create FAQ entry automatically
+            try:
+                new_faq = FAQ(
+                    tenant_id=feedback_record.tenant_id,
+                    question=feedback_record.user_question,
+                    answer=tenant_response.strip()
+                )
+                db.add(new_faq)
+                feedback_record.faq_created = True
+                logger.info(f"✅ Created FAQ entry for feedback {feedback_id}")
+            except Exception as faq_error:
+                logger.error(f"❌ Failed to create FAQ: {faq_error}")
+        
+        # Mark form as expired to prevent reuse
+        feedback_record.form_expired = True
+        feedback_record.status = "responded"
+        
+        # Process the tenant response (send to customer)
+        feedback_manager = AdvancedSmartFeedbackManager(db, feedback_record.tenant_id)
+        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+        
+        if success:
+            db.commit()
+            
+            success_message = "Thank you! Your response has been sent to the customer."
+            if feedback_record.faq_created:
+                success_message += " The question and answer have also been added to your FAQ section."
+            
+            return HTMLResponse(content=f"""
+                <div style='font-family: Inter, sans-serif; text-align: center; padding: 60px 40px; max-width: 600px; margin: 0 auto;'>
+                    <div style='background: linear-gradient(135deg, #6B46C1, #9333EA); color: white; padding: 30px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.1);'>
+                        <div style='font-size: 48px; margin-bottom: 20px;'>✅</div>
+                        <h1 style='margin: 0 0 15px 0; font-size: 24px;'>Response Sent Successfully!</h1>
+                        <p style='margin: 0; font-size: 16px; opacity: 0.9;'>{success_message}</p>
+                        <div style='margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 14px; opacity: 0.8;'>
+                            This form has been securely closed and cannot be used again.
+                        </div>
+                    </div>
+                </div>
+            """, status_code=200)
+        else:
+            raise HTTPException(status_code=500, detail="Failed to process feedback.")
+            
+    except Exception as e:
+        logger.error(f"Error processing enhanced feedback: {e}")
+        db.rollback()
         raise HTTPException(status_code=500, detail="Failed to process feedback.")
