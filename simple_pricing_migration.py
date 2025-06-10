@@ -1,55 +1,64 @@
 #!/usr/bin/env python3
 """
-Debug what's in the database
+Create a test feedback record in your LIVE PostgreSQL database
 """
 
-import sqlite3
+import psycopg2
+import uuid
+from datetime import datetime
 
-def debug_sqlite():
-    """Check what's in SQLite database"""
+def create_live_test_feedback():
+    """Create test feedback in live PostgreSQL database"""
     try:
-        conn = sqlite3.connect("./chatbot.db")
+        # Connect to your LIVE PostgreSQL database
+        conn = psycopg2.connect(
+            "postgresql://chatbot_hhjv_user:dYXguSEwpwZl3Yt2R3ACsfvmM5lLIgSD@dpg-d10sp295pdvs73afujf0-a.oregon-postgres.render.com/chatbot_hhjv"
+        )
         cursor = conn.cursor()
         
-        print("🔍 Checking SQLite database...")
+        print("🔗 Creating test feedback in LIVE database...")
         
-        # Check if pending_feedback table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pending_feedback';")
-        table_exists = cursor.fetchone()
+        # Generate test feedback ID
+        test_feedback_id = str(uuid.uuid4())
         
-        if not table_exists:
-            print("❌ pending_feedback table doesn't exist!")
-            return
+        # Create test feedback record
+        insert_sql = """
+        INSERT INTO pending_feedback (
+            feedback_id, tenant_id, user_email, user_question, 
+            bot_response, status, created_at, form_accessed, form_expired
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
         
-        print("✅ pending_feedback table exists")
+        cursor.execute(insert_sql, (
+            test_feedback_id,
+            1,  # Use tenant_id 1 - change if needed
+            "test@example.com",
+            "What are your business hours for customer support?",
+            "I don't have that information available.",
+            "pending",
+            datetime.utcnow(),
+            False,
+            False
+        ))
         
-        # Check table structure
-        cursor.execute("PRAGMA table_info(pending_feedback);")
-        columns = cursor.fetchall()
-        print(f"\n📋 Table columns ({len(columns)}):")
-        for col in columns:
-            print(f"  - {col[1]} ({col[2]})")
-        
-        # Check all records
-        cursor.execute("SELECT feedback_id, tenant_id, user_question, status FROM pending_feedback;")
-        records = cursor.fetchall()
-        
-        print(f"\n📊 Found {len(records)} records:")
-        for record in records:
-            print(f"  ID: {record[0]}")
-            print(f"  Tenant: {record[1]}")
-            print(f"  Question: {record[2]}")
-            print(f"  Status: {record[3]}")
-            print("  ---")
-        
+        conn.commit()
+        cursor.close()
         conn.close()
         
-        if records:
-            test_id = records[0][0]
-            print(f"\n🔗 Try this URL: http://localhost:8000/chatbot/feedback/form/{test_id}")
+        print(f"✅ Live test feedback created!")
+        print(f"🔗 LIVE Test URL: https://botbackend-qtbf.onrender.com/chatbot/feedback/form/{test_feedback_id}")
+        print(f"📋 Feedback ID: {test_feedback_id}")
+        
+        # Also print the curl command
+        print(f"\n📱 Test with curl:")
+        print(f"curl -X GET https://botbackend-qtbf.onrender.com/chatbot/feedback/form/{test_feedback_id}")
+        
+        return test_feedback_id
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error creating live test feedback: {e}")
+        return None
 
 if __name__ == "__main__":
-    debug_sqlite()
+    print("🌍 Creating test feedback for LIVE database...")
+    create_live_test_feedback()
