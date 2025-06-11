@@ -78,7 +78,13 @@ class TenantSubscription(Base):
     stripe_subscription_id = Column(String, nullable=True)
     stripe_customer_id = Column(String, nullable=True)  # Added for better Stripe integration
     status = Column(String, default="active")  # active, canceled, past_due, etc.
-    
+
+
+        # Flutterwave payment tracking
+    flutterwave_tx_ref = Column(String, nullable=True)
+    flutterwave_flw_ref = Column(String, nullable=True)
+    flutterwave_customer_id = Column(String, nullable=True)
+        
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

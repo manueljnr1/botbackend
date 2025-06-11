@@ -34,6 +34,7 @@ from app.pricing.middleware import PricingMiddleware
 from app.live_chat.router import router as live_chat_router
 from app.slack.router import router as slack_router, get_bot_manager as get_slack_bot_manager
 from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
+from app.payments.router import router as payments_router
 
 from app.config import settings
 
@@ -43,6 +44,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
 
 # ✅ Validate production configuration at startup
 try:
@@ -141,7 +143,7 @@ app.include_router(pricing_router, prefix="/pricing", tags=["Pricing"])
 app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
-# app.include_router(chatbot_router.router, prefix="/api/v1/chatbot", tags=["chatbot"])
+app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
 
 
 
@@ -173,36 +175,6 @@ def health_check():
     }
 
     
-
-
-    # # WhatsApp numbers with API keys
-    # whatsapp_keys = {}
-    # for key in os.environ:
-    #     if key.startswith("WHATSAPP_NUMBER_") and key.endswith("_API_KEY"):
-    #         number = key.replace("WHATSAPP_NUMBER_", "").replace("_API_KEY", "")
-    #         whatsapp_keys[number] = "Configured"
-    
-    # return {
-    #     "status": "healthy",
-    #     "environment": env_vars,
-    #     "whatsapp_numbers": whatsapp_keys
-    # }
-
-# @app.post("/whatsapp-test")
-# async def whatsapp_test(request: Request):
-#     """Test endpoint for WhatsApp webhook"""
-#     try:
-#         form_data = await request.form()
-#         logger.info(f"Received WhatsApp test webhook: {dict(form_data)}")
-        
-#         # Simple echo response
-#         body = form_data.get("Body", "No message")
-#         return {
-#             "response": f"Echo: {body}"
-#         }
-#     except Exception as e:
-#         logger.error(f"Error in WhatsApp test webhook: {e}")
-#         return {"error": str(e)}
 
 
 
