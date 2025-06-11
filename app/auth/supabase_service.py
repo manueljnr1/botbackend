@@ -386,102 +386,65 @@ class DummySupabaseService:
     
     async def verify_password_reset(self, token: str, new_password: str):
         """
-        Verify password reset token and set new password
+        Simple password reset using admin API
         """
         try:
-            logger.info("🔄 Starting password reset verification...")
+            # Decode token to get user ID
+            import jwt
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            user_id = decoded.get('sub')
+            user_email = decoded.get('email')
             
-            # Step 1: Set the session using the recovery token
-            session_response = self.supabase.auth.set_session(
-                access_token=token,
-                refresh_token=""
-            )
-            
-            if not session_response.session:
-                logger.error("❌ Failed to establish session with recovery token")
+            if not user_id:
                 return {
                     "success": False,
-                    "error": "Invalid or expired reset token"
+                    "error": "Invalid token - no user ID found"
                 }
             
-            logger.info("✅ Session established with recovery token")
+            logger.info(f"🔄 Updating password for user: {user_email}")
             
-            # Step 2: Update password immediately after setting session
-            try:
-                update_response = self.supabase.auth.update_user({
-                    "password": new_password
-                })
-                
-                if update_response.user:
-                    logger.info("✅ Password updated successfully")
-                    return {
-                        "success": True,
-                        "user": update_response.user,
-                        "message": "Password reset successful"
-                    }
-                else:
-                    logger.error("❌ Password update returned no user")
-                    return {
-                        "success": False,
-                        "error": "Failed to update password"
-                    }
-                    
-            except Exception as update_error:
-                logger.error(f"❌ Password update error: {str(update_error)}")
-                
-                # Alternative approach: Use admin API with user ID from token
-                try:
-                    # Decode the token to get user ID
-                    import jwt
-                    decoded = jwt.decode(token, options={"verify_signature": False})
-                    user_id = decoded.get('sub')
-                    
-                    if user_id:
-                        logger.info(f"🔄 Trying admin update for user: {user_id}")
-                        admin_response = self.supabase.auth.admin.update_user_by_id(
-                            uid=user_id,
-                            attributes={"password": new_password}
-                        )
-                        
-                        if admin_response.user:
-                            logger.info("✅ Password updated via admin API")
-                            return {
-                                "success": True,
-                                "user": admin_response.user,
-                                "message": "Password reset successful"
-                            }
-                    
-                except Exception as admin_error:
-                    logger.error(f"❌ Admin update failed: {str(admin_error)}")
-                
+            # Use admin API directly
+            admin_response = self.supabase.auth.admin.update_user_by_id(
+                uid=user_id,
+                attributes={"password": new_password}
+            )
+            
+            if admin_response.user:
+                logger.info("✅ Password updated successfully")
+                return {
+                    "success": True,
+                    "user": admin_response.user,
+                    "message": "Password reset successful"
+                }
+            else:
                 return {
                     "success": False,
                     "error": "Failed to update password"
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Password reset verification error: {str(e)}")
+            logger.error(f"❌ Password reset error: {str(e)}")
             return {
                 "success": False,
-                "error": "Password reset failed. Please request a new reset link."
+                "error": str(e)
             }
-    
-    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
-        """Dummy get user from token method"""
-        logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
-        return {
-            "success": False,
-            "error": "Supabase not configured",
-            "user": None
-        }
-    
-    async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
-        """Dummy update user metadata method"""
-        logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
+        
+        async def get_user_from_token(self, token: str) -> Dict[str, Any]:
+            """Dummy get user from token method"""
+            logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
+            return {
+                "success": False,
+                "error": "Supabase not configured",
+                "user": None
+            }
+        
+        async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
+            """Dummy update user metadata method"""
+            logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
+            return {
+                "success": False,
+                "error": "Supabase not configured"
+            }
 
 
 def check_supabase_config() -> bool:
