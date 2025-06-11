@@ -632,52 +632,41 @@ async def tenant_forgot_password_supabase(
     request: TenantForgotPasswordRequest, 
     db: Session = Depends(get_db)
 ):
-    """Enhanced password reset using email with centralized configuration"""
+    """Enhanced password reset - always try Supabase"""
     
-    # Input validation (Pydantic handles basic validation)
     normalized_email = str(request.email).strip().lower()
+    standard_message = "If your account exists in our system, you will receive a password reset link."
     
-    # Find tenant by email
     try:
+        # Check if tenant exists locally (for logging)
         tenant = db.query(Tenant).filter(
             func.lower(Tenant.email) == normalized_email,
             Tenant.is_active == True
         ).first()
-    except Exception as e:
-        logger.error(f"Database error during password reset lookup: {e}")
-        return {"message": "If your account exists in our system, you will receive a password reset link."}
-    
-    # Standard security message (same whether tenant exists or not)
-    standard_message = "If your account exists in our system, you will receive a password reset link."
-    
-    if not tenant:
-        # Log attempt for monitoring (partial email for privacy)
-        logger.info(f"Password reset attempted for non-existent email: {normalized_email[:3]}***@{normalized_email.split('@')[1] if '@' in normalized_email else 'unknown'}")
-        return {"message": standard_message}
-    
-    try:
-        # Use centralized configuration
+        
+        if tenant:
+            logger.info(f"Password reset for existing tenant: {tenant.name}")
+        else:
+            logger.info(f"Password reset attempted for email not in tenant DB: {normalized_email[:3]}***@{normalized_email.split('@')[1]}")
+        
+        # ALWAYS try Supabase regardless of local tenant existence
         redirect_to = settings.get_password_reset_url()
         
-        # Send password reset via Supabase
         result = await supabase_auth_service.send_password_reset(
-            email=tenant.email,  # Use stored email (preserves original case for display)
+            email=request.email,  # Use original email (not normalized)
             redirect_to=redirect_to
         )
         
         if result["success"]:
-            logger.info(f"Password reset sent successfully for tenant ID: {tenant.id}")
+            logger.info(f"✅ Supabase password reset sent for: {normalized_email[:3]}***")
         else:
-            logger.error(f"Password reset failed for tenant ID: {tenant.id} - Error: {result.get('error')}")
+            logger.warning(f"❌ Supabase password reset failed: {result.get('error')}")
         
-    except ValueError as e:
-        # Configuration error
-        logger.error(f"Configuration error in password reset: {e}")
     except Exception as e:
-        logger.error(f"Password reset service error for tenant ID: {tenant.id} - Error: {e}")
+        logger.error(f"Password reset error: {e}")
     
+    # Always return the same message for security
     return {"message": standard_message}
-
 
 
 
