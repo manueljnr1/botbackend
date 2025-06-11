@@ -308,50 +308,47 @@ class SupabaseAuthService:
 
     async def verify_password_reset(self, token: str, new_password: str):
         """
-        Verify password reset token and set new password
+        Simple password reset using admin API
         """
         try:
-            logger.info("🔄 Starting password reset verification...")
+            # Decode token to get user ID
+            import jwt
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            user_id = decoded.get('sub')
+            user_email = decoded.get('email')
             
-            # Step 1: Set the session using the recovery token
-            session_response = self.supabase.auth.set_session(
-                access_token=token,
-                refresh_token=""  # Empty refresh token for recovery
-            )
-            
-            if not session_response.session:
-                logger.error("❌ Failed to establish session with recovery token")
+            if not user_id:
                 return {
                     "success": False,
-                    "error": "Invalid or expired reset token"
+                    "error": "Invalid token - no user ID found"
                 }
             
-            logger.info("✅ Session established with recovery token")
+            logger.info(f"🔄 Updating password for user: {user_email}")
             
-            # Step 2: Update password using the correct method
-            update_response = self.supabase.auth.update_user({
-                "password": new_password
-            })
+            # Use admin API directly
+            admin_response = self.supabase.auth.admin.update_user_by_id(
+                uid=user_id,
+                attributes={"password": new_password}
+            )
             
-            if update_response.user:
+            if admin_response.user:
                 logger.info("✅ Password updated successfully")
                 return {
                     "success": True,
-                    "user": update_response.user,
+                    "user": admin_response.user,
                     "message": "Password reset successful"
                 }
             else:
-                logger.error("❌ Password update failed")
                 return {
                     "success": False,
                     "error": "Failed to update password"
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Password reset verification error: {str(e)}")
+            logger.error(f"❌ Password reset error: {str(e)}")
             return {
                 "success": False,
-                "error": "Password reset failed. Please request a new reset link."
+                "error": str(e)
             }
 
 
@@ -376,13 +373,7 @@ class DummySupabaseService:
             "error": "Supabase not configured"
         }
     
-    async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
-        """Dummy send password reset method"""
-        logger.warning("⚠️ Using dummy Supabase service - send_password_reset")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
+    
     
     async def verify_password_reset(self, token: str, new_password: str):
         """
