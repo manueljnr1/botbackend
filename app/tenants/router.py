@@ -687,46 +687,75 @@ async def tenant_reset_password_supabase(
     db: Session = Depends(get_db)
 ):
     """Reset password using Supabase token with confirmation"""
-
-    # Step 1: Add validation to check if passwords match
-    if request.new_password != request.confirm_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Passwords do not match."
+    
+    try:
+        # Step 1: Validate passwords match
+        if request.new_password != request.confirm_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Passwords do not match."
+            )
+        
+        # Step 2: Basic password validation
+        if len(request.new_password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 6 characters long."
+            )
+        
+        logger.info(f"🔄 Processing password reset with token: {request.token[:20]}...")
+        
+        # Step 3: Call the Supabase service
+        result = await supabase_auth_service.verify_password_reset(
+            token=request.token, 
+            new_password=request.new_password
         )
-
-    # Step 2: Call the Supabase service (the rest of the logic is the same)
-    result = await supabase_auth_service.verify_password_reset(
-        token=request.token, 
-        new_password=request.new_password
-    )
-    
-    if not result["success"]:
+        
+        if not result["success"]:
+            logger.warning(f"❌ Password reset failed: {result.get('error')}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Invalid or expired reset token")
+            )
+        
+        logger.info("✅ Password reset successful")
+        
+        # Step 4: Update local tenant credentials if needed
+        if result.get("user"):
+            user_email = result["user"].email
+            if user_email:
+                tenant = db.query(Tenant).filter(
+                    func.lower(Tenant.email) == user_email.lower()
+                ).first()
+                
+                if tenant:
+                    # Update local credentials for legacy compatibility
+                    credentials = db.query(TenantCredentials).filter(
+                        TenantCredentials.tenant_id == tenant.id
+                    ).first()
+                    
+                    if credentials:
+                        credentials.hashed_password = get_password_hash(request.new_password)
+                    else:
+                        credentials = TenantCredentials(
+                            tenant_id=tenant.id,
+                            hashed_password=get_password_hash(request.new_password)
+                        )
+                        db.add(credentials)
+                    
+                    db.commit()
+                    logger.info(f"✅ Local password updated for tenant: {tenant.name}")
+        
+        return {"message": "Password reset successfully. You can now log in with your new password."}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during password reset: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result.get("error", "Invalid or expired reset token")
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Password reset failed. Please try again or request a new reset link."
         )
-    
-    # Optional: Update local tenant credentials if needed
-    if result.get("user"):
-        user_email = result["user"].email
-        if user_email:
-            tenant = db.query(Tenant).filter(Tenant.email == user_email).first()
-            if tenant:
-                # Update local credentials
-                credentials = db.query(TenantCredentials).filter(TenantCredentials.tenant_id == tenant.id).first()
-                if credentials:
-                    credentials.hashed_password = get_password_hash(request.new_password)
-                else:
-                    credentials = TenantCredentials(
-                        tenant_id=tenant.id,
-                        hashed_password=get_password_hash(request.new_password)
-                    )
-                    db.add(credentials)
-                db.commit()
-                logger.info(f"Local password updated for tenant: {tenant.name}")
-    
-    return {"message": "Password reset successfully. You can now log in with your new password."}
 
 
 

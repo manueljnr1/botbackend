@@ -273,7 +273,7 @@ class SupabaseAuthService:
             if redirect_to:
                 options["redirect_to"] = redirect_to
             
-            self.supabase.auth.reset_password_email(email, options)
+            self.supabase.auth.reset_password_for_email(email, options)
             
             return {
                 "success": True,
@@ -306,59 +306,75 @@ class SupabaseAuthService:
         """Alias for verify_password_reset for backward compatibility"""
         return await self.verify_password_reset(token, new_password)
 
-    async def verify_password_reset(self, token: str, new_password: str) -> Dict[str, Any]:
+    async def verify_password_reset(self, token: str, new_password: str):
         """
-        Verify password reset token and update password
+        Verify password reset token and set new password
+        This should be called when user clicks the reset link and submits new password
         """
         try:
-            if not token or not new_password:
-                return {
-                    "success": False,
-                    "error": "Token and new password are required"
-                }
+            # Method 1: Use the session-based approach (recommended)
+            # The token from the email should be used to establish a session first
+            response = self.supabase.auth.set_session(access_token=token, refresh_token="")
             
-            if len(new_password) < 6:
-                return {
-                    "success": False,
-                    "error": "Password must be at least 6 characters"
-                }
-            
-            # Use Supabase client to verify and update password
-            auth_response = self.supabase.auth.verify_otp({
-                "token": token,
-                "type": "recovery"
-            })
-            
-            if auth_response.user:
-                # Update the password
+            if response.user:
+                # Now update the password for the authenticated user
                 update_response = self.supabase.auth.update({
                     "password": new_password
                 })
                 
-                return {
-                    "success": True,
-                    "error": None,
-                    "user": update_response.user
-                }
+                if update_response.user:
+                    logger.info(f"✅ Password reset successful for user: {update_response.user.email}")
+                    return {
+                        "success": True,
+                        "user": update_response.user,
+                        "message": "Password updated successfully"
+                    }
+                else:
+                    logger.error("❌ Failed to update password after token verification")
+                    return {
+                        "success": False,
+                        "error": "Failed to update password"
+                    }
             else:
+                logger.error("❌ Invalid or expired reset token")
                 return {
                     "success": False,
-                    "error": "Invalid or expired token"
+                    "error": "Invalid or expired reset token"
                 }
-                    
+                
         except Exception as e:
-            logger.error(f"❌ Supabase password reset verification error: {e}")
+            logger.error(f"❌ Password reset verification error: {str(e)}")
             
-            error_message = str(e).lower()
-            if "invalid" in error_message or "expired" in error_message:
-                friendly_error = "Invalid or expired reset token"
-            else:
-                friendly_error = "Failed to reset password"
-            
-            return {
-                "success": False,
-                "error": friendly_error
-            }
+            # Method 2: Alternative approach if Method 1 doesn't work
+            # Try using the recovery flow directly
+            try:
+                # Extract the token from URL format if needed
+                if 'access_token=' in token:
+                    # Parse URL-encoded token
+                    from urllib.parse import parse_qs, urlparse
+                    parsed = urlparse(token)
+                    query_params = parse_qs(parsed.fragment or parsed.query)
+                    actual_token = query_params.get('access_token', [token])[0]
+                else:
+                    actual_token = token
+                
+                # Use the admin client to update password directly
+                admin_response = self.supabase.auth.admin.update_user_by_id(
+                    uid=None,  # We'll get this from token verification
+                    attributes={"password": new_password}
+                )
+                
+                return {
+                    "success": False,
+                    "error": f"Password reset failed: {str(e)}"
+                }
+                
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback password reset also failed: {str(fallback_error)}")
+                return {
+                    "success": False,
+                    "error": "Password reset failed. Please request a new reset link."
+                }
 
 
 class DummySupabaseService:
