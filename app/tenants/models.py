@@ -5,6 +5,10 @@ from sqlalchemy.sql import func
 from app.database import Base
 from datetime import datetime, timedelta
 import secrets
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.live_chat.models import Agent, Conversation
 
 
 
@@ -44,7 +48,7 @@ class Tenant(Base):
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan", overlaps="tenant_credentials")
     subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
     agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
-    live_chats = relationship("LiveChat", back_populates="tenant", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="tenant")
    
 
     # Integration fields
@@ -62,6 +66,10 @@ class Tenant(Base):
     slack_enabled = Column(Boolean, default=False)
     slack_team_id = Column(String, nullable=True)  # Slack workspace ID
     slack_bot_user_id = Column(String, nullable=True)  # Bot user ID in Slack
+
+    # Live chat relationships
+    agents = relationship("Agent", back_populates="tenant")
+    conversations = relationship("Conversation", back_populates="tenant")
 
     @validates('email')
     def normalize_email(self, key, email):

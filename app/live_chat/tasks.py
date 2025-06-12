@@ -2,72 +2,88 @@ import asyncio
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 import logging
+
+# Import dependencies
 from app.database import get_db
-from app.live_chat.models import LiveChat, ChatStatus, Agent, AgentStatus
-from app.live_chat.manager import LiveChatManager
-# Configure logger
+from app.live_chat.models import Conversation, ConversationStatus
+from app.live_chat.router_service import LiveChatRouter
+from app.live_chat.state_manager import ChatStateManager
+from app.live_chat.config import get_redis_client
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
-
-async def cleanup_abandoned_chats():
-    """Clean up chats that have been abandoned"""
+async def cleanup_abandoned_conversations():
+    """Clean up conversations that have been abandoned"""
     db = next(get_db())
     
     try:
-        # Find chats waiting for more than 30 minutes
+        # Create state manager instance
+        try:
+            redis_client = get_redis_client()
+            state_manager = ChatStateManager(redis_client)
+        except Exception as e:
+            logger.warning(f"Redis not available for cleanup task: {e}")
+            # Skip cleanup if Redis is not available
+            return
+        
+        # Find conversations in queue for more than 30 minutes
         cutoff_time = datetime.utcnow() - timedelta(minutes=30)
         
-        abandoned_chats = db.query(LiveChat).filter(
-            LiveChat.status == ChatStatus.WAITING,
-            LiveChat.started_at < cutoff_time
+        abandoned = db.query(Conversation).filter(
+            Conversation.status == ConversationStatus.QUEUED,
+            Conversation.created_at < cutoff_time
         ).all()
         
-        chat_manager = LiveChatManager(db)
-        
-        for chat in abandoned_chats:
-            chat.status = ChatStatus.ABANDONED
+        for conv in abandoned:
+            conv.status = ConversationStatus.ABANDONED
+            conv.resolved_at = datetime.utcnow()
             
-            # Remove from queue
-            from app.live_chat.models import ChatQueue
-            queue_entry = db.query(ChatQueue).filter(ChatQueue.chat_id == chat.id).first()
-            if queue_entry:
-                db.delete(queue_entry)
+            # Remove from Redis (if available)
+            try:
+                state_manager.remove_from_queue(conv.tenant_id, conv.session_id)
+                state_manager.end_conversation_state(conv.session_id)
+            except Exception as e:
+                logger.warning(f"Could not update Redis state for abandoned conversation: {e}")
         
-        db.commit()
-        
-        if abandoned_chats:
-            logger.info(f"Marked {len(abandoned_chats)} chats as abandoned")
+        if abandoned:
+            db.commit()
+            logger.info(f"Cleaned up {len(abandoned)} abandoned conversations")
             
     except Exception as e:
-        logger.error(f"Error in cleanup_abandoned_chats: {e}")
+        logger.error(f"Error in cleanup task: {e}")
         db.rollback()
     finally:
         db.close()
 
-async def update_agent_status():
-    """Update agent status based on activity"""
+async def process_queues():
+    """Periodically process queues for agent assignment"""
     db = next(get_db())
     
     try:
-        # Mark agents as away if no activity for 10 minutes
-        cutoff_time = datetime.utcnow() - timedelta(minutes=10)
+        # Create state manager instance
+        try:
+            redis_client = get_redis_client()
+            state_manager = ChatStateManager(redis_client)
+        except Exception as e:
+            logger.warning(f"Redis not available for queue processing: {e}")
+            # Skip queue processing if Redis is not available
+            return
         
-        inactive_agents = db.query(Agent).filter(
-            Agent.status == AgentStatus.ONLINE,
-            Agent.last_seen < cutoff_time
-        ).all()
+        # Get all tenants with queued conversations
+        tenants_with_queue = db.query(Conversation.tenant_id).filter(
+            Conversation.status == ConversationStatus.QUEUED
+        ).distinct().all()
         
-        for agent in inactive_agents:
-            agent.status = AgentStatus.AWAY
-        
-        db.commit()
-        
-        if inactive_agents:
-            logger.info(f"Marked {len(inactive_agents)} agents as away due to inactivity")
+        if tenants_with_queue:
+            chat_router = LiveChatRouter(db, state_manager)
+            
+            for (tenant_id,) in tenants_with_queue:
+                try:
+                    chat_router.process_queue(tenant_id)
+                except Exception as e:
+                    logger.error(f"Error processing queue for tenant {tenant_id}: {e}")
             
     except Exception as e:
-        logger.error(f"Error in update_agent_status: {e}")
-        db.rollback()
+        logger.error(f"Error in queue processing: {e}")
     finally:
         db.close()

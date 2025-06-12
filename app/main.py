@@ -17,6 +17,7 @@ import logging
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+
 from app.chatbot.models import ChatSession, ChatMessage
 from app.tenants.models import Tenant
 from app.auth.models import User, TenantCredentials
@@ -31,12 +32,14 @@ from app.admin.router import router as admin_router
 from app.discord.router import router as discord_router, get_bot_manager as get_discord_bot_manager
 from app.pricing.router import router as pricing_router
 from app.pricing.middleware import PricingMiddleware
-from app.live_chat.router import router as live_chat_router
 from app.slack.router import router as slack_router, get_bot_manager as get_slack_bot_manager
 from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 from app.payments.router import router as payments_router
 
 from app.config import settings
+from app.live_chat.api import router as live_chat_router
+from app.live_chat.tasks import cleanup_abandoned_conversations, process_queues
+import asyncio
 
 
 logging.basicConfig(
@@ -144,6 +147,7 @@ app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
+app.include_router(live_chat_router, prefix="/api/live-chat", tags=["Live Chat"])
 
 
 
@@ -189,12 +193,12 @@ async def startup_event():
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
         
         # 1. Start Discord and Slack bots
-        try:
-            discord_manager = get_discord_bot_manager()
-            await discord_manager.start_all_bots()
-            logger.info("✅ All Discord bots started successfully")
-        except Exception as e:
-            logger.error(f"❌ Error starting Discord bots: {e}")
+        # try:
+        #     discord_manager = get_discord_bot_manager()
+        #     await discord_manager.start_all_bots()
+        #     logger.info("✅ All Discord bots started successfully")
+        # except Exception as e:
+        #     logger.error(f"❌ Error starting Discord bots: {e}")
         
         try:
             slack_manager = get_slack_bot_manager()
@@ -261,6 +265,28 @@ async def startup_event():
         logger.error(f"💥 Error in startup event: {e}")
 
 
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Start background tasks
+    asyncio.create_task(run_background_tasks_safe())
+
+async def run_background_tasks_safe():
+    """Safe version of background tasks with proper error handling"""
+    while True:
+        try:
+            # Use simple versions that don't depend on Redis being available
+            await cleanup_abandoned_conversations()
+            await process_queues()
+            
+            # Wait 30 seconds before next run
+            await asyncio.sleep(30)
+            
+        except Exception as e:
+            logger.error(f"Background task error: {e}")
+            # Wait longer if there's an error
+            await asyncio.sleep(60)
 
 
 @app.on_event("shutdown")
