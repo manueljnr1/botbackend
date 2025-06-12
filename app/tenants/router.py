@@ -148,6 +148,7 @@ class SupabaseTokenResponse(BaseModel):
     tenant_id: Optional[int]
     tenant_name: Optional[str]
     api_key: Optional[str]
+    is_admin: Optional[bool] = False 
 
 
 class TenantEmailConfigUpdate(BaseModel):
@@ -376,12 +377,12 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
 
 @router.post("/register", response_model=TenantOut)
 async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(get_db)):
-    """Tenant Registration """
+    """Tenant Registration with proper session handling"""
     
     supabase_user_id = None
     
     try:
-        logger.info(f"🚀 Starting registration for: {tenant.name} ({tenant.email}) - Business: {tenant.business_name}")
+        logger.info(f"Starting registration for: {tenant.name} ({tenant.email}) - Business: {tenant.business_name}")
         
         # Step 1: Validate inputs
         normalized_email = tenant.email.lower().strip()
@@ -389,22 +390,22 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             func.lower(Tenant.email) == normalized_email
         ).first()
         if existing_email:
-            logger.warning(f"❌ Email already registered: {tenant.email}")
+            logger.warning(f"Email already registered: {tenant.email}")
             raise HTTPException(status_code=400, detail="Email already registered")
         
         existing_name = db.query(Tenant).filter(Tenant.name == tenant.name).first()
         if existing_name:
-            logger.warning(f"❌ Username already taken: {tenant.name}")
+            logger.warning(f"Username already taken: {tenant.name}")
             raise HTTPException(status_code=400, detail="Username already taken")
         
-        logger.info("✅ Input validation passed")
+        logger.info("Input validation passed")
         
         # Step 2: Generate API key
         api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
-        logger.info(f"✅ Generated API key: {api_key[:15]}...")
+        logger.info(f"Generated API key: {api_key[:15]}...")
         
         # Step 3: Create Supabase user with business info
-        logger.info("🔄 Creating Supabase user...")
+        logger.info("Creating Supabase user...")
         supabase_result = await supabase_auth_service.create_user(
             email=normalized_email,
             password=tenant.password,
@@ -412,7 +413,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 "display_name": tenant.name,
                 "full_name": tenant.name,
                 "tenant_name": tenant.name,
-                "business_name": tenant.business_name,  # NEW: Include business name
+                "business_name": tenant.business_name,
                 "tenant_description": tenant.description or "",
                 "role": "tenant_admin",
                 "account_type": "tenant",
@@ -423,20 +424,20 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         )
         
         if not supabase_result["success"]:
-            logger.error(f"❌ Supabase user creation failed: {supabase_result.get('error')}")
+            logger.error(f"Supabase user creation failed: {supabase_result.get('error')}")
             raise HTTPException(
                 status_code=400, 
                 detail=f"Account creation failed: {supabase_result.get('error')}"
             )
         
         supabase_user_id = supabase_result["user"].id
-        logger.info(f"✅ Supabase user created: {supabase_user_id}")
+        logger.info(f"Supabase user created: {supabase_user_id}")
         
         # Step 4: Create local tenant with business name
-        logger.info("🔄 Creating local tenant record...")
+        logger.info("Creating local tenant record...")
         new_tenant = Tenant(
             name=tenant.name,
-            business_name=tenant.business_name,  # NEW: Include business name
+            business_name=tenant.business_name,
             email=normalized_email,
             description=tenant.description,
             api_key=api_key,
@@ -445,11 +446,12 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         )
         
         db.add(new_tenant)
-        db.flush()
-        logger.info(f"✅ Local tenant created with ID: {new_tenant.id}")
+        db.commit()  # Commit immediately after creating tenant
+        db.refresh(new_tenant)  # Refresh to get the ID
+        logger.info(f"Local tenant created with ID: {new_tenant.id}")
         
-        # Step 5: Update Supabase with tenant ID
-        logger.info("🔄 Updating Supabase with tenant ID...")
+        # Step 5: Update Supabase with tenant ID (separate transaction)
+        logger.info("Updating Supabase with tenant ID...")
         try:
             update_result = await supabase_auth_service.update_user_metadata(
                 user_id=supabase_user_id,
@@ -461,44 +463,43 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             )
             
             if update_result["success"]:
-                logger.info("✅ Supabase metadata updated")
+                logger.info("Supabase metadata updated")
             else:
-                logger.warning(f"⚠️ Failed to update Supabase metadata: {update_result.get('error')}")
+                logger.warning(f"Failed to update Supabase metadata: {update_result.get('error')}")
         except Exception as meta_error:
-            logger.warning(f"⚠️ Supabase metadata update failed: {meta_error}")
+            logger.warning(f"Supabase metadata update failed: {meta_error}")
         
-        # Step 6: Create subscription if available
+        # Step 6: Create subscription if available (separate transaction)
         if PRICING_AVAILABLE:
-            logger.info("🔄 Creating subscription...")
+            logger.info("Creating subscription...")
             try:
                 pricing_service = PricingService(db)
                 pricing_service.create_default_plans()
                 subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
                 
                 if subscription:
-                    logger.info(f"✅ Subscription created: {subscription.id}")
+                    logger.info(f"Subscription created: {subscription.id}")
                 else:
-                    logger.warning("⚠️ Subscription creation returned None")
+                    logger.warning("Subscription creation returned None")
             except Exception as e:
-                logger.error(f"❌ Subscription creation failed: {e}")
+                logger.error(f"Subscription creation failed: {e}")
+                # Don't fail the whole registration if subscription fails
         else:
-            logger.info("ℹ️ Pricing system not available, skipping subscription")
+            logger.info("Pricing system not available, skipping subscription")
         
-        # Step 7: Commit
-        db.commit()
-        db.refresh(new_tenant)
-        
-        logger.info(f"🎉 Registration successful for: {new_tenant.name} - Business: {new_tenant.business_name} (ID: {new_tenant.id})")
+        logger.info(f"Registration successful for: {new_tenant.name} - Business: {new_tenant.business_name} (ID: {new_tenant.id})")
         return new_tenant
         
     except HTTPException as he:
-        logger.error(f"❌ HTTP Exception during registration: {he.detail}")
+        logger.error(f"HTTP Exception during registration: {he.detail}")
+        db.rollback()  # Rollback on HTTP exceptions
         if supabase_user_id:
             await cleanup_supabase_user(supabase_user_id)
         raise he
         
     except Exception as e:
-        logger.error(f"❌ Unexpected error during registration: {str(e)}")
+        logger.error(f"Unexpected error during registration: {str(e)}")
+        db.rollback()  # Rollback on any exception
         if supabase_user_id:
             await cleanup_supabase_user(supabase_user_id)
         raise HTTPException(
@@ -509,67 +510,64 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
 
 
 
-
 @router.post("/login", response_model=SupabaseTokenResponse)
 async def login_with_supabase(
     login_data: SupabaseLoginRequest,
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Clean login with enhanced security layers"""
+    """Clean login without rate limiting for debugging"""
     try:
         normalized_email = login_data.email.lower().strip()
         client_ip = request.client.host
         
-        if not check_admin_rate_limit(f"admin_{normalized_email}", max_attempts=3, window_minutes=10):
-            logger.warning(f"🚨 Admin rate limit exceeded: {normalized_email} from {client_ip}")
-            await asyncio.sleep(2)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many login attempts. Please try again later."
-            )
-        
+        # Check for admin login first
         admin = db.query(Admin).filter(
             (func.lower(Admin.username) == normalized_email) |
             (func.lower(Admin.email) == normalized_email),
             Admin.is_active == True
         ).first()
         
-        if admin and verify_password(login_data.password, admin.hashed_password):
-            logger.info(f"🔐 Admin login successful: {admin.username} ({admin.email}) from {client_ip}")
-            admin_rate_limit_storage[f"admin_{normalized_email}"].clear()
-            
-            access_token, expires_at = create_access_token(
-                data={
-                    "sub": str(admin.id), 
-                    "is_admin": True,
-                    "login_ip": client_ip,
-                    "login_time": datetime.utcnow().isoformat()
-                },
-                expires_delta=timedelta(minutes=30)
-            )
-            
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "expires_at": expires_at,
-                "user_id": str(admin.id),
-                "email": admin.email,
-                "tenant_id": None,
-                "tenant_name": "ADMIN",
-                "api_key": None
-            }
-        
         if admin:
-            logger.warning(f"🚨 Failed admin login (wrong password): {normalized_email} from {client_ip}")
+            logger.info(f"Admin found: {admin.username}, checking password...")
+            password_valid = verify_password(login_data.password, admin.hashed_password)
+            logger.info(f"Password valid: {password_valid}")
+            
+            if password_valid:
+                logger.info(f"Admin login successful: {admin.username} ({admin.email}) from {client_ip}")
+                
+                access_token, expires_at = create_access_token(
+                    data={
+                        "sub": str(admin.id), 
+                        "is_admin": True,
+                        "login_ip": client_ip,
+                        "login_time": datetime.utcnow().isoformat()
+                    },
+                    expires_delta=timedelta(minutes=30)
+                )
+                
+                return {
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "expires_at": expires_at,
+                    "user_id": str(admin.id),
+                    "email": admin.email,
+                    "tenant_id": None,
+                    "tenant_name": None,  # Admins don't have tenant names
+                    "api_key": None,
+                    "is_admin": True  # Add this field for admin identification
+                }
+            else:
+                logger.warning(f"Failed admin login (wrong password): {normalized_email} from {client_ip}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid email or password"
+                )
+        else:
+            logger.info(f"No admin found for email: {normalized_email}")
         
-        if not check_rate_limit(f"tenant_{normalized_email}", max_attempts=5, window_minutes=15):
-            logger.warning(f"⚠️ Tenant rate limit exceeded: {normalized_email} from {client_ip}")
-            await asyncio.sleep(1)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many login attempts. Please try again later."
-            )
+        # If no admin found or admin login failed, try tenant login
+        logger.info(f"Attempting tenant login for: {normalized_email}")
         
         supabase_result = await supabase_auth_service.sign_in(
             email=normalized_email,
@@ -577,7 +575,7 @@ async def login_with_supabase(
         )
         
         if not supabase_result["success"]:
-            logger.warning(f"⚠️ Failed tenant login: {normalized_email} from {client_ip}")
+            logger.warning(f"Failed tenant login: {normalized_email} from {client_ip}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
@@ -589,13 +587,13 @@ async def login_with_supabase(
         ).first()
         
         if not tenant:
-            logger.error(f"❌ Tenant not found after successful Supabase auth: {normalized_email}")
+            logger.error(f"Tenant not found after successful Supabase auth: {normalized_email}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No tenant found with this email address"
             )
         
-        logger.info(f"✅ Tenant login successful: {tenant.name} ({tenant.email}) from {client_ip}")
+        logger.info(f"Tenant login successful: {tenant.name} ({tenant.email}) from {client_ip}")
         
         session = supabase_result["session"]
         user = supabase_result["user"]
@@ -608,14 +606,14 @@ async def login_with_supabase(
             "email": user.email,
             "tenant_id": tenant.id,
             "tenant_name": tenant.name,
-            "api_key": tenant.api_key
+            "api_key": tenant.api_key,
+            "is_admin": False  # Add this for tenant responses
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
-        await asyncio.sleep(1)
+        logger.error(f"Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
         raise HTTPException(status_code=500, detail="Login failed")
 
 
