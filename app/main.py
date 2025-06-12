@@ -267,26 +267,26 @@ async def startup_event():
 
 
 
-@app.on_event("startup")
-async def startup_event():
-    # Start background tasks
-    asyncio.create_task(run_background_tasks_safe())
+# @app.on_event("startup")
+# async def startup_event():
+#     # Start background tasks
+#     asyncio.create_task(run_background_tasks_safe())
 
-async def run_background_tasks_safe():
-    """Safe version of background tasks with proper error handling"""
-    while True:
-        try:
-            # Use simple versions that don't depend on Redis being available
-            await cleanup_abandoned_conversations()
-            await process_queues()
+# async def run_background_tasks_safe():
+#     """Safe version of background tasks with proper error handling"""
+#     while True:
+#         try:
+#             # Use simple versions that don't depend on Redis being available
+#             await cleanup_abandoned_conversations()
+#             await process_queues()
             
-            # Wait 30 seconds before next run
-            await asyncio.sleep(30)
+#             # Wait 30 seconds before next run
+#             await asyncio.sleep(30)
             
-        except Exception as e:
-            logger.error(f"Background task error: {e}")
-            # Wait longer if there's an error
-            await asyncio.sleep(60)
+#         except Exception as e:
+#             logger.error(f"Background task error: {e}")
+#             # Wait longer if there's an error
+#             await asyncio.sleep(60)
 
 
 @app.on_event("shutdown")
