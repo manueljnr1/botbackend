@@ -1,4 +1,3 @@
-# app/auth/supabase_service.py
 import os
 import logging
 from typing import Dict, Optional, Any
@@ -6,13 +5,10 @@ import httpx
 from datetime import datetime
 from supabase import create_client, Client
 
-
 from dotenv import load_dotenv, dotenv_values
 
 # Force reload the .env file
 load_dotenv(dotenv_path=".env", override=True)
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -34,36 +30,50 @@ class SimpleUser:
 class SupabaseAuthService:
     """Supabase authentication service for handling auth operations"""
     
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None):
+    def __init__(self, supabase_url: Optional[str] = None, 
+                 service_key: Optional[str] = None, 
+                 anon_key: Optional[str] = None):
         """
-        Initialize Supabase Auth Service with environment variables as fallback
+        Initialize Supabase Auth Service with dual clients
         """
         self.supabase_url = supabase_url or os.getenv("SUPABASE_URL")
-        self.supabase_key = supabase_key or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+        
+        # Get both keys
+        self.service_key = service_key or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        self.anon_key = anon_key or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
         
         if not self.supabase_url:
             raise ValueError("SUPABASE_URL is required")
         
-        if not self.supabase_key:
-            raise ValueError("SUPABASE_KEY/SUPABASE_ANON_KEY/SUPABASE_SERVICE_KEY is required")
+        if not self.service_key:
+            raise ValueError("SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY is required for admin operations")
+            
+        if not self.anon_key:
+            raise ValueError("SUPABASE_ANON_KEY is required for client operations")
         
         self.supabase_url = self.supabase_url.rstrip('/')
         
-        # 🔥 THIS WAS MISSING! Create the actual Supabase client
+        # Create dual clients
         try:
-            self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
-            logger.info("✅ Supabase client initialized successfully")
+            # Admin client - for server-side admin operations
+            self.admin_client: Client = create_client(self.supabase_url, self.service_key)
+            logger.info("✅ Supabase admin client initialized successfully")
+            
+            # Public client - for regular auth operations
+            self.public_client: Client = create_client(self.supabase_url, self.anon_key)
+            logger.info("✅ Supabase public client initialized successfully")
+            
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Supabase client: {e}")
+            logger.error(f"❌ Failed to initialize Supabase clients: {e}")
             raise
         
-        logger.info("Supabase auth service initialized")
+        logger.info("Supabase auth service initialized with dual clients")
 
     async def get_user_from_token(self, token: str) -> Dict[str, Any]:
-        """Get user information from access token"""
+        """Get user information from access token - uses public client"""
         try:
-            # Use the Supabase client to get user from token
-            user_response = self.supabase.auth.get_user(token)
+            # Use the public client to get user from token
+            user_response = self.public_client.auth.get_user(token)
             
             if user_response.user:
                 return {
@@ -88,7 +98,7 @@ class SupabaseAuthService:
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """
-        Sign in user with email and password
+        Sign in user with email and password - uses public client
         """
         try:
             if not email or not password:
@@ -99,8 +109,8 @@ class SupabaseAuthService:
                     "user": None
                 }
             
-            # Use Supabase client for sign in
-            auth_response = self.supabase.auth.sign_in_with_password({
+            # Use public client for regular sign in
+            auth_response = self.public_client.auth.sign_in_with_password({
                 "email": email,
                 "password": password
             })
@@ -142,10 +152,10 @@ class SupabaseAuthService:
             }
 
     async def delete_user(self, user_id: str) -> Dict[str, Any]:
-        """Delete a user from Supabase (for cleanup)"""
+        """Delete a user from Supabase - uses admin client"""
         try:
             # Use admin client to delete user
-            response = self.supabase.auth.admin.delete_user(user_id)
+            response = self.admin_client.auth.admin.delete_user(user_id)
             logger.info(f"✅ Deleted Supabase user: {user_id}")
             return {"success": True, "response": response}
         except Exception as e:
@@ -153,10 +163,10 @@ class SupabaseAuthService:
             return {"success": False, "error": str(e)}
 
     async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
-        """Update user metadata in Supabase"""
+        """Update user metadata in Supabase - uses admin client"""
         try:
-            # Get current user metadata
-            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            # Get current user metadata using admin client
+            user_response = self.admin_client.auth.admin.get_user_by_id(user_id)
             
             if not user_response.user:
                 return {"success": False, "error": "User not found"}
@@ -165,8 +175,8 @@ class SupabaseAuthService:
             current_metadata = user_response.user.user_metadata or {}
             updated_metadata = {**current_metadata, **additional_metadata}
             
-            # Update user metadata
-            update_response = self.supabase.auth.admin.update_user_by_id(
+            # Update user metadata using admin client
+            update_response = self.admin_client.auth.admin.update_user_by_id(
                 user_id,
                 {"user_metadata": updated_metadata}
             )
@@ -182,9 +192,9 @@ class SupabaseAuthService:
             return {"success": False, "error": str(e)}
         
     async def get_user_metadata(self, user_id: str) -> Dict[str, Any]:
-        """Get user metadata from Supabase"""
+        """Get user metadata from Supabase - uses admin client"""
         try:
-            user_response = self.supabase.auth.admin.get_user_by_id(user_id)
+            user_response = self.admin_client.auth.admin.get_user_by_id(user_id)
             
             if not user_response.user:
                 return {"success": False, "error": "User not found"}
@@ -201,7 +211,7 @@ class SupabaseAuthService:
 
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Create a new user account
+        Create a new user account - uses admin client
         """
         try:
             if not email or not password:
@@ -216,8 +226,8 @@ class SupabaseAuthService:
                     "error": "Password must be at least 6 characters"
                 }
             
-            # Use Supabase client to create user
-            auth_response = self.supabase.auth.admin.create_user({
+            # Use admin client to create user
+            auth_response = self.admin_client.auth.admin.create_user({
                 "email": email,
                 "password": password,
                 "user_metadata": metadata or {},
@@ -237,7 +247,7 @@ class SupabaseAuthService:
                 }
                     
         except Exception as e:
-    # Log the raw, detailed error message from Supabase
+            # Log the raw, detailed error message from Supabase
             logger.error(f"❌ Supabase create_user raw error: {e}")
             
             # Handle common Supabase errors
@@ -259,7 +269,7 @@ class SupabaseAuthService:
 
     async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
         """
-        Send password reset email using Supabase
+        Send password reset email - uses public client
         """
         try:
             if not email:
@@ -268,12 +278,12 @@ class SupabaseAuthService:
                     "error": "Email is required"
                 }
             
-            # Use Supabase client to send password reset
+            # Use public client to send password reset
             options = {}
             if redirect_to:
                 options["redirect_to"] = redirect_to
             
-            self.supabase.auth.reset_password_for_email(email, options)
+            self.public_client.auth.reset_password_for_email(email, options)
             
             return {
                 "success": True,
@@ -308,7 +318,7 @@ class SupabaseAuthService:
 
     async def verify_password_reset(self, token: str, new_password: str):
         """
-        Simple password reset using admin API
+        Simple password reset using admin API - uses admin client
         """
         try:
             # Decode token to get user ID
@@ -325,8 +335,8 @@ class SupabaseAuthService:
             
             logger.info(f"🔄 Updating password for user: {user_email}")
             
-            # Use admin API directly
-            admin_response = self.supabase.auth.admin.update_user_by_id(
+            # Use admin client directly
+            admin_response = self.admin_client.auth.admin.update_user_by_id(
                 uid=user_id,
                 attributes={"password": new_password}
             )
@@ -373,69 +383,22 @@ class DummySupabaseService:
             "error": "Supabase not configured"
         }
     
+    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
+        """Dummy get user from token method"""
+        logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
+        return {
+            "success": False,
+            "error": "Supabase not configured",
+            "user": None
+        }
     
-    
-    async def verify_password_reset(self, token: str, new_password: str):
-        """
-        Simple password reset using admin API
-        """
-        try:
-            # Decode token to get user ID
-            import jwt
-            decoded = jwt.decode(token, options={"verify_signature": False})
-            user_id = decoded.get('sub')
-            user_email = decoded.get('email')
-            
-            if not user_id:
-                return {
-                    "success": False,
-                    "error": "Invalid token - no user ID found"
-                }
-            
-            logger.info(f"🔄 Updating password for user: {user_email}")
-            
-            # Use admin API directly
-            admin_response = self.supabase.auth.admin.update_user_by_id(
-                uid=user_id,
-                attributes={"password": new_password}
-            )
-            
-            if admin_response.user:
-                logger.info("✅ Password updated successfully")
-                return {
-                    "success": True,
-                    "user": admin_response.user,
-                    "message": "Password reset successful"
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "Failed to update password"
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Password reset error: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-        
-        async def get_user_from_token(self, token: str) -> Dict[str, Any]:
-            """Dummy get user from token method"""
-            logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
-            return {
-                "success": False,
-                "error": "Supabase not configured",
-                "user": None
-            }
-        
-        async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
-            """Dummy update user metadata method"""
-            logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
-            return {
-                "success": False,
-                "error": "Supabase not configured"
-            }
+    async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
+        """Dummy update user metadata method"""
+        logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
 
 
 def check_supabase_config() -> bool:
@@ -443,12 +406,13 @@ def check_supabase_config() -> bool:
     Check if Supabase configuration is valid
     
     Returns:
-        bool: True if both URL and key are configured, False otherwise
+        bool: True if both URL and both keys are configured, False otherwise
     """
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+    service_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
     
-    return bool(supabase_url and supabase_key)
+    return bool(supabase_url and service_key and anon_key)
 
 
 # Create the global service instance
