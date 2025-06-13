@@ -92,6 +92,35 @@ def verify_slack_signature(request_body: bytes, timestamp: str, signature: str, 
         logger.error(f"Error verifying Slack signature: {e}")
         return False
 
+
+
+
+@router.post("/events")
+async def handle_slack_events(request: Request):
+    """
+    General Slack events endpoint for challenge verification and routing
+    """
+    try:
+        body = await request.body()
+        data = json.loads(body)
+        
+        # Handle URL verification challenge FIRST
+        if data.get("type") == "url_verification":
+            challenge = data.get("challenge")
+            logger.info(f"✅ Slack URL verification challenge: {challenge}")
+            return challenge  # Return string directly
+        
+        # For actual events, you could route to tenant-specific handlers
+        # or handle them here directly
+        logger.info(f"📢 Received Slack event: {data.get('type')}")
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"Error in Slack events endpoint: {e}")
+        return {"status": "ok"}
+
+
 # SINGLE WEBHOOK HANDLER - REMOVED DUPLICATE
 @router.post("/webhook/{tenant_id}")
 async def slack_webhook(
