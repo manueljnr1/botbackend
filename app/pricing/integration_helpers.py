@@ -12,6 +12,7 @@ from app.database import get_db
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+from app.tenants.models import Tenant 
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,292 @@ logger = logging.getLogger(__name__)
 def check_message_limit_dependency(tenant_id: int, db: Session = Depends(get_db)):
     """Legacy function name - redirects to conversation limit check"""
     return check_conversation_limit_dependency(tenant_id, db)
+
+def is_super_tenant_unlimited(tenant_id: int, db: Session) -> bool:
+    """Check if tenant is super tenant with unlimited privileges"""
+    try:
+        tenant = db.query(Tenant).filter(
+            Tenant.id == tenant_id,
+            Tenant.is_super_tenant == True,
+            Tenant.is_active == True
+        ).first()
+        return tenant is not None
+    except Exception as e:
+        logger.error(f"Error checking super tenant status: {e}")
+        return False
+    
+
+def get_effective_tenant_for_limits(tenant_id: int, db: Session) -> int:
+    """
+    Get the effective tenant ID for limit checking
+    If super tenant is impersonating, use their unlimited privileges
+    """
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            return tenant_id
+        
+        # If this is a super tenant, they have unlimited access regardless of impersonation
+        if tenant.is_super_tenant:
+            return tenant_id  # Return the super tenant ID to trigger unlimited access
+        
+        # For regular tenants, just return their ID
+        return tenant_id
+        
+    except Exception as e:
+        logger.error(f"Error getting effective tenant: {e}")
+        return tenant_id
+    
+
+def check_conversation_limit_dependency_with_super_tenant(tenant_id: int, db: Session = Depends(get_db)):
+    """Enhanced conversation limit check that bypasses for super tenants"""
+    logger.info(f"🔍 Checking conversation limit for tenant {tenant_id}")
+    
+    # First check if this is a super tenant
+    if is_super_tenant_unlimited(tenant_id, db):
+        logger.info(f"🔓 Super tenant {tenant_id} - bypassing conversation limits")
+        return  # Super tenants have unlimited access
+    
+    # Otherwise use normal limit checking
+    try:
+        pricing_service = PricingService(db)
+        
+        if not pricing_service.check_message_limit(tenant_id):
+            logger.warning(f"🚫 Conversation limit exceeded for tenant {tenant_id}")
+            
+            try:
+                usage_stats = pricing_service.get_usage_stats(tenant_id)
+                subscription = pricing_service.get_tenant_subscription(tenant_id)
+                plan_name = subscription.plan.name if subscription else "Unknown"
+                
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Conversation limit exceeded",
+                        "message": f"You have reached your monthly limit of {usage_stats.messages_limit} conversations on the {plan_name} plan. Please upgrade to continue.",
+                        "current_usage": usage_stats.messages_used,
+                        "limit": usage_stats.messages_limit,
+                        "plan_name": plan_name,
+                        "upgrade_required": True,
+                        "conversation_definition": "A conversation is any length of interaction within 24 hours"
+                    }
+                )
+            except:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Conversation limit exceeded",
+                        "message": "You have reached your monthly conversation limit. Please upgrade your plan to continue.",
+                        "upgrade_required": True,
+                        "conversation_definition": "A conversation is any length of interaction within 24 hours"
+                    }
+                )
+        
+        logger.info(f"✅ Conversation limit check passed for tenant {tenant_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error checking conversation limit for tenant {tenant_id}: {e}")
+
+
+
+
+def check_integration_limit_dependency_with_super_tenant(tenant_id: int, db: Session = Depends(get_db)):
+    """Enhanced integration limit check that bypasses for super tenants"""
+    logger.info(f"🔍 Checking integration limit for tenant {tenant_id}")
+    
+    # First check if this is a super tenant
+    if is_super_tenant_unlimited(tenant_id, db):
+        logger.info(f"🔓 Super tenant {tenant_id} - bypassing integration limits")
+        return  # Super tenants have unlimited access
+    
+    # Otherwise use normal limit checking
+    try:
+        pricing_service = PricingService(db)
+        
+        if not pricing_service.check_integration_limit(tenant_id):
+            logger.warning(f"🚫 Integration limit exceeded for tenant {tenant_id}")
+            
+            try:
+                subscription = pricing_service.get_tenant_subscription(tenant_id)
+                plan_name = subscription.plan.name if subscription else "Unknown"
+                current_count = subscription.integrations_count if subscription else 0
+                limit = subscription.plan.max_integrations if subscription else 0
+                
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Integration limit exceeded",
+                        "message": f"You have reached your integration limit of {limit} on the {plan_name} plan. Please upgrade to add more integrations.",
+                        "current_usage": current_count,
+                        "limit": limit,
+                        "plan_name": plan_name,
+                        "upgrade_required": True
+                    }
+                )
+            except:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": "Integration limit exceeded",
+                        "message": "You have reached your integration limit. Please upgrade your plan to add more integrations.",
+                        "upgrade_required": True
+                    }
+                )
+        
+        logger.info(f"✅ Integration limit check passed for tenant {tenant_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error checking integration limit for tenant {tenant_id}: {e}")
+
+
+
+
+def track_conversation_started_with_super_tenant(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+    """
+    Enhanced conversation tracking that handles super tenants
+    - Super tenants: Track for analytics but don't count against limits
+    - Regular tenants: Normal tracking with limit enforcement
+    """
+    try:
+        logger.info(f"📊 Enhanced tracking for tenant {tenant_id}, user: {user_identifier}, platform: {platform}")
+        
+        # Check if super tenant
+        if is_super_tenant_unlimited(tenant_id, db):
+            logger.info(f"🔓 Super tenant {tenant_id} - tracking for analytics only")
+            
+            # For super tenants, we still want to track for analytics but bypass limits
+            try:
+                # Check if ConversationSession model exists for analytics
+                from app.pricing.models import ConversationSession
+                
+                last_24_hours = datetime.utcnow() - timedelta(hours=24)
+                existing_conversation = db.query(ConversationSession).filter(
+                    ConversationSession.tenant_id == tenant_id,
+                    ConversationSession.user_identifier == user_identifier,
+                    ConversationSession.platform == platform,
+                    ConversationSession.last_activity > last_24_hours,
+                    ConversationSession.is_active == True
+                ).first()
+                
+                if existing_conversation:
+                    # Update existing conversation
+                    existing_conversation.last_activity = datetime.utcnow()
+                    existing_conversation.message_count += 1
+                    duration = (existing_conversation.last_activity - existing_conversation.started_at).total_seconds() / 60
+                    existing_conversation.duration_minutes = int(duration)
+                    db.commit()
+                    logger.info(f"✅ Updated existing conversation for super tenant {tenant_id}")
+                else:
+                    # Create new conversation session for analytics (but don't count for billing)
+                    new_conversation = ConversationSession(
+                        tenant_id=tenant_id,
+                        user_identifier=user_identifier,
+                        platform=platform,
+                        started_at=datetime.utcnow(),
+                        last_activity=datetime.utcnow(),
+                        message_count=1,
+                        counted_for_billing=False  # ✅ Don't count for super tenants
+                    )
+                    db.add(new_conversation)
+                    db.commit()
+                    logger.info(f"✅ Created analytics-only conversation for super tenant {tenant_id}")
+                
+                return True
+                
+            except ImportError:
+                # ConversationSession model not available, just return success
+                logger.info(f"✅ Super tenant {tenant_id} - analytics tracking skipped (model not available)")
+                return True
+            except Exception as analytics_error:
+                logger.warning(f"⚠️ Analytics tracking failed for super tenant {tenant_id}: {analytics_error}")
+                return True  # Still return success for super tenants
+        
+        # For regular tenants, use normal tracking with limit enforcement
+        logger.info(f"👤 Regular tenant {tenant_id} - using normal tracking with limits")
+        return track_conversation_started(tenant_id, user_identifier, platform, db)
+        
+    except Exception as e:
+        logger.error(f"💥 Error in enhanced conversation tracking: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+def track_conversation_started_enhanced(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+    """
+    Alias for the enhanced tracking function - use this in your endpoints
+    """
+    return track_conversation_started_with_super_tenant(tenant_id, user_identifier, platform, db)
+
+def track_message_sent_with_super_tenant(tenant_id: int, db: Session, count: int = 1, 
+                                       user_identifier: str = None, platform: str = "web") -> bool:
+    """
+    Enhanced message tracking that handles super tenants
+    """
+    try:
+        logger.info(f"📊 Enhanced message tracking for tenant {tenant_id}, count: {count}, platform: {platform}")
+        
+        # Super tenants don't need message tracking for limits
+        if is_super_tenant_unlimited(tenant_id, db):
+            logger.info(f"🔓 Super tenant {tenant_id} - skipping message tracking for limits")
+            
+            # Still track conversation if user_identifier provided (for analytics)
+            if user_identifier:
+                return track_conversation_started_with_super_tenant(tenant_id, user_identifier, platform, db)
+            return True
+        
+        # Regular tenants use normal tracking
+        if user_identifier:
+            return track_conversation_started(tenant_id, user_identifier, platform, db)
+        else:
+            # Fallback to original message tracking
+            pricing_service = PricingService(db)
+            return pricing_service.log_message_usage(tenant_id, count)
+        
+    except Exception as e:
+        logger.error(f"💥 Error in enhanced message tracking: {e}")
+        return False
+    
+
+
+
+def smart_conversation_tracking(tenant_id: int, user_identifier: str, platform: str, db: Session) -> Dict[str, Any]:
+    """
+    Smart tracking that returns detailed information about what happened
+    Use this for better debugging and monitoring
+    """
+    try:
+        is_super = is_super_tenant_unlimited(tenant_id, db)
+        
+        tracking_result = track_conversation_started_with_super_tenant(
+            tenant_id, user_identifier, platform, db
+        )
+        
+        return {
+            "success": tracking_result,
+            "tenant_id": tenant_id,
+            "is_super_tenant": is_super,
+            "tracking_type": "analytics_only" if is_super else "full_billing",
+            "platform": platform,
+            "user_identifier": user_identifier,
+            "unlimited_access": is_super,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"💥 Error in smart conversation tracking: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "tenant_id": tenant_id,
+            "is_super_tenant": False,
+            "tracking_type": "failed"
+        }
+
 
 
 def check_conversation_limit_dependency(tenant_id: int, db: Session = Depends(get_db)):

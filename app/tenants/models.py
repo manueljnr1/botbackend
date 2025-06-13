@@ -37,7 +37,18 @@ class Tenant(Base):
     enable_feedback_system = Column(Boolean, default=True)
     feedback_notification_enabled = Column(Boolean, default=True)
 
+
+
     
+     #  Super tenant 
+    is_super_tenant = Column(Boolean, default=False)
+    # 🆕 NEW: Can impersonate other tenants
+    can_impersonate = Column(Boolean, default=False)
+    # 🆕 NEW: Current impersonated tenant (if any)
+    impersonating_tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+
+
+
 
     # Relationships
     users = relationship("User", back_populates="tenant") # Assuming User model has a back_populates="tenant"
@@ -49,6 +60,7 @@ class Tenant(Base):
     subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
     agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="tenant")
+    impersonating_tenant = relationship("Tenant", remote_side=[id], foreign_keys=[impersonating_tenant_id])
    
 
     # Integration fields

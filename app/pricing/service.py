@@ -549,3 +549,43 @@ class PricingService:
             "next_billing_date": subscription.current_period_end,
             "conversation_definition": "A conversation is any length of interaction within 24 hours"
         }
+    
+    def check_message_limit_with_super_tenant(self, tenant_id: int) -> bool:
+        """
+        Enhanced message limit check that bypasses for super tenants
+        """
+        try:
+            # Check if super tenant first
+            from app.tenants.super_tenant_service import SuperTenantService
+            super_service = SuperTenantService(self.db)
+            
+            if super_service.is_super_tenant(tenant_id):
+                logger.info(f"🔓 Super tenant {tenant_id} - unlimited message access")
+                return True  # Super tenants have unlimited access
+            
+            # Otherwise use normal limit checking
+            return self.check_message_limit(tenant_id)
+            
+        except Exception as e:
+            logger.error(f"Error checking message limit with super tenant: {e}")
+            return self.check_message_limit(tenant_id)  # Fallback to normal check
+
+    def check_integration_limit_with_super_tenant(self, tenant_id: int) -> bool:
+        """
+        Enhanced integration limit check that bypasses for super tenants
+        """
+        try:
+            # Check if super tenant first
+            from app.tenants.super_tenant_service import SuperTenantService
+            super_service = SuperTenantService(self.db)
+            
+            if super_service.is_super_tenant(tenant_id):
+                logger.info(f"🔓 Super tenant {tenant_id} - unlimited integration access")
+                return True  # Super tenants have unlimited access
+            
+            # Otherwise use normal limit checking
+            return self.check_integration_limit(tenant_id)
+            
+        except Exception as e:
+            logger.error(f"Error checking integration limit with super tenant: {e}")
+            return self.check_integration_limit(tenant_id)  # Fallback to normal check

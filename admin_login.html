@@ -996,6 +996,118 @@
                 container.innerHTML = overviewHtml + tenantsTable;
             }
 
+
+            async loadUsers() {
+                try {
+                    const data = await this.makeApiRequest('/admin/users');
+                    this.renderUsers(data);
+                } catch (error) {
+                    console.error('Error loading users:', error);
+                    document.getElementById('usersContainer').innerHTML = '<p class="error">Error loading users</p>';
+                }
+            }
+
+            renderUsers(users) {
+                const container = document.getElementById('usersContainer');
+                
+                if (users.length === 0) {
+                    container.innerHTML = '<p>No users found.</p>';
+                    return;
+                }
+
+                const tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Status</th>
+                                <th>Admin</th>
+                                <th>Tenant ID</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${users.map(user => `
+                                <tr>
+                                    <td>${user.id}</td>
+                                    <td>${user.username}</td>
+                                    <td>${user.email}</td>
+                                    <td>
+                                        <span class="${user.is_active ? 'status-active' : 'status-inactive'}">
+                                            ${user.is_active ? 'Active' : 'Inactive'}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="${user.is_admin ? 'status-active' : 'status-inactive'}">
+                                            ${user.is_admin ? 'Yes' : 'No'}
+                                        </span>
+                                    </td>
+                                    <td>${user.tenant_id || 'N/A'}</td>
+                                    <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button onclick="adminDashboard.editUser(${user.id})" 
+                                                    class="btn btn-warning btn-small">Edit</button>
+                                            <button onclick="adminDashboard.deleteUser(${user.id})" 
+                                                    class="btn btn-danger btn-small">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+                container.innerHTML = tableHtml;
+            }
+
+            async populateFilterDropdowns() {
+                try {
+                    const tenantsData = await this.makeApiRequest('/admin/tenants/overview');
+                    
+                    const documentFilter = document.getElementById('documentTenantFilter');
+                    const faqFilter = document.getElementById('faqTenantFilter');
+                    const subscriptionFilter = document.getElementById('subscriptionTenantFilter');
+                    
+                    [documentFilter, faqFilter, subscriptionFilter].forEach(filter => {
+                        if (filter) {
+                            filter.innerHTML = '<option value="">All Tenants</option>';
+                            tenantsData.tenant_stats.forEach(tenant => {
+                                const option = new Option(tenant.name, tenant.id);
+                                filter.add(option);
+                            });
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error populating filter dropdowns:', error);
+                }
+            }
+
+            // Placeholder methods for user management
+            async editUser(userId) {
+                alert(`Edit user functionality not fully implemented yet. User ID: ${userId}`);
+            }
+
+            async deleteUser(userId) {
+                if (!confirm('Are you sure you want to delete this user?')) {
+                    return;
+                }
+                
+                try {
+                    await this.makeApiRequest(`/admin/users/${userId}`, {
+                        method: 'DELETE'
+                    });
+                    alert('User deleted successfully');
+                    await this.loadUsers();
+                } catch (error) {
+                    alert('Error deleting user: ' + error.message);
+                }
+            }
+
+
             async viewTenant(tenantId) {
                 try {
                     const tenant = await this.makeApiRequest(`/admin/tenants/${tenantId}`);
@@ -1137,25 +1249,102 @@
                 }
             }
 
-            showAddTenantModal() {
-                alert('Tenant creation functionality requires additional backend endpoints for user registration and tenant setup.');
-            }
 
-            async loadUsers() {
+
+            async loadPricingManagement() {
                 try {
-                    const data = await this.makeApiRequest('/admin/users');
-                    this.renderUsers(data);
+                    // For now, just show a placeholder message since pricing endpoints may not be implemented
+                    const container = document.getElementById('pricingPlansContainer');
+                    if (container) {
+                        container.innerHTML = '<p>Pricing management functionality is under development.</p>';
+                    }
+                    
+                    const subscriptionsContainer = document.getElementById('subscriptionsContainer');
+                    if (subscriptionsContainer) {
+                        subscriptionsContainer.innerHTML = '<p>Subscription management functionality is under development.</p>';
+                    }
+                    
+                    const billingContainer = document.getElementById('billingHistoryContainer');
+                    if (billingContainer) {
+                        billingContainer.innerHTML = '<p>Billing history functionality is under development.</p>';
+                    }
                 } catch (error) {
-                    console.error('Error loading users:', error);
-                    document.getElementById('usersContainer').innerHTML = '<p class="error">Error loading users</p>';
+                    console.error('Error loading pricing management:', error);
                 }
             }
 
-            renderUsers(users) {
-                const container = document.getElementById('usersContainer');
+
+            async searchSession() {
+                const sessionId = document.getElementById('sessionIdSearch').value.trim();
+                if (!sessionId) {
+                    alert('Please enter a session ID');
+                    return;
+                }
+
+                try {
+                    const data = await this.makeApiRequest(`/admin/session-details/${sessionId}`);
+                    this.renderSessionDetails(data);
+                } catch (error) {
+                    document.getElementById('sessionDetails').innerHTML = `
+                        <div class="error">Session not found or error: ${error.message}</div>
+                    `;
+                }
+            }
+
+            renderSessionDetails(session) {
+                const container = document.getElementById('sessionDetails');
                 
-                if (users.length === 0) {
-                    container.innerHTML = '<p>No users found.</p>';
+                const messagesHtml = session.messages.map(msg => `
+                    <div style="margin: 10px 0; padding: 15px; background: ${msg.is_from_user ? '#e3f2fd' : '#f3e5f5'}; border-radius: 8px; border-left: 4px solid ${msg.is_from_user ? '#2196f3' : '#9c27b0'};">
+                        <div style="font-weight: 600; color: ${msg.is_from_user ? '#1976d2' : '#7b1fa2'}; margin-bottom: 5px;">
+                            ${msg.is_from_user ? 'User' : 'Bot'} - ${new Date(msg.created_at).toLocaleString()}
+                        </div>
+                        <div>${msg.content}</div>
+                    </div>
+                `).join('');
+
+                container.innerHTML = `
+                    <div style="background: white; padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);">
+                        <h4>Session Details</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                            <div><strong>Session ID:</strong><br>${session.session_id}</div>
+                            <div><strong>Tenant:</strong><br>${session.tenant_name} (ID: ${session.tenant_id})</div>
+                            <div><strong>User:</strong><br>${session.user_identifier || 'Anonymous'}</div>
+                            <div><strong>Status:</strong><br>
+                                <span class="${session.is_active ? 'status-active' : 'status-inactive'}">
+                                    ${session.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                            </div>
+                            <div><strong>Messages:</strong><br>${session.message_count}</div>
+                            <div><strong>Created:</strong><br>${new Date(session.created_at).toLocaleString()}</div>
+                        </div>
+                        <h4>Messages (${session.messages.length}):</h4>
+                        <div style="max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px;">
+                            ${messagesHtml}
+                        </div>
+                    </div>
+                `;
+            }
+
+
+
+            async loadDocuments() {
+                try {
+                    const tenantId = document.getElementById('documentTenantFilter').value;
+                    const endpoint = tenantId ? `/admin/documents?tenant_id=${tenantId}` : '/admin/documents';
+                    const data = await this.makeApiRequest(endpoint);
+                    this.renderDocuments(data);
+                } catch (error) {
+                    console.error('Error loading documents:', error);
+                    document.getElementById('documentsContainer').innerHTML = '<p class="error">Error loading documents</p>';
+                }
+            }
+
+            renderDocuments(documents) {
+                const container = document.getElementById('documentsContainer');
+                
+                if (documents.length === 0) {
+                    container.innerHTML = '<p>No documents found.</p>';
                     return;
                 }
 
@@ -1164,38 +1353,26 @@
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>Username</th>
-                                <th>Email</th>
-                                <th>Status</th>
-                                <th>Admin</th>
-                                <th>Tenant ID</th>
+                                <th>Name</th>
+                                <th>Tenant</th>
+                                <th>Type</th>
                                 <th>Created</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${users.map(user => `
+                            ${documents.map(doc => `
                                 <tr>
-                                    <td>${user.id}</td>
-                                    <td>${user.username}</td>
-                                    <td>${user.email}</td>
-                                    <td>
-                                        <span class="${user.is_active ? 'status-active' : 'status-inactive'}">
-                                            ${user.is_active ? 'Active' : 'Inactive'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="${user.is_admin ? 'status-active' : 'status-inactive'}">
-                                            ${user.is_admin ? 'Yes' : 'No'}
-                                        </span>
-                                    </td>
-                                    <td>${user.tenant_id || 'N/A'}</td>
-                                    <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                                    <td>${doc.id}</td>
+                                    <td>${doc.name}</td>
+                                    <td>${doc.tenant_name}</td>
+                                    <td>${doc.document_type}</td>
+                                    <td>${new Date(doc.created_at).toLocaleDateString()}</td>
                                     <td>
                                         <div class="action-buttons">
-                                            <button onclick="adminDashboard.editUser(${user.id})" 
-                                                    class="btn btn-warning btn-small">Edit</button>
-                                            <button onclick="adminDashboard.deleteUser(${user.id})" 
+                                            <button onclick="adminDashboard.viewDocument(${doc.id})" 
+                                                    class="btn btn-secondary btn-small">View</button>
+                                            <button onclick="adminDashboard.deleteDocument(${doc.id})" 
                                                     class="btn btn-danger btn-small">Delete</button>
                                         </div>
                                     </td>
@@ -1208,16 +1385,398 @@
                 container.innerHTML = tableHtml;
             }
 
+            async viewDocument(documentId) {
+                try {
+                    const document = await this.makeApiRequest(`/admin/documents/${documentId}`);
+                    this.showDocumentModal(document);
+                } catch (error) {
+                    alert('Error loading document details: ' + error.message);
+                }
+            }
+
+            showDocumentModal(document) {
+                const modal = document.createElement('div');
+                modal.className = 'modal';
+                
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>Document Details: ${document.name}</h3>
+                            <button onclick="this.closest('.modal').remove()" class="btn btn-danger btn-small">Close</button>
+                        </div>
+                        <div class="grid-2">
+                            <div><strong>ID:</strong> ${document.id}</div>
+                            <div><strong>Name:</strong> ${document.name}</div>
+                            <div><strong>Tenant ID:</strong> ${document.tenant_id}</div>
+                            <div><strong>Type:</strong> ${document.document_type}</div>
+                            <div><strong>Created:</strong> ${new Date(document.created_at).toLocaleString()}</div>
+                            <div><strong>File Path:</strong> ${document.file_path}</div>
+                        </div>
+                        ${document.description ? `
+                            <div style="margin-top: 20px;">
+                                <strong>Description:</strong>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                                    ${document.description}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+
+                document.body.appendChild(modal);
+            }
+
+            async deleteDocument(documentId) {
+                if (!confirm('Are you sure you want to delete this document?')) {
+                    return;
+                }
+
+                try {
+                    await this.makeApiRequest(`/admin/documents/${documentId}`, {
+                        method: 'DELETE'
+                    });
+                    alert('Document deleted successfully');
+                    await this.loadDocuments();
+                } catch (error) {
+                    alert('Error deleting document: ' + error.message);
+                }
+            }
+
+            async loadFaqs() {
+                try {
+                    const tenantId = document.getElementById('faqTenantFilter').value;
+                    const endpoint = tenantId ? `/admin/faqs?tenant_id=${tenantId}` : '/admin/faqs';
+                    const data = await this.makeApiRequest(endpoint);
+                    this.renderFaqs(data);
+                } catch (error) {
+                    console.error('Error loading FAQs:', error);
+                    document.getElementById('faqsContainer').innerHTML = '<p class="error">Error loading FAQs</p>';
+                }
+            }
+
+            renderFaqs(faqs) {
+                const container = document.getElementById('faqsContainer');
+                
+                if (faqs.length === 0) {
+                    container.innerHTML = '<p>No FAQs found.</p>';
+                    return;
+                }
+
+                const tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Question</th>
+                                <th>Answer</th>
+                                <th>Tenant</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${faqs.map(faq => `
+                                <tr>
+                                    <td>${faq.id}</td>
+                                    <td>${faq.question.substring(0, 50)}${faq.question.length > 50 ? '...' : ''}</td>
+                                    <td>${faq.answer.substring(0, 50)}${faq.answer.length > 50 ? '...' : ''}</td>
+                                    <td>${faq.tenant_name}</td>
+                                    <td>${new Date(faq.created_at).toLocaleDateString()}</td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button onclick="adminDashboard.viewFaq(${faq.id})" 
+                                                    class="btn btn-secondary btn-small">View</button>
+                                            <button onclick="adminDashboard.editFaq(${faq.id})" 
+                                                    class="btn btn-warning btn-small">Edit</button>
+                                            <button onclick="adminDashboard.deleteFaq(${faq.id})" 
+                                                    class="btn btn-danger btn-small">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+                container.innerHTML = tableHtml;
+            }
+
+            async viewFaq(faqId) {
+                try {
+                    const faq = await this.makeApiRequest(`/admin/faqs/${faqId}`);
+                    this.showFaqModal(faq, 'view');
+                } catch (error) {
+                    alert('Error loading FAQ details: ' + error.message);
+                }
+            }
+
+            async editFaq(faqId) {
+                try {
+                    const faq = await this.makeApiRequest(`/admin/faqs/${faqId}`);
+                    this.showFaqModal(faq, 'edit');
+                } catch (error) {
+                    alert('Error loading FAQ details: ' + error.message);
+                }
+            }
+
+            showFaqModal(faq, mode) {
+                const isEdit = mode === 'edit';
+                const modal = document.createElement('div');
+                modal.className = 'modal';
+                
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3>${isEdit ? 'Edit' : 'View'} FAQ (ID: ${faq.id})</h3>
+                            <button onclick="this.closest('.modal').remove()" class="btn btn-danger btn-small">Close</button>
+                        </div>
+                        <form id="faqForm">
+                            <div class="form-group">
+                                <label>Question:</label>
+                                <textarea id="faqQuestion" ${!isEdit ? 'readonly' : ''} style="min-height: 80px;">${faq.question}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Answer:</label>
+                                <textarea id="faqAnswer" ${!isEdit ? 'readonly' : ''} style="min-height: 120px;">${faq.answer}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Tenant ID:</label>
+                                <input type="number" value="${faq.tenant_id}" readonly style="background: #f8f9fa;">
+                            </div>
+                            <div class="form-group">
+                                <label>Created:</label>
+                                <input type="text" value="${new Date(faq.created_at).toLocaleString()}" readonly style="background: #f8f9fa;">
+                            </div>
+                            ${isEdit ? `
+                                <div style="margin-top: 20px;">
+                                    <button type="submit" class="btn btn-success">Save Changes</button>
+                                    <button type="button" onclick="this.closest('.modal').remove()" class="btn btn-secondary">Cancel</button>
+                                </div>
+                            ` : ''}
+                        </form>
+                    </div>
+                `;
+
+                if (isEdit) {
+                    modal.querySelector('#faqForm').addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        await this.saveFaqChanges(faq.id, modal);
+                    });
+                }
+
+                document.body.appendChild(modal);
+            }
+
+            async saveFaqChanges(faqId, modal) {
+                try {
+                    const updateData = {
+                        question: modal.querySelector('#faqQuestion').value,
+                        answer: modal.querySelector('#faqAnswer').value
+                    };
+
+                    await this.makeApiRequest(`/admin/faqs/${faqId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(updateData)
+                    });
+
+                    alert('FAQ updated successfully');
+                    modal.remove();
+                    await this.loadFaqs();
+                } catch (error) {
+                    alert('Error updating FAQ: ' + error.message);
+                }
+            }
+
+            async deleteFaq(faqId) {
+                if (!confirm('Are you sure you want to delete this FAQ?')) {
+                    return;
+                }
+
+                try {
+                    await this.makeApiRequest(`/admin/faqs/${faqId}`, {
+                        method: 'DELETE'
+                    });
+                    alert('FAQ deleted successfully');
+                    await this.loadFaqs();
+                } catch (error) {
+                    alert('Error deleting FAQ: ' + error.message);
+                }
+            }
+
+            async showAddFaqModal() {
+                try {
+                    const tenants = await this.makeApiRequest('/admin/tenants');
+                    
+                    const modal = document.createElement('div');
+                    modal.className = 'modal';
+                    
+                    modal.innerHTML = `
+                        <div class="modal-content">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <h3>Add New FAQ</h3>
+                                <button onclick="this.closest('.modal').remove()" class="btn btn-danger btn-small">Close</button>
+                            </div>
+                            <form id="addFaqForm">
+                                <div class="form-group">
+                                    <label>Tenant:</label>
+                                    <select id="newFaqTenant" required>
+                                        <option value="">Select a tenant...</option>
+                                        ${tenants.map(tenant => `
+                                            <option value="${tenant.id}">${tenant.name}</option>
+                                        `).join('')}
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Question:</label>
+                                    <textarea id="newFaqQuestion" required style="min-height: 80px;" placeholder="Enter the question..."></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>Answer:</label>
+                                    <textarea id="newFaqAnswer" required style="min-height: 120px;" placeholder="Enter the answer..."></textarea>
+                                </div>
+                                <div style="margin-top: 20px;">
+                                    <button type="submit" class="btn btn-success">Create FAQ</button>
+                                    <button type="button" onclick="this.closest('.modal').remove()" class="btn btn-secondary">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    `;
+
+                    modal.querySelector('#addFaqForm').addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        await this.createNewFaq(modal);
+                    });
+
+                    document.body.appendChild(modal);
+                } catch (error) {
+                    alert('Error loading tenants: ' + error.message);
+                }
+            }
+
+            async createNewFaq(modal) {
+                try {
+                    const faqData = {
+                        tenant_id: parseInt(modal.querySelector('#newFaqTenant').value),
+                        question: modal.querySelector('#newFaqQuestion').value,
+                        answer: modal.querySelector('#newFaqAnswer').value
+                    };
+
+                    await this.makeApiRequest('/admin/faqs', {
+                        method: 'POST',
+                        body: JSON.stringify(faqData)
+                    });
+
+                    alert('FAQ created successfully');
+                    modal.remove();
+                    await this.loadFaqs();
+                } catch (error) {
+                    alert('Error creating FAQ: ' + error.message);
+                }
+            }
+
+            async loadPromptsTab() {
+                try {
+                    const tenants = await this.makeApiRequest('/admin/tenants');
+                    const select = document.getElementById('promptTenantSelect');
+                    
+                    select.innerHTML = '<option value="">Select a tenant...</option>';
+                    tenants.forEach(tenant => {
+                        const option = new Option(tenant.name, tenant.id);
+                        select.add(option);
+                    });
+                } catch (error) {
+                    console.error('Error loading tenants for prompts:', error);
+                    document.getElementById('promptContainer').innerHTML = '<p class="error">Error loading tenants</p>';
+                }
+            }
+
+            async loadTenantPrompt() {
+                const tenantId = document.getElementById('promptTenantSelect').value;
+                if (!tenantId) {
+                    alert('Please select a tenant first');
+                    return;
+                }
+
+                try {
+                    const data = await this.makeApiRequest(`/admin/tenants/${tenantId}/prompt`);
+                    this.renderTenantPrompt(data);
+                } catch (error) {
+                    alert('Error loading tenant prompt: ' + error.message);
+                }
+            }
+
+            renderTenantPrompt(data) {
+                const container = document.getElementById('promptContainer');
+                
+                container.innerHTML = `
+                    <div style="background: white; padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);">
+                        <h4>System Prompt for: ${data.tenant_name}</h4>
+                        <form id="promptForm">
+                            <div class="form-group">
+                                <label>System Prompt:</label>
+                                <textarea id="systemPromptText" style="min-height: 200px;" placeholder="Enter system prompt...">${data.system_prompt || ''}</textarea>
+                            </div>
+                            <div style="margin-top: 20px;">
+                                <button type="submit" class="btn btn-success">Update Prompt</button>
+                                <button type="button" onclick="adminDashboard.resetPrompt()" class="btn btn-warning">Reset</button>
+                            </div>
+                        </form>
+                        ${data.system_prompt ? `
+                            <div style="margin-top: 20px;">
+                                <h5>Current Prompt Preview:</h5>
+                                <div class="prompt-preview">
+                                    ${data.system_prompt}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+
+                document.getElementById('promptForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await this.updateTenantPrompt(data.tenant_id);
+                });
+            }
+
+            async updateTenantPrompt(tenantId) {
+                try {
+                    const promptText = document.getElementById('systemPromptText').value;
+                    
+                    await this.makeApiRequest(`/admin/tenants/${tenantId}/prompt`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ system_prompt: promptText })
+                    });
+
+                    alert('System prompt updated successfully');
+                    await this.loadTenantPrompt();
+                } catch (error) {
+                    alert('Error updating system prompt: ' + error.message);
+                }
+            }
+
+            resetPrompt() {
+                const tenantId = document.getElementById('promptTenantSelect').value;
+                if (!tenantId) return;
+                
+                if (confirm('Are you sure you want to reset the system prompt?')) {
+                    document.getElementById('systemPromptText').value = '';
+                }
+            }
+
+
+
+
+            showAddTenantModal() {
+                alert('Tenant creation functionality requires additional backend endpoints for user registration and tenant setup.');
+            }
+
+            
             // Rest of the methods would continue here...
             // For brevity, I'll add a placeholder for the remaining methods
             
-            async editUser(userId) { /* implementation */ }
-            async deleteUser(userId) { /* implementation */ }
-            async loadDocuments() { /* implementation */ }
-            async loadFaqs() { /* implementation */ }
-            async searchSession() { /* implementation */ }
-            async loadPromptsTab() { /* implementation */ }
-            async loadPricingManagement() { /* implementation */ }
+            
+            
+          
             
             // ... and all other methods
         }

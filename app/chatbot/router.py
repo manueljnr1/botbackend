@@ -19,28 +19,23 @@ import re
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 import json
-
-
-
 from app.database import get_db
 from app.chatbot.engine import ChatbotEngine
-
 from app.chatbot.models import ChatSession, ChatMessage
+from app.knowledge_base.models import FAQ 
 from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
-
 from app.tenants.models import Tenant
-
-
-
 from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
 from app.pricing.integration_helpers import (
-    check_conversation_limit_dependency,  # Changed from check_message_limit_dependency
-    track_conversation_started,           # New function for conversation tracking
-    track_message_sent                    # Updated function
+    check_conversation_limit_dependency_with_super_tenant,
+    check_integration_limit_dependency_with_super_tenant,
+    track_conversation_started_with_super_tenant,  # ← ADD THIS LINE
+    track_conversation_started,
+    track_message_sent
 )
 from app.tenants.router import get_tenant_from_api_key
 
@@ -246,7 +241,7 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
         logger.info(f"✅ Found tenant: {tenant.name} (ID: {tenant.id})")
         
         logger.info("🚦 Checking conversation limits...")
-        check_conversation_limit_dependency(tenant.id, db)  # UPDATED
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
         logger.info("✅ Conversation limit check passed")
         
         # Initialize chatbot engine
@@ -264,10 +259,10 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
         
         # 📊 PRICING TRACK - Track conversation usage (UPDATED)
         logger.info("📊 Tracking conversation usage...")
-        track_success = track_conversation_started(
+        track_success = track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=request.user_identifier,
-            platform="web",
+            platform="web", 
             db=db
         )
         logger.info(f"📈 Conversation tracking result: {track_success}")
@@ -385,7 +380,7 @@ async def chat_with_simple_sentence_streaming(
             # 🔒 PRICING CHECK - Get tenant and check limits FIRST (UPDATED)
             logger.info("🔍 Getting tenant and checking limits for streaming...")
             tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency(tenant.id, db)  # UPDATED
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
             logger.info(f"✅ Streaming limits OK for tenant: {tenant.name}")
             
             start_time = time.time()
@@ -410,7 +405,7 @@ async def chat_with_simple_sentence_streaming(
             
             # 📊 PRICING TRACK - Track conversation usage (UPDATED)
             logger.info("📊 Tracking streaming conversation usage...")
-            track_success = track_conversation_started(
+            track_success = track_conversation_started_with_super_tenant(
                 tenant_id=tenant.id,
                 user_identifier=request.user_identifier,
                 platform="web",
@@ -453,7 +448,7 @@ async def chat_with_handoff_detection(
     try:
         # Check pricing limits first
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
@@ -497,7 +492,7 @@ async def chat_with_simple_memory(
         
         # Pricing check (UPDATED)
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)  # UPDATED
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
         
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
@@ -517,7 +512,7 @@ async def chat_with_simple_memory(
             raise HTTPException(status_code=400, detail=error_message)
         
         # Track conversation usage (UPDATED)
-        track_conversation_started(
+        track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=request.user_identifier,
             platform="web",
@@ -554,7 +549,7 @@ async def discord_chat_simple(
         
         # Pricing check (UPDATED)
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)  # UPDATED
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
         
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
@@ -575,7 +570,7 @@ async def discord_chat_simple(
             raise HTTPException(status_code=400, detail=error_message)
         
         # Track conversation usage (UPDATED)
-        track_conversation_started(
+        track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=f"discord:{request.discord_user_id}",
             platform="discord",
@@ -733,7 +728,7 @@ async def slack_chat_simple(
         
         # Pricing check
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         # Initialize chatbot engine
         engine = ChatbotEngine(db)
@@ -754,7 +749,7 @@ async def slack_chat_simple(
             raise HTTPException(status_code=400, detail=error_message)
         
         # Track conversation usage
-        track_conversation_started(
+        track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=f"slack:{request.slack_user_id}",
             platform="slack",
@@ -803,7 +798,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
             logger.info(f"👤 Using provided user_identifier: {user_id}")
         
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         engine = ChatbotEngine(db)
         result = engine.process_web_message_with_advanced_feedback(
@@ -816,7 +811,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
         
-        track_conversation_started(
+        track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=user_id,
             platform="web",
@@ -855,12 +850,14 @@ async def smart_chat_streaming_dedicated(
     """
     Dedicated streaming endpoint for smart feedback chat
     """
-    return await chat_with_advanced_smart_feedback_streaming(
+    # Call the regular smart chat endpoint instead
+    return await chat_with_advanced_smart_feedback_enhanced(
         SmartChatRequest(
             message=request.message,
             user_identifier=request.user_identifier,
             max_context=request.max_context
         ),
+        False,  # enable_streaming=False
         api_key,
         db
     )
@@ -890,7 +887,7 @@ async def chat_with_advanced_smart_feedback(
             logger.info(f"👤 Using provided user_identifier: {user_id}")
         
         tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency(tenant.id, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         engine = ChatbotEngine(db)
         result = engine.process_web_message_with_advanced_feedback(
@@ -903,7 +900,7 @@ async def chat_with_advanced_smart_feedback(
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
         
-        track_conversation_started(
+        track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=user_id,  # 🆕 Use the processed user_id
             platform="web",
