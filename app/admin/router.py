@@ -209,59 +209,7 @@ async def admin_list_tenants(
     tenants = db.query(Tenant).all()
     return tenants
 
-@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
-async def admin_get_tenant(
-    tenant_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """
-    Get detailed tenant information (admin only)
-    """
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    return tenant
 
-@router.put("/tenants/{tenant_id}", response_model=TenantResponse)
-async def admin_update_tenant(
-    tenant_id: int,
-    tenant_update: TenantUpdateAdmin,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """
-    Update tenant details including system prompt (admin only)
-    """
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Update tenant fields
-    update_data = tenant_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(tenant, key, value)
-    
-    db.commit()
-    db.refresh(tenant)
-    return tenant
-
-@router.delete("/tenants/{tenant_id}")
-async def admin_delete_tenant(
-    tenant_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """
-    Deactivate a tenant (admin only)
-    """
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    tenant.is_active = False
-    db.commit()
-    return {"message": "Tenant deactivated successfully"}
 
 @router.get("/tenants/overview", response_model=TenantOverviewResponse)
 async def get_tenant_overview(
@@ -342,6 +290,76 @@ async def get_tenant_overview(
         active_tenants=sum(1 for t in tenants if t.is_active),
         tenant_stats=tenant_stats
     )
+
+
+
+
+@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
+async def admin_get_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Get detailed tenant information (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return tenant
+
+
+
+
+
+
+
+@router.put("/tenants/{tenant_id}", response_model=TenantResponse)
+async def admin_update_tenant(
+    tenant_id: int,
+    tenant_update: TenantUpdateAdmin,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Update tenant details including system prompt (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Update tenant fields
+    update_data = tenant_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(tenant, key, value)
+    
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+
+
+
+
+@router.delete("/tenants/{tenant_id}")
+async def admin_delete_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Deactivate a tenant (admin only)
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant.is_active = False
+    db.commit()
+    return {"message": "Tenant deactivated successfully"}
+
+
 
 # =============================================================================
 # SYSTEM PROMPT MANAGEMENT
