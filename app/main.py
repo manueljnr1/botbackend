@@ -193,12 +193,12 @@ async def startup_event():
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
         
         # 1. Start Discord and Slack bots
-        # try:
-        #     discord_manager = get_discord_bot_manager()
-        #     await discord_manager.start_all_bots()
-        #     logger.info("✅ All Discord bots started successfully")
-        # except Exception as e:
-        #     logger.error(f"❌ Error starting Discord bots: {e}")
+        try:
+            discord_manager = get_discord_bot_manager()
+            await discord_manager.start_all_bots()
+            logger.info("✅ All Discord bots started successfully")
+        except Exception as e:
+            logger.error(f"❌ Error starting Discord bots: {e}")
         
         try:
             slack_manager = get_slack_bot_manager()
