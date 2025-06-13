@@ -11,20 +11,25 @@ def register_slack_routes(app: FastAPI):
     
     @app.post("/integrations/slack/events")
     async def handle_slack_events(request: Request):
-        # Verify the request
+        body = await request.body()
+        data = json.loads(body)
+        
+        # Handle URL verification challenge FIRST (before signature verification)
+        if data.get("type") == "url_verification":
+            return data.get("challenge")
+        
+        # Only verify signature for actual events
         signature_verifier = SignatureVerifier(os.getenv("SLACK_SIGNING_SECRET"))
         headers = request.headers
-        body = await request.body()
         
         if not signature_verifier.is_valid(body, headers.get("X-Slack-Request-Timestamp"), headers.get("X-Slack-Signature")):
             raise HTTPException(status_code=403, detail="Invalid request signature")
-        
         # Parse request body
         data = json.loads(body)
         
         # Handle URL verification challenge
         if data.get("type") == "url_verification":
-            return {"challenge": data.get("challenge")}
+            return data.get("challenge")
         
         # Handle events
         if data.get("type") == "event_callback":
