@@ -26,7 +26,7 @@ class Tenant(Base):
     email = Column(String, nullable=False, unique=True, index=True)  # ← Just 'email'
     supabase_user_id = Column(String, nullable=True, index=True)
 
-    system_prompt = Column(Text, nullable=True)  # Custom system prompt for this tenant
+    # 🆕 NEW: Subscription details
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()) # Added server_default for creation as well, often useful
     
@@ -82,6 +82,18 @@ class Tenant(Base):
     # Live chat relationships
     agents = relationship("Agent", back_populates="tenant")
     conversations = relationship("Conversation", back_populates="tenant")
+
+
+ # 🔒 NEW: Custom prompt management
+    system_prompt = Column(Text, nullable=True)  # Custom system prompt
+    system_prompt_validated = Column(Boolean, default=False)  # Has prompt been validated?
+    system_prompt_updated_at = Column(DateTime, nullable=True)  # When was prompt last updated?
+    
+    # 🔒 NEW: Security settings
+    security_level = Column(String(20), default="standard")  # standard, strict, custom
+    allow_custom_prompts = Column(Boolean, default=True)  # Can tenant customize prompts?
+    security_notifications_enabled = Column(Boolean, default=True)  # Send security alerts?
+
 
     @validates('email')
     def normalize_email(self, key, email):

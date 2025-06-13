@@ -1,6 +1,8 @@
+# app/chatbot/prompts.py
 from string import Template
+from .security import SecurityPromptManager
 
-# System prompt template for the chatbot
+# Legacy system prompt template for backward compatibility
 SYSTEM_PROMPT_TEMPLATE = Template("""
 You are a helpful customer support assistant for $company_name.
 You should be friendly, helpful, and professional at all times.
@@ -23,3 +25,55 @@ Guidelines for responses:
 - Stay in character as a knowledgeable support representative
 - Be concise but complete in your answers
 """)
+
+def build_secure_chatbot_prompt(
+    tenant_prompt: str = None,
+    company_name: str = "Your Company",
+    faq_info: str = "",
+    knowledge_base_info: str = ""
+) -> str:
+    """
+    Build a complete chatbot prompt with central security + tenant customization
+    
+    This is the main function to use for generating chatbot prompts.
+    It automatically includes security protections while allowing tenant customization.
+    """
+    return SecurityPromptManager.build_secure_prompt(
+        tenant_prompt=tenant_prompt,
+        company_name=company_name,
+        faq_info=faq_info,
+        knowledge_base_info=knowledge_base_info
+    )
+
+def validate_and_sanitize_tenant_prompt(tenant_prompt: str) -> tuple[str, bool, list[str]]:
+    """
+    Validate and sanitize a tenant's custom prompt
+    
+    Returns:
+        (sanitized_prompt, is_valid, issues_found)
+    """
+    if not tenant_prompt:
+        return "", True, []
+    
+    # Validate for security issues
+    is_valid, issues = SecurityPromptManager.validate_tenant_prompt(tenant_prompt)
+    
+    # Sanitize the prompt
+    sanitized = SecurityPromptManager._sanitize_tenant_prompt(tenant_prompt)
+    
+    return sanitized, is_valid, issues
+
+def check_message_security(user_message: str, company_name: str) -> tuple[bool, str]:
+    """
+    Check if a user message is safe to process
+    
+    Returns:
+        (is_safe, response_if_unsafe)
+    """
+    is_safe, risk_type = SecurityPromptManager.check_user_message_security(user_message)
+    
+    if not is_safe:
+        decline_message = SecurityPromptManager.get_security_decline_message(risk_type, company_name)
+        return False, decline_message
+    
+    return True, ""

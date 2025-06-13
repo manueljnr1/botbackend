@@ -27,6 +27,9 @@ from app.utils.language_service import language_service, SUPPORTED_LANGUAGES
 from app.chatbot.memory import EnhancedChatbotMemory
 from app.tenants.models import Tenant
 from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
+from app.chatbot.security import SecurityPromptManager
+from app.chatbot.security import SecurityPromptManager, SecurityIncident
+from app.chatbot.security import validate_and_sanitize_tenant_prompt
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -112,6 +115,9 @@ class WebChatRequest(BaseModel):
     message: str
     user_identifier: str
     session_token: Optional[str] = None
+
+class TenantPromptUpdate(BaseModel):
+    system_prompt: str
 
 
 
@@ -1307,3 +1313,229 @@ async def get_tenant_info_for_frontend(
         }
 
 
+
+
+
+
+
+@router.get("/security/analytics")
+async def get_security_analytics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days: int = 30
+):
+    """Get comprehensive security analytics for the tenant"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = SecurityPromptManager(db, tenant.id)
+        analytics = security_manager.get_security_analytics(days)
+        
+        return analytics
+        
+    except Exception as e:
+        logger.error(f"Error getting security analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/security/incidents")
+async def get_security_incidents(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    reviewed: Optional[bool] = None
+):
+    """Get list of security incidents for the tenant"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        query = db.query(SecurityIncident).filter(
+            SecurityIncident.tenant_id == tenant.id
+        )
+        
+        if reviewed is not None:
+            query = query.filter(SecurityIncident.reviewed == reviewed)
+        
+        incidents = query.order_by(
+            SecurityIncident.detected_at.desc()
+        ).limit(limit).all()
+        
+        incidents_data = []
+        for incident in incidents:
+            incidents_data.append({
+                "id": incident.id,
+                "user_identifier": incident.user_identifier,
+                "platform": incident.platform,
+                "risk_type": incident.risk_type,
+                "severity_score": incident.severity_score,
+                "detected_at": incident.detected_at.isoformat(),
+                "reviewed": incident.reviewed,
+                "user_message_preview": incident.user_message[:100] + "..." if len(incident.user_message) > 100 else incident.user_message
+            })
+        
+        return {
+            "success": True,
+            "incidents": incidents_data,
+            "total_count": len(incidents_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting security incidents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+
+@router.get("/security/incidents/{incident_id}")
+async def get_security_incident_details(
+    incident_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get detailed information about a specific security incident"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = EnhancedSecurityManager(db, tenant.id)
+        incident_details = security_manager.get_incident_details(incident_id)
+        
+        if not incident_details:
+            raise HTTPException(status_code=404, detail="Security incident not found")
+        
+        return {
+            "success": True,
+            "incident": incident_details
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting incident details: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+class IncidentReviewRequest(BaseModel):
+    reviewer_notes: Optional[str] = None
+
+@router.post("/security/incidents/{incident_id}/review")
+async def mark_incident_reviewed(
+    incident_id: int,
+    request: IncidentReviewRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Mark a security incident as reviewed"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = EnhancedSecurityManager(db, tenant.id)
+        success = security_manager.mark_incident_reviewed(
+            incident_id, 
+            request.reviewer_notes
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Security incident not found")
+        
+        return {
+            "success": True,
+            "message": f"Incident {incident_id} marked as reviewed"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking incident as reviewed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/security/cleanup")
+async def cleanup_old_security_incidents(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days_old: int = 90
+):
+    """Clean up old reviewed security incidents"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = EnhancedSecurityManager(db, tenant.id)
+        cleaned_count = security_manager.cleanup_old_incidents(days_old)
+        
+        return {
+            "success": True,
+            "message": f"Cleaned up {cleaned_count} old security incidents",
+            "days_threshold": days_old
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up security incidents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+class SecuritySettingsRequest(BaseModel):
+    security_level: str = "standard"  # standard, strict, custom
+    allow_custom_prompts: bool = True
+    security_notifications_enabled: bool = True
+
+@router.post("/security/settings")
+async def update_security_settings(
+    request: SecuritySettingsRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update tenant security settings"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Validate security level
+        valid_levels = ["standard", "strict", "custom"]
+        if request.security_level not in valid_levels:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid security level. Must be one of: {valid_levels}"
+            )
+        
+        # Update tenant security settings
+        tenant.security_level = request.security_level
+        tenant.allow_custom_prompts = request.allow_custom_prompts
+        tenant.security_notifications_enabled = request.security_notifications_enabled
+        
+        db.commit()
+        
+        logger.info(f"Updated security settings for tenant {tenant.id}")
+        
+        return {
+            "success": True,
+            "message": "Security settings updated successfully",
+            "settings": {
+                "security_level": tenant.security_level,
+                "allow_custom_prompts": tenant.allow_custom_prompts,
+                "security_notifications_enabled": tenant.security_notifications_enabled
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating security settings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/security/settings")
+async def get_security_settings(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get current tenant security settings"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        return {
+            "success": True,
+            "settings": {
+                "security_level": getattr(tenant, 'security_level', 'standard'),
+                "allow_custom_prompts": getattr(tenant, 'allow_custom_prompts', True),
+                "security_notifications_enabled": getattr(tenant, 'security_notifications_enabled', True),
+                "system_prompt_configured": bool(getattr(tenant, 'system_prompt', None)),
+                "system_prompt_validated": getattr(tenant, 'system_prompt_validated', False)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting security settings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

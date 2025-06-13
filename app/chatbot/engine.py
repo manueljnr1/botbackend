@@ -14,6 +14,7 @@ from app.utils.language_service import language_service
 from app.chatbot.response_simulator import SimpleHumanDelaySimulator
 from app.chatbot.simple_memory import SimpleChatbotMemory
 from datetime import datetime
+from app.chatbot.prompts import build_secure_chatbot_prompt, check_message_security
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +79,11 @@ class ChatbotEngine:
             logger.warning("No FAQs found! Check if FAQs are properly saved in database.")
         
         return faqs
+    
+    def _check_message_security(self, user_message: str, tenant_name: str) -> tuple[bool, str]:
+        """Check message security before processing"""
+        return check_message_security(user_message, tenant_name)
+
 
     # ========================== SESSION MANAGEMENT ==========================
     
@@ -132,7 +138,6 @@ class ChatbotEngine:
     
     def _create_simple_chain(self, tenant, faq_info):
         """Helper method to create a simple conversation chain when no KB is available"""
-        from app.chatbot.prompts import SYSTEM_PROMPT_TEMPLATE
         from langchain_openai import ChatOpenAI
         from langchain.chains import ConversationChain
         from langchain.memory import ConversationBufferMemory
@@ -140,36 +145,23 @@ class ChatbotEngine:
         
         logger.info("Creating simple conversation chain without knowledge base")
         
-        # Check if tenant has custom system prompt
-        if hasattr(tenant, 'system_prompt') and tenant.system_prompt:
-            system_prompt = tenant.system_prompt
-            system_prompt = system_prompt.replace("$company_name", tenant.name)
-            system_prompt = system_prompt.replace("$faq_info", faq_info)
-        else:
-            # Format default system prompt
-            system_prompt = SYSTEM_PROMPT_TEMPLATE.substitute(
-                company_name=tenant.name,
-                faq_info=faq_info
-            )
+        # Use the new secure prompt builder
+        secure_prompt = build_secure_chatbot_prompt(
+            tenant_prompt=getattr(tenant, 'system_prompt', None),
+            company_name=tenant.name,
+            faq_info=faq_info,
+            knowledge_base_info=""
+        )
         
-        # Create custom prompt template that emphasizes FAQ checking
-        prompt_template = f"""{system_prompt}
+        # Create prompt template with security integrated
+        prompt_template = f"""{secure_prompt}
 
-Since no additional knowledge base is available, please focus on using the FAQs above to answer user questions.
+    Conversation History:
+    {{history}}
 
-Conversation History:
-{{history}}
+    User: {{input}}
 
-User: {{input}}
-
-Instructions:
-1. Check if the user's question matches any FAQ above
-2. If it matches, provide that answer naturally
-3. If no FAQ matches, provide a helpful response based on general customer service principles
-4. Never mention that you're checking FAQs or reference internal systems
-5. Be friendly and professional
-
-AI Assistant:"""
+    AI Assistant:"""
         
         prompt = PromptTemplate(
             input_variables=["history", "input"],
@@ -179,7 +171,7 @@ AI Assistant:"""
         # Create LLM
         llm = ChatOpenAI(
             model_name="gpt-3.5-turbo",
-            temperature=0.3,  # Lower temperature for consistency
+            temperature=0.3,
             openai_api_key=settings.OPENAI_API_KEY
         )
         
@@ -195,7 +187,7 @@ AI Assistant:"""
         return chain
 
     def _initialize_chatbot_chain(self, tenant_id: int) -> Optional[Any]:
-        """Initialize the chatbot chain for a tenant"""
+        """Initialize the chatbot chain for a tenant with security integration"""
         tenant = self._get_tenant(tenant_id)
         if not tenant:
             logger.error(f"Tenant not found for ID: {tenant_id}")
@@ -207,10 +199,10 @@ AI Assistant:"""
         
         logger.info(f"Found {len(faqs)} FAQs for tenant")
         
-        # Format FAQ info for better matching
+        # Format FAQ info
         if faqs:
             faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs])
-            logger.info(f"FAQ info: {faq_info[:200]}...")  # Log first 200 chars for debugging
+            logger.info(f"FAQ info: {faq_info[:200]}...")
         else:
             faq_info = "No specific FAQs are available."
         
@@ -228,33 +220,19 @@ AI Assistant:"""
                 if vector_store is None:
                     return self._create_simple_chain(tenant, faq_info)
                 
-                # Create the system prompt with FAQs
-                if hasattr(tenant, 'system_prompt') and tenant.system_prompt:
-                    base_prompt = tenant.system_prompt
-                else:
-                    from app.chatbot.prompts import SYSTEM_PROMPT_TEMPLATE
-                    base_prompt = SYSTEM_PROMPT_TEMPLATE.template
+                # Build secure prompt with security layer
+                secure_prompt_content = build_secure_chatbot_prompt(
+                    tenant_prompt=getattr(tenant, 'system_prompt', None),
+                    company_name=tenant.name,
+                    faq_info=faq_info,
+                    knowledge_base_info="{context}"  # Will be filled by LangChain
+                )
                 
-                # Replace placeholders
-                system_prompt_content = base_prompt.replace("$company_name", tenant.name)
-                system_prompt_content = system_prompt_content.replace("$faq_info", faq_info)
-                
-                # Create a better QA prompt that emphasizes FAQ checking and natural responses
-                qa_prompt_template = f"""{system_prompt_content}
+                qa_prompt_template = f"""{secure_prompt_content}
 
-Here is additional context from our knowledge base that may help answer the question:
-{{context}}
+    User Question: {{question}}
 
-User Question: {{question}}
-
-Instructions for your response:
-1. First, check if this question is similar to any FAQ above
-2. If an FAQ matches, use that answer (you can expand with knowledge base info if helpful)
-3. If no FAQ matches, use the knowledge base context to provide a helpful answer
-4. Respond naturally as a customer service representative - don't mention internal systems
-5. If you cannot answer, politely say you don't have that information and offer to connect them with a specialist
-
-Your response:"""
+    Your response:"""
                 
                 qa_prompt = PromptTemplate(
                     template=qa_prompt_template,
@@ -264,7 +242,7 @@ Your response:"""
                 # Initialize LLM
                 llm = ChatOpenAI(
                     model_name="gpt-3.5-turbo",
-                    temperature=0.3,  # Lower temperature for more consistent responses
+                    temperature=0.3,
                     openai_api_key=settings.OPENAI_API_KEY
                 )
                 
@@ -275,17 +253,17 @@ Your response:"""
                     output_key="answer"
                 )
                 
-                # Create the chain with proper prompt
+                # Create the chain with secure prompt
                 chain = ConversationalRetrievalChain.from_llm(
                     llm=llm,
-                    retriever=vector_store.as_retriever(search_kwargs={"k": 3}),  # Reduced to 3 for focus
+                    retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
                     memory=memory,
                     combine_docs_chain_kwargs={"prompt": qa_prompt},
                     return_source_documents=False,
                     verbose=True
                 )
                 
-                logger.info(f"Successfully created chatbot chain for tenant: {tenant.name}")
+                logger.info(f"Successfully created secure chatbot chain for tenant: {tenant.name}")
                 return chain
                 
             except Exception as e:
@@ -297,12 +275,49 @@ Your response:"""
     # ========================== BASIC MESSAGE PROCESSING ==========================
     
     def process_message(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
-        """Process an incoming message and return a response"""
+        """Process an incoming message and return a response with security checking"""
         # Get tenant from API key
         tenant = self._get_tenant_by_api_key(api_key)
         if not tenant:
             logger.error(f"Invalid API key: {api_key[:5]}...")
             return {"error": "Invalid API key", "success": False}
+        
+        # 🔒 SECURITY CHECK: Validate user message before processing
+        is_safe, security_response = self._check_message_security(user_message, tenant.name)
+        if not is_safe:
+            logger.warning(f"Security risk detected in message from {user_identifier}: {user_message[:50]}...")
+            
+            # Store the security incident for audit
+            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
+            session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            
+            # Store user message (for audit trail)
+            user_msg = ChatMessage(
+                session_id=session.id,
+                content=user_message,
+                is_from_user=True
+            )
+            self.db.add(user_msg)
+            
+            # Store security response
+            security_msg = ChatMessage(
+                session_id=session.id,
+                content=security_response,
+                is_from_user=False
+            )
+            self.db.add(security_msg)
+            self.db.commit()
+            
+            return {
+                "session_id": session_id,
+                "response": security_response,
+                "success": True,
+                "is_new_session": False,
+                "security_declined": True
+            }
+        
+        # Continue with normal processing if message is safe
+        # ... (rest of the original process_message code remains the same)
         
         # Get or create session
         session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)

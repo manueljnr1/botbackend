@@ -1098,9 +1098,11 @@ async def update_tenant_prompt(
     db: Session = Depends(get_db)
 ):
     """
-    Update a tenant's system prompt using API key.
+    Update a tenant's system prompt with security validation using API key.
     Returns the updated tenant details.
     """
+    from app.chatbot.security import validate_and_sanitize_tenant_prompt  # Add this import
+    
     tenant = get_tenant_from_api_key(api_key, db)
     
     if tenant.id != tenant_id:
@@ -1116,11 +1118,25 @@ async def update_tenant_prompt(
             detail="system_prompt field is required in request body"
         )
 
-    tenant.system_prompt = new_system_prompt
+    # 🔒 NEW: Add security validation
+    sanitized_prompt, is_valid, issues = validate_and_sanitize_tenant_prompt(new_system_prompt)
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompt contains security issues: {', '.join(issues)}"
+        )
+
+    # Update with sanitized prompt
+    tenant.system_prompt = sanitized_prompt
+    tenant.system_prompt_validated = True  # Mark as validated
+    tenant.system_prompt_updated_at = datetime.utcnow()  # Add timestamp
+    
     db.commit()
     db.refresh(tenant)
     
-    logger.info(f"✅ Updated system prompt for tenant {tenant.name} (ID: {tenant.id})")
+    was_sanitized = sanitized_prompt != new_system_prompt
+    logger.info(f"✅ Updated system prompt for tenant {tenant.name} (ID: {tenant.id}). Sanitized: {was_sanitized}")
     
     return tenant
 
