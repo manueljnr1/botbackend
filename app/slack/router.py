@@ -129,13 +129,24 @@ async def slack_webhook(
     db: Session = Depends(get_db)
 ):
     """
-    Slack webhook endpoint for a specific tenant - ENHANCED DEBUG VERSION
+    Slack webhook endpoint for a specific tenant - CHALLENGE FIRST VERSION
     """
     try:
-        # Get request details
+        # Get request body first
         body = await request.body()
-        headers = request.headers
         
+        # HANDLE CHALLENGE FIRST - Before ANY validation
+        try:
+            payload = json.loads(body.decode('utf-8'))
+            if payload.get("type") == "url_verification":
+                challenge = payload.get("challenge")
+                logger.info(f"✅ Slack URL verification challenge for tenant {tenant_id}: {challenge}")
+                return challenge  # Return string directly, not dict
+        except Exception as e:
+            logger.error(f"Error parsing challenge: {e}")
+        
+        # NOW do all your existing validation
+        headers = request.headers
         logger.info(f"📨 Received Slack webhook for tenant {tenant_id}")
         
         # DEBUG: Check all tenants first
@@ -180,19 +191,7 @@ async def slack_webhook(
         
         logger.info(f"✅ Tenant {tenant_id} has Slack ENABLED")
         
-        # Parse request
-        try:
-            payload = json.loads(body.decode('utf-8'))
-        except json.JSONDecodeError:
-            logger.error("❌ Failed to parse JSON from Slack webhook")
-            raise HTTPException(status_code=400, detail="Invalid JSON")
-        
-        # Handle URL verification challenge
-        if payload.get("type") == "url_verification":
-            challenge = payload.get("challenge")
-            logger.info(f"✅ Slack URL verification challenge: {challenge}")
-            return {"challenge": challenge}
-        
+        # We already parsed the payload above, so we can reuse it
         # Handle other events
         if payload.get("type") == "event_callback":
             event = payload.get("event", {})
@@ -233,7 +232,8 @@ async def slack_webhook(
         logger.error(traceback.format_exc())
         # Still return OK to Slack to prevent retries
         return JSONResponse(content={"status": "ok"})
-
+    
+    
 @router.post("/config")
 async def configure_slack(
     config: SlackConfig,
