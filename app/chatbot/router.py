@@ -155,11 +155,7 @@ class ChatRequest(BaseModel):
     message: str
     user_identifier: str
 
-class ChatResponse(BaseModel):
-    session_id: str
-    response: str
-    success: bool
-    is_new_session: bool
+
 
 class ChatHistory(BaseModel):
     session_id: str
@@ -778,34 +774,39 @@ async def slack_chat_simple(
 @router.post("/chat/smart", response_model=ChatResponse)
 async def chat_with_advanced_smart_feedback_enhanced(
     request: SmartChatRequest,
-    enable_streaming: bool = False,  # Add optional streaming parameter
+    enable_streaming: bool = False,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Enhanced smart feedback endpoint that supports both regular and streaming responses
+    Enhanced smart feedback endpoint with email collection and auto-generated user IDs
+    
+    Features:
+    - Auto-generates user IDs when not provided
+    - 30-day email memory system
+    - Smart feedback detection for inadequate responses
+    - Cross-session conversation continuity
     """
     if enable_streaming:
-        # Redirect to streaming version
         raise HTTPException(status_code=500, detail="Streaming functionality is not implemented.")
     
-    # Existing non-streaming logic
     try:
-        logger.info(f"🧠📧 Advanced smart feedback chat for: {request.user_identifier}")
-        
         user_id = request.user_identifier
         auto_generated = False
         
-        if not user_id or len(user_id) < 10 or user_id.startswith('temp_') or user_id.startswith('session_'):
+        # Auto-generate user ID if empty or temporary
+        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
             user_id = f"auto_{str(uuid.uuid4())}"
             auto_generated = True
             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
         else:
-            logger.info(f"👤 Using provided user_identifier: {user_id}")
+            logger.debug(f"👤 Using provided user_identifier: {user_id}")
         
+        # Check tenant limits
         tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
+        # Process message with advanced feedback
         engine = ChatbotEngine(db)
         result = engine.process_web_message_with_advanced_feedback(
             api_key=api_key,
@@ -817,6 +818,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
         
+        # Track conversation usage
         track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
             user_identifier=user_id,
@@ -824,18 +826,17 @@ async def chat_with_advanced_smart_feedback_enhanced(
             db=db
         )
         
-        logger.info("✅ Advanced smart feedback chat successful")
-        
+        # Add user ID to response for frontend persistence
         result["user_id"] = user_id
         result["auto_generated_user_id"] = auto_generated
         
+        logger.info("✅ Smart feedback chat completed successfully")
         return result
         
-    except HTTPException as e:
-        logger.error(f"HTTP exception in smart chat: {e.detail}")
+    except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"💥 Error in advanced smart feedback chat: {str(e)}")
+        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -885,7 +886,7 @@ async def chat_with_advanced_smart_feedback(
         user_id = request.user_identifier
         auto_generated = False
         
-        if not user_id or len(user_id) < 10 or user_id.startswith('temp_') or user_id.startswith('session_'):
+        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
             user_id = f"auto_{str(uuid.uuid4())}"
             auto_generated = True
             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
