@@ -1,14 +1,15 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 import os
 import shutil
 import uuid
+from datetime import datetime 
 
 from app.database import get_db
-from app.knowledge_base.models import KnowledgeBase, FAQ, DocumentType
+from app.knowledge_base.models import KnowledgeBase, FAQ, DocumentType, ProcessingStatus
 from app.knowledge_base.processor import DocumentProcessor
 from app.tenants.models import Tenant
 from app.auth.models import User
@@ -32,6 +33,9 @@ class KnowledgeBaseOut(BaseModel):
     file_path: str
     document_type: DocumentType
     vector_store_id: str
+    processing_status: ProcessingStatus  # Add this
+    processing_error: Optional[str] = None  # Add this
+    processed_at: Optional[datetime] = None  # Add this
     
     class Config:
         from_attributes = True
@@ -61,75 +65,7 @@ def get_tenant_from_api_key(api_key: str, db: Session):
     return tenant
 
 # Endpoints
-@router.post("/upload", response_model=KnowledgeBaseOut)
-async def upload_knowledge_base(
-    request: Request,
-    file: UploadFile = File(...),
-    name: str = Form(...),
-    description: Optional[str] = Form(None),
-    x_api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-):
-    """
-    Upload a knowledge base document
-    """
-    logger.info(f"Knowledge base upload requested: {name}")
-    tenant = get_tenant_from_api_key(x_api_key, db)
-    tenant_id = tenant.id
-    logger.info(f"Using tenant: {tenant.name} (ID: {tenant_id})")
-    
-    # Get document type from file extension
-    file_extension = file.filename.split('.')[-1].lower()
-    try:
-        doc_type = DocumentType(file_extension)
-        logger.info(f"Document type: {doc_type.value}")
-    except ValueError:
-        logger.error(f"Unsupported file type: {file_extension}")
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
-    
-    # Save the uploaded file
-    upload_dir = os.path.join("uploads", f"tenant_{tenant_id}")
-    os.makedirs(upload_dir, exist_ok=True)
-    logger.info(f"Upload directory: {upload_dir}")
-    
-    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
-    logger.info(f"Saving file to: {file_path}")
-    
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        logger.info(f"File saved successfully")
-    except Exception as e:
-        logger.error(f"Error saving file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
-    
-    # Process the document
-    processor = DocumentProcessor(tenant_id)
-    try:
-        logger.info(f"Processing document...")
-        vector_store_id = processor.process_document(file_path, doc_type)
-        logger.info(f"Document processed successfully. Vector store ID: {vector_store_id}")
-    except Exception as e:
-        # Clean up uploaded file on error
-        os.remove(file_path)
-        logger.error(f"Failed to process document: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
-    
-    # Save to database
-    kb = KnowledgeBase(
-        tenant_id=tenant_id,
-        name=name,
-        description=description,
-        file_path=file_path,
-        document_type=doc_type,
-        vector_store_id=vector_store_id
-    )
-    db.add(kb)
-    db.commit()
-    db.refresh(kb)
-    logger.info(f"Knowledge base saved to database. ID: {kb.id}")
-    
-    return kb
+
 
 @router.get("/", response_model=List[KnowledgeBaseOut])
 async def list_knowledge_bases(
@@ -346,3 +282,135 @@ async def delete_faq(
     logger.info(f"FAQ deleted successfully")
     
     return {"message": "FAQ deleted successfully"}
+
+
+@router.post("/upload", response_model=KnowledgeBaseOut)
+async def upload_knowledge_base(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Upload and automatically process knowledge base document"""
+    logger.info(f"Knowledge base upload requested: {name}")
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    # Get document type
+    file_extension = file.filename.split('.')[-1].lower()
+    try:
+        doc_type = DocumentType(file_extension)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
+    
+    # Save uploaded file
+    upload_dir = os.path.join("uploads", f"tenant_{tenant_id}")
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # Create database record FIRST (with pending status)
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=name,
+        description=description,
+        file_path=file_path,
+        document_type=doc_type,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",  # Generate ID upfront
+        processing_status=ProcessingStatus.PENDING
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Process document with error handling
+    processor = DocumentProcessor(tenant_id)
+    try:
+        kb.processing_status = ProcessingStatus.PROCESSING
+        db.commit()
+        
+        logger.info(f"Processing document for KB {kb.id}...")
+        # Use the pre-generated vector_store_id
+        processor.process_document_with_id(file_path, doc_type, kb.vector_store_id)
+        
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        kb.processing_error = None
+        
+        logger.info(f"Document processed successfully: {kb.vector_store_id}")
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        logger.error(f"Failed to process document: {e}")
+        
+        # Don't raise exception - keep the record for retry
+        
+    db.commit()
+    return kb
+
+
+@router.post("/{kb_id}/reprocess")
+async def reprocess_knowledge_base(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Reprocess a failed or pending knowledge base"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    
+    if not os.path.exists(kb.file_path):
+        raise HTTPException(status_code=400, detail="Source file no longer exists")
+    
+    processor = DocumentProcessor(tenant.id)
+    try:
+        kb.processing_status = ProcessingStatus.PROCESSING
+        kb.processing_error = None
+        db.commit()
+        
+        # Clean up old vector store if exists
+        processor.delete_vector_store(kb.vector_store_id)
+        
+        # Reprocess
+        processor.process_document_with_id(kb.file_path, kb.document_type, kb.vector_store_id)
+        
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        logger.error(f"Reprocessing failed: {e}")
+        
+    db.commit()
+    return {"message": "Reprocessing completed", "status": kb.processing_status.value}
+
+@router.get("/status", response_model=List[dict])
+async def get_processing_status(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get processing status of all knowledge bases"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kbs = db.query(KnowledgeBase).filter(KnowledgeBase.tenant_id == tenant.id).all()
+    
+    return [{
+        "id": kb.id,
+        "name": kb.name,
+        "status": kb.processing_status.value,
+        "error": kb.processing_error,
+        "processed_at": kb.processed_at.isoformat() if kb.processed_at else None
+    } for kb in kbs]

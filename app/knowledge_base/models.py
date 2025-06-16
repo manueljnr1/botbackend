@@ -1,8 +1,16 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
 from app.database import Base
+
+
+class ProcessingStatus(enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing" 
+    COMPLETED = "completed"
+    FAILED = "failed"
+
 
 class DocumentType(enum.Enum):
     PDF = "pdf"
@@ -24,6 +32,9 @@ class KnowledgeBase(Base):
     vector_store_id = Column(String, unique=True)  # Reference to the vector store
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    processing_status = Column(Enum(ProcessingStatus), default=ProcessingStatus.PENDING)
+    processing_error = Column(Text, nullable=True)
+    processed_at = Column(DateTime, nullable=True)
     
     # Relationships
     tenant = relationship("Tenant", back_populates="knowledge_bases")
