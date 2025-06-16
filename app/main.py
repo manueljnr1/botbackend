@@ -37,7 +37,7 @@ from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 from app.payments.router import router as payments_router
 
 from app.config import settings
-from app.live_chat import auth_router, router as live_chat_router
+# from app.live_chat import auth_router, router as live_chat_router
 import asyncio
 
 
@@ -146,8 +146,8 @@ app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
-app.include_router(auth_router.router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
-app.include_router(live_chat_router.router, prefix="/live-chat", tags=["Live Chat"])
+# app.include_router(auth_router.router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
+# app.include_router(live_chat_router.router, prefix="/live-chat", tags=["Live Chat"])
 
 
 
