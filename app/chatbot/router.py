@@ -30,6 +30,8 @@ from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeed
 from app.chatbot.security import SecurityPromptManager
 from app.chatbot.security import SecurityPromptManager, SecurityIncident
 from app.chatbot.security import validate_and_sanitize_tenant_prompt
+from app.live_chat.models import LiveChatConversation
+from app.live_chat.queue_service import LiveChatQueueService
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -167,6 +169,18 @@ class SmartChatRequest(BaseModel):
     max_context: int = 200
 
 
+def detect_handoff_triggers(user_message: str) -> bool:
+    '''Detect if user message should trigger handoff to live chat'''
+    handoff_triggers = [
+        "speak to human", "talk to human", "human agent", "live agent",
+        "customer service", "customer support", "speak to agent",
+        "talk to agent", "live chat", "human help", "real person",
+        "not helpful", "doesn't work", "frustrated", "urgent",
+        "complaint", "billing issue", "refund", "cancel"
+    ]
+    
+    message_lower = user_message.lower()
+    return any(trigger in message_lower for trigger in handoff_triggers)
 
 
 def break_into_sentences(response: str) -> list:
@@ -1539,4 +1553,79 @@ async def get_security_settings(
         
     except Exception as e:
         logger.error(f"Error getting security settings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
+
+
+
+@router.post("/chat/with-handoff", response_model=ChatResponse)
+async def chat_with_handoff_detection(
+    request: ChatRequest, 
+    api_key: str = Header(..., alias="X-API-Key"), 
+    db: Session = Depends(get_db)
+):
+    '''Enhanced chat endpoint that detects handoff requests'''
+    try:
+        # Check pricing limits first
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Check for handoff triggers
+        if detect_handoff_triggers(request.message):
+            # Create live chat conversation
+            live_conversation = LiveChatConversation(
+                tenant_id=tenant.id,
+                customer_identifier=request.user_identifier,
+                handoff_reason="triggered",
+                handoff_trigger=request.message,
+                original_question=request.message,
+                status="queued"
+            )
+            
+            db.add(live_conversation)
+            db.commit()
+            db.refresh(live_conversation)
+            
+            # Add to queue
+            queue_service = LiveChatQueueService(db)
+            queue_result = queue_service.add_to_queue(
+                conversation_id=live_conversation.id,
+                priority=2,  # Higher priority for triggered handoffs
+                assignment_criteria={"source": "chatbot_trigger", "trigger": request.message}
+            )
+            
+            # Return handoff response
+            return {
+                "session_id": f"handoff_{live_conversation.id}",
+                "response": "I understand you'd like to speak with a human agent. I'm connecting you to our support team now. Please wait a moment...",
+                "success": True,
+                "is_new_session": True,
+                "handoff_triggered": True,
+                "live_chat_conversation_id": live_conversation.id,
+                "queue_position": queue_result.get("position"),
+                "estimated_wait_time": queue_result.get("estimated_wait_time")
+            }
+        
+        # Normal chatbot processing if no handoff triggered
+        engine = ChatbotEngine(db)
+        result = engine.process_message(api_key, request.message, request.user_identifier)
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track message usage
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=request.user_identifier,
+            platform="web",
+            db=db
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in handoff-enabled chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")

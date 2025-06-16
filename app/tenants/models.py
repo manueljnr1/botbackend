@@ -80,8 +80,10 @@ class Tenant(Base):
     slack_bot_user_id = Column(String, nullable=True)  # Bot user ID in Slack
 
     # Live chat relationships
-    agents = relationship("Agent", back_populates="tenant")
-    conversations = relationship("Conversation", back_populates="tenant")
+    # Live Chat Relationships
+    agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
+    conversations = relationship("LiveChatConversation", back_populates="tenant", cascade="all, delete-orphan")
+    live_chat_settings = relationship("LiveChatSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
 
 
  # 🔒 NEW: Custom prompt management

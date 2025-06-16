@@ -1,8 +1,3 @@
-
-
-
-
-
 import os
 import uuid
 import pandas as pd
@@ -27,6 +22,18 @@ logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     """Process and load documents for vector storage"""
+    
+    def __init__(self, tenant_id: int):
+        """Initialize DocumentProcessor with tenant ID and required components"""
+        self.tenant_id = tenant_id
+        self.embeddings = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
+        self.vector_store_path = os.path.join("vector_stores", f"tenant_{tenant_id}")
+        
+        # Ensure the vector store directory exists
+        os.makedirs(self.vector_store_path, exist_ok=True)
+        
+        logger.info(f"DocumentProcessor initialized for tenant {tenant_id}")
+        logger.info(f"Vector store path: {self.vector_store_path}")
     
     def process_document(self, file_path: str, doc_type: DocumentType) -> str:
         """Process a document and store it in the vector store (original method)"""
@@ -135,55 +142,6 @@ class DocumentProcessor:
         else:
             raise ValueError(f"Unsupported document type: {doc_type}")
     
-    def process_document(self, file_path: str, doc_type: DocumentType) -> str:
-        """Process a document and store it in the vector store"""
-        logger.info(f"Processing document: {file_path}")
-        
-        # Load the document
-        try:
-            loader = self._get_loader(file_path, doc_type)
-            documents = loader.load()
-            logger.info(f"Loaded {len(documents)} document segments")
-            
-            # Log the content of the first document for debugging
-            if documents:
-                first_doc = documents[0]
-                content_preview = first_doc.page_content[:200] if hasattr(first_doc, 'page_content') else "No content available"
-                logger.info(f"First document content preview: {content_preview}...")
-            
-            # Split the documents into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                length_function=len,
-            )
-            splits = text_splitter.split_documents(documents)
-            logger.info(f"Split into {len(splits)} chunks")
-            
-            # Create a unique ID for this vector store
-            vector_store_id = f"kb_{self.tenant_id}_{str(uuid.uuid4())}"
-            vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
-            logger.info(f"Creating vector store at: {vector_store_path}")
-            
-            # Create and save the vector store
-            vector_store = FAISS.from_documents(documents=splits, embedding=self.embeddings)
-            vector_store.save_local(vector_store_path)
-            logger.info(f"Vector store saved successfully")
-            
-            # Verify the vector store was created
-            if os.path.exists(vector_store_path):
-                logger.info(f"Vector store directory exists at: {vector_store_path}")
-                files = os.listdir(vector_store_path)
-                logger.info(f"Vector store files: {files}")
-            else:
-                logger.error(f"Vector store directory was not created at: {vector_store_path}")
-            
-            return vector_store_id
-            
-        except Exception as e:
-            logger.error(f"Error processing document: {str(e)}", exc_info=True)
-            raise
-    
     def get_vector_store(self, vector_store_id: str):
         """Load a vector store by ID"""
         vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
@@ -194,7 +152,7 @@ class DocumentProcessor:
             raise FileNotFoundError(f"Vector store not found: {vector_store_id}")
         
         try:
-            vector_store = FAISS.load_local(vector_store_path, self.embeddings,  allow_dangerous_deserialization=True)
+            vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
             logger.info(f"Vector store loaded successfully")
             return vector_store
         except Exception as e:

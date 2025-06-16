@@ -37,8 +37,7 @@ from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 from app.payments.router import router as payments_router
 
 from app.config import settings
-from app.live_chat.api import router as live_chat_router
-from app.live_chat.tasks import cleanup_abandoned_conversations, process_queues
+from app.live_chat import auth_router, router as live_chat_router
 import asyncio
 
 
@@ -147,7 +146,8 @@ app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
-app.include_router(live_chat_router, prefix="/api/live-chat", tags=["Live Chat"])
+app.include_router(auth_router.router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
+app.include_router(live_chat_router.router, prefix="/live-chat", tags=["Live Chat"])
 
 
 
@@ -268,25 +268,64 @@ async def startup_event():
 
 
 # @app.on_event("startup")
-# async def startup_event():
-#     # Start background tasks
-#     asyncio.create_task(run_background_tasks_safe())
+# async def startup_tasks():
+#     """Tasks to run when the application starts"""
+    
+#     # Initialize live chat settings for existing tenants
+#     from app.database import get_db
+#     from app.live_chat.agent_service import LiveChatSettingsService
+#     from app.tenants.models import Tenant
+    
+#     try:
+#         db = next(get_db())
+#         settings_service = LiveChatSettingsService(db)
+        
+#         # Get all tenants without live chat settings
+#         tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+        
+#         for tenant in tenants:
+#             try:
+#                 # This will create default settings if they don't exist
+#                 settings_service.get_or_create_settings(tenant.id)
+#             except Exception as e:
+#                 print(f"Warning: Could not initialize live chat settings for tenant {tenant.id}: {e}")
+        
+#         print("✅ Live chat startup tasks completed")
+        
+#     except Exception as e:
+#         print(f"❌ Error in live chat startup tasks: {e}")
 
-# async def run_background_tasks_safe():
-#     """Safe version of background tasks with proper error handling"""
-#     while True:
-#         try:
-#             # Use simple versions that don't depend on Redis being available
-#             await cleanup_abandoned_conversations()
-#             await process_queues()
-            
-#             # Wait 30 seconds before next run
-#             await asyncio.sleep(30)
-            
-#         except Exception as e:
-#             logger.error(f"Background task error: {e}")
-#             # Wait longer if there's an error
-#             await asyncio.sleep(60)
+
+
+
+# @app.get("/health/live-chat")
+# async def live_chat_health_check():
+#     """Health check endpoint for live chat system"""
+#     try:
+#         from app.live_chat.websocket_manager import websocket_manager
+        
+#         # Check database connectivity
+#         db = next(get_db())
+        
+#         # Check WebSocket manager
+#         connection_stats = websocket_manager.get_connection_stats()
+        
+#         return {
+#             "status": "healthy",
+#             "service": "live_chat",
+#             "websocket_connections": connection_stats["total_connections"],
+#             "active_connections": connection_stats["active_connections"],
+#             "timestamp": datetime.utcnow().isoformat(),
+#             "database_connected": True
+#         }
+        
+#     except Exception as e:
+#         return {
+#             "status": "unhealthy",
+#             "service": "live_chat",
+#             "error": str(e),
+#             "timestamp": datetime.utcnow().isoformat()
+#         }
 
 
 @app.on_event("shutdown")

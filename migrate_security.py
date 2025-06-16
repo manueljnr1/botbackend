@@ -1,323 +1,157 @@
 #!/usr/bin/env python3
 """
-Universal Database Migration Script
-Adds security fields to both SQLite and PostgreSQL databases
+Cleanup and Migration Script
+Cleans up any failed migration attempts and runs a fresh migration
 """
 
 import sqlite3
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import sys
-import os
-from urllib.parse import urlparse
+import urllib.parse as urlparse
 
-# Database URLs
-SQLITE_URL = "sqlite:///./chatbot.db"
-POSTGRES_URL = "postgresql://chatbot_hhjv_user:dYXguSEwpwZl3Yt2R3ACsfvmM5lLIgSD@dpg-d10sp295pdvs73afujf0-a.oregon-postgres.render.com/chatbot_hhjv"
+POSTGRES_DB = "postgresql://chatbot_hhjv_user:dYXguSEwpwZl3Yt2R3ACsfvmM5lLIgSD@dpg-d10sp295pdvs73afujf0-a.oregon-postgres.render.com/chatbot_hhjv"
 
-def parse_postgres_url(url):
-    """Parse PostgreSQL URL into connection parameters"""
-    parsed = urlparse(url)
-    return {
-        'host': parsed.hostname,
-        'port': parsed.port or 5432,
-        'database': parsed.path[1:],  # Remove leading slash
-        'user': parsed.username,
-        'password': parsed.password
-    }
-
-def migrate_sqlite():
-    """Add security fields to SQLite database"""
-    print("🔧 Migrating SQLite database...")
-    
-    # Extract database path from SQLite URL
-    db_path = SQLITE_URL.replace("sqlite:///", "")
-    
-    if not os.path.exists(db_path):
-        print(f"❌ SQLite database not found at: {db_path}")
-        return False
+def cleanup_postgresql():
+    """Clean up any failed PostgreSQL migration attempts"""
+    print("🧹 Cleaning up PostgreSQL...")
     
     try:
-        conn = sqlite3.connect(db_path)
+        url = urlparse.urlparse(POSTGRES_DB)
+        conn = psycopg2.connect(
+            host=url.hostname,
+            port=url.port,
+            database=url.path[1:],
+            user=url.username,
+            password=url.password,
+            sslmode='require'
+        )
+        
         cursor = conn.cursor()
         
-        # Check if tenants table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tenants'")
-        if not cursor.fetchone():
-            print("❌ Tenants table not found in SQLite database")
-            return False
+        # Drop the columns if they exist
+        print("🗑️  Dropping existing columns...")
+        cursor.execute("""
+            ALTER TABLE knowledge_bases 
+            DROP COLUMN IF EXISTS processing_status,
+            DROP COLUMN IF EXISTS processing_error,
+            DROP COLUMN IF EXISTS processed_at
+        """)
         
-        print("📋 Adding security fields to tenants table...")
+        # Drop the enum type if it exists
+        print("🗑️  Dropping enum type...")
+        cursor.execute("DROP TYPE IF EXISTS processingstatus CASCADE")
         
-        # Add security fields to tenants table (one by one to handle existing columns)
-        security_fields = [
-            ("system_prompt", "TEXT"),
-            ("system_prompt_validated", "BOOLEAN DEFAULT FALSE"),
-            ("system_prompt_updated_at", "DATETIME"),
-            ("security_level", "VARCHAR(20) DEFAULT 'standard'"),
-            ("allow_custom_prompts", "BOOLEAN DEFAULT TRUE"),
-            ("security_notifications_enabled", "BOOLEAN DEFAULT TRUE")
-        ]
-        
-        for field_name, field_type in security_fields:
-            try:
-                cursor.execute(f'ALTER TABLE tenants ADD COLUMN {field_name} {field_type}')
-                print(f"  ✅ Added {field_name}")
-            except sqlite3.OperationalError as e:
-                if "duplicate column name" in str(e):
-                    print(f"  ⚠️ {field_name} already exists, skipping...")
-                else:
-                    print(f"  ❌ Error adding {field_name}: {e}")
-        
-        print("📋 Creating security_incidents table...")
-        
-        # Create security_incidents table
-        try:
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS security_incidents (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id INTEGER NOT NULL,
-                    session_id VARCHAR(255),
-                    user_identifier VARCHAR(255) NOT NULL,
-                    platform VARCHAR(50) DEFAULT 'web',
-                    risk_type VARCHAR(50) NOT NULL,
-                    user_message TEXT NOT NULL,
-                    security_response TEXT NOT NULL,
-                    matched_patterns TEXT,
-                    severity_score INTEGER DEFAULT 1,
-                    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    reviewed BOOLEAN DEFAULT FALSE,
-                    reviewer_notes TEXT,
-                    FOREIGN KEY(tenant_id) REFERENCES tenants(id)
-                )
-            ''')
-            print("  ✅ security_incidents table created")
-            
-            # Create indexes for better performance
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_security_incidents_tenant_detected ON security_incidents(tenant_id, detected_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_security_incidents_risk_type ON security_incidents(risk_type)')
-            print("  ✅ Security indexes created")
-            
-        except sqlite3.Error as e:
-            print(f"  ❌ Error creating security_incidents table: {e}")
+        # Drop the index if it exists
+        cursor.execute("DROP INDEX IF EXISTS idx_knowledge_bases_processing_status")
         
         conn.commit()
-        print("✅ SQLite migration completed successfully!")
+        conn.close()
+        
+        print("✅ PostgreSQL cleanup completed")
         return True
         
     except Exception as e:
-        print(f"❌ SQLite migration failed: {e}")
+        print(f"❌ PostgreSQL cleanup failed: {e}")
         return False
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
-def migrate_postgresql():
-    """Add security fields to PostgreSQL database"""
-    print("🔧 Migrating PostgreSQL database...")
+def fresh_postgresql_migration():
+    """Run a fresh PostgreSQL migration"""
+    print("🔧 Running fresh PostgreSQL migration...")
     
     try:
-        # Parse connection parameters
-        conn_params = parse_postgres_url(POSTGRES_URL)
+        url = urlparse.urlparse(POSTGRES_DB)
+        conn = psycopg2.connect(
+            host=url.hostname,
+            port=url.port,
+            database=url.path[1:],
+            user=url.username,
+            password=url.password,
+            sslmode='require'
+        )
         
-        # Connect to PostgreSQL
-        conn = psycopg2.connect(**conn_params)
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
         
-        # Check if tenants table exists
+        # Create enum type with UPPERCASE values to match Python enum
+        print("📝 Creating enum type...")
         cursor.execute("""
-            SELECT table_name FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name = 'tenants'
+            CREATE TYPE processingstatus AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')
         """)
-        if not cursor.fetchone():
-            print("❌ Tenants table not found in PostgreSQL database")
-            return False
         
-        print("📋 Adding security fields to tenants table...")
+        # Add columns
+        print("📝 Adding columns...")
+        cursor.execute("""
+            ALTER TABLE knowledge_bases 
+            ADD COLUMN processing_status processingstatus DEFAULT 'PENDING'
+        """)
         
-        # Add security fields to tenants table
-        security_fields = [
-            ("system_prompt", "TEXT"),
-            ("system_prompt_validated", "BOOLEAN DEFAULT FALSE"),
-            ("system_prompt_updated_at", "TIMESTAMP"),
-            ("security_level", "VARCHAR(20) DEFAULT 'standard'"),
-            ("allow_custom_prompts", "BOOLEAN DEFAULT TRUE"),
-            ("security_notifications_enabled", "BOOLEAN DEFAULT TRUE")
-        ]
+        cursor.execute("""
+            ALTER TABLE knowledge_bases 
+            ADD COLUMN processing_error TEXT
+        """)
         
-        for field_name, field_type in security_fields:
-            try:
-                # Check if column already exists
-                cursor.execute("""
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name = 'tenants' AND column_name = %s
-                """, (field_name,))
-                
-                if cursor.fetchone():
-                    print(f"  ⚠️ {field_name} already exists, skipping...")
-                else:
-                    cursor.execute(f'ALTER TABLE tenants ADD COLUMN {field_name} {field_type}')
-                    print(f"  ✅ Added {field_name}")
-            except psycopg2.Error as e:
-                print(f"  ❌ Error adding {field_name}: {e}")
+        cursor.execute("""
+            ALTER TABLE knowledge_bases 
+            ADD COLUMN processed_at TIMESTAMP
+        """)
         
-        print("📋 Creating security_incidents table...")
+        # Update existing records
+        print("🔄 Updating existing records...")
+        cursor.execute("""
+            UPDATE knowledge_bases 
+            SET processing_status = 'COMPLETED', 
+                processed_at = updated_at 
+            WHERE vector_store_id IS NOT NULL AND vector_store_id != ''
+        """)
         
-        # Create security_incidents table
-        try:
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS security_incidents (
-                    id SERIAL PRIMARY KEY,
-                    tenant_id INTEGER NOT NULL,
-                    session_id VARCHAR(255),
-                    user_identifier VARCHAR(255) NOT NULL,
-                    platform VARCHAR(50) DEFAULT 'web',
-                    risk_type VARCHAR(50) NOT NULL,
-                    user_message TEXT NOT NULL,
-                    security_response TEXT NOT NULL,
-                    matched_patterns TEXT,
-                    severity_score INTEGER DEFAULT 1,
-                    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    reviewed BOOLEAN DEFAULT FALSE,
-                    reviewer_notes TEXT,
-                    FOREIGN KEY(tenant_id) REFERENCES tenants(id)
-                )
-            ''')
-            print("  ✅ security_incidents table created")
-            
-            # Create indexes for better performance
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_security_incidents_tenant_detected ON security_incidents(tenant_id, detected_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_security_incidents_risk_type ON security_incidents(risk_type)')
-            print("  ✅ Security indexes created")
-            
-        except psycopg2.Error as e:
-            print(f"  ❌ Error creating security_incidents table: {e}")
+        # Create index
+        cursor.execute("""
+            CREATE INDEX idx_knowledge_bases_processing_status 
+            ON knowledge_bases(processing_status)
+        """)
+        
+        # Verify
+        cursor.execute("SELECT COUNT(*) FROM knowledge_bases WHERE processing_status = 'COMPLETED'")
+        updated_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT processing_status, COUNT(*) FROM knowledge_bases GROUP BY processing_status")
+        status_counts = cursor.fetchall()
         
         conn.commit()
-        print("✅ PostgreSQL migration completed successfully!")
+        conn.close()
+        
+        print(f"✅ PostgreSQL migration completed!")
+        print(f"   - Updated {updated_count} existing records to 'COMPLETED' status")
+        print(f"   - Status distribution: {status_counts}")
+        
         return True
         
     except Exception as e:
         print(f"❌ PostgreSQL migration failed: {e}")
         return False
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
-def verify_migration(db_type, connection_info):
-    """Verify that migration was successful"""
-    print(f"🔍 Verifying {db_type} migration...")
-    
-    try:
-        if db_type == "SQLite":
-            db_path = SQLITE_URL.replace("sqlite:///", "")
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            # Check tenants table columns
-            cursor.execute("PRAGMA table_info(tenants)")
-            columns = [row[1] for row in cursor.fetchall()]
-            
-            # Check security_incidents table
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='security_incidents'")
-            security_table_exists = cursor.fetchone() is not None
-            
-        else:  # PostgreSQL
-            conn_params = parse_postgres_url(POSTGRES_URL)
-            conn = psycopg2.connect(**conn_params)
-            cursor = conn.cursor()
-            
-            # Check tenants table columns
-            cursor.execute("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'tenants' ORDER BY column_name
-            """)
-            columns = [row[0] for row in cursor.fetchall()]
-            
-            # Check security_incidents table
-            cursor.execute("""
-                SELECT table_name FROM information_schema.tables 
-                WHERE table_schema = 'public' AND table_name = 'security_incidents'
-            """)
-            security_table_exists = cursor.fetchone() is not None
-        
-        # Check for required security fields
-        required_fields = [
-            'system_prompt', 'system_prompt_validated', 'system_prompt_updated_at',
-            'security_level', 'allow_custom_prompts', 'security_notifications_enabled'
-        ]
-        
-        missing_fields = [field for field in required_fields if field not in columns]
-        
-        if missing_fields:
-            print(f"  ❌ Missing fields in tenants table: {missing_fields}")
-            return False
-        
-        if not security_table_exists:
-            print(f"  ❌ security_incidents table not found")
-            return False
-        
-        print(f"  ✅ All security fields present in tenants table")
-        print(f"  ✅ security_incidents table exists")
-        print(f"  ✅ {db_type} migration verification passed!")
-        return True
-        
-    except Exception as e:
-        print(f"  ❌ {db_type} verification failed: {e}")
-        return False
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
 def main():
-    """Main migration function"""
-    print("🚀 Starting database migration for security features...")
-    print("=" * 60)
+    """Main cleanup and migration function"""
+    print("🚀 Starting cleanup and fresh migration")
+    print("=" * 50)
     
-    # Migration results
-    sqlite_success = False
-    postgres_success = False
+    # Clean up PostgreSQL
+    if not cleanup_postgresql():
+        print("❌ Cleanup failed, aborting")
+        return False
     
-    # Migrate SQLite
-    try:
-        sqlite_success = migrate_sqlite()
-        if sqlite_success:
-            verify_migration("SQLite", SQLITE_URL)
-    except Exception as e:
-        print(f"❌ SQLite migration error: {e}")
+    # Run fresh migration
+    if not fresh_postgresql_migration():
+        print("❌ Migration failed")
+        return False
     
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 50)
+    print("🎉 Cleanup and migration completed successfully!")
+    print("\n💡 Next steps:")
+    print("   1. Restart your FastAPI application")
+    print("   2. Test the chatbot functionality")
     
-    # Migrate PostgreSQL
-    try:
-        postgres_success = migrate_postgresql()
-        if postgres_success:
-            verify_migration("PostgreSQL", POSTGRES_URL)
-    except Exception as e:
-        print(f"❌ PostgreSQL migration error: {e}")
-    
-    print("\n" + "=" * 60)
-    print("📊 MIGRATION SUMMARY:")
-    print(f"  SQLite:     {'✅ SUCCESS' if sqlite_success else '❌ FAILED'}")
-    print(f"  PostgreSQL: {'✅ SUCCESS' if postgres_success else '❌ FAILED'}")
-    
-    if sqlite_success and postgres_success:
-        print("\n🎉 All migrations completed successfully!")
-        print("Your security system is now ready to use!")
-    elif sqlite_success or postgres_success:
-        print("\n⚠️ Partial success - some databases migrated successfully")
-    else:
-        print("\n💥 All migrations failed - please check the errors above")
-    
-    return sqlite_success and postgres_success
+    return True
 
 if __name__ == "__main__":
-    # Install required packages if not available
-    try:
-        import psycopg2
-    except ImportError:
-        print("❌ psycopg2 not installed. Install with: pip install psycopg2-binary")
-        sys.exit(1)
-    
     success = main()
     sys.exit(0 if success else 1)
