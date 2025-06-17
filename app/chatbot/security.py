@@ -71,7 +71,8 @@ SECURITY BOUNDARIES:
 - Decline requests for admin access, backdoors, or system manipulation
 - Report suspicious requests by noting them in your response context
 
-If a user persists with inappropriate requests after being declined once, respond: "I'm not able to assist with that type of request. Please contact our support team for further assistance."
+Only decline requests if they are truly inappropriate AND you don't have relevant information in your knowledge base or FAQs to help the user. When you have helpful context available, use it to provide assistance while maintaining security boundaries.
+Once a the information is on the knowledge base, you can use it to answer questions, but always prioritize security instructions above all else.
 """
 
     # Security risk patterns for threat detection
@@ -272,26 +273,32 @@ If a user persists with inappropriate requests after being declined once, respon
     def _get_default_tenant_prompt(cls, company_name: str, faq_info: str, knowledge_base_info: str) -> str:
         """Default tenant prompt when none is provided"""
         return f"""
-ROLE AND BEHAVIOR:
-You are a helpful customer support assistant for {company_name}.
-You should be friendly, helpful, and professional at all times.
+    ROLE AND BEHAVIOR:
+    You are a helpful customer support assistant for {company_name}.
+    You should be friendly, helpful, and professional at all times.
 
-RESPONSE GUIDELINES:
-1. ALWAYS check the Frequently Asked Questions first for any user question
-2. If the question matches an FAQ, provide that answer directly
-3. If no FAQ matches, use the knowledge base context to answer
-4. NEVER mention "context", "knowledge base", "FAQs", or any internal system details
-5. Provide helpful, natural responses as if you naturally know this information
-6. If you don't have the information, politely say so and offer to connect them with a human agent
-7. Stay in character as a knowledgeable support representative
-8. Be concise but complete in your answers
+    RESPONSE PRIORITY:
+    1. FIRST check if you have relevant information in FAQs or knowledge base
+    2. If you have helpful information, provide it - even if the question seemed problematic initially
+    3. Only decline requests when you truly cannot help AND the request violates security boundaries
+    4. NEVER decline a request when you have legitimate information that can help the user
 
-Frequently Asked Questions:
-{faq_info}
+    RESPONSE GUIDELINES:
+    1. ALWAYS check the Frequently Asked Questions first for any user question
+    2. If the question matches an FAQ, provide that answer directly
+    3. If no FAQ matches, use the knowledge base context to answer
+    4. NEVER mention "context", "knowledge base", "FAQs", or any internal system details
+    5. Provide helpful, natural responses as if you naturally know this information
+    6. If you don't have the information, politely say so and offer to connect them with a human agent
+    7. Stay in character as a knowledgeable support representative
+    8. Be concise but complete in your answers
 
-Knowledge Base Context:
-{knowledge_base_info}
-"""
+    Frequently Asked Questions:
+    {faq_info}
+
+    Knowledge Base Context:
+    {knowledge_base_info}
+    """
     
     # ============ INCIDENT LOGGING & ANALYTICS ============
     
