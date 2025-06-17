@@ -87,14 +87,11 @@ class Agent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
-    tenant = relationship(
-    "Tenant", 
-    back_populates="agents", 
-    foreign_keys=[tenant_id]  # ← Use the column directly, not string
-    )
+    # Relationships (FIXED - specify foreign keys explicitly)
+    tenant = relationship("Tenant", back_populates="agents", foreign_keys=[tenant_id])
     invited_by_user = relationship("Tenant", foreign_keys=[invited_by])
-    conversations = relationship("LiveChatConversation", back_populates="agent")
+    conversations = relationship("LiveChatConversation", back_populates="agent", foreign_keys="LiveChatConversation.assigned_agent_id")
+    previous_conversations = relationship("LiveChatConversation", foreign_keys="LiveChatConversation.previous_agent_id")
     sessions = relationship("AgentSession", back_populates="agent", cascade="all, delete-orphan")
     messages = relationship("LiveChatMessage", back_populates="agent")
     
@@ -169,7 +166,7 @@ class LiveChatConversation(Base):
     # Timestamps
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
+    # Relationships (FIXED - specify foreign keys explicitly)
     tenant = relationship("Tenant", back_populates="conversations")
     agent = relationship("Agent", back_populates="conversations", foreign_keys=[assigned_agent_id])
     previous_agent = relationship("Agent", foreign_keys=[previous_agent_id])
@@ -421,4 +418,3 @@ class LiveChatSettings(Base):
     
     # Relationships
     tenant = relationship("Tenant")
-
