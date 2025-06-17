@@ -285,10 +285,8 @@ class ChatbotEngine:
                             llm=llm,
                             retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
                             memory=memory,
-                            combine_docs_chain_kwargs={
-                                "prompt": qa_prompt,
-                                "document_variable_name": "context"
-                            },
+                            # Corrected arguments for combining documents
+                            combine_docs_chain_kwargs={"prompt": qa_prompt},
                             return_source_documents=False,
                             verbose=True
                         )
