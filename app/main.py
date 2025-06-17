@@ -142,7 +142,6 @@ app.include_router(chatbot_router, prefix="/chatbot", tags=["Chatbot"])
 app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 app.include_router(pricing_router, prefix="/pricing", tags=["Pricing"])
-app.include_router(live_chat_router, prefix="/live-chat", tags=["Live Chat"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
