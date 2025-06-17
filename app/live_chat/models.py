@@ -88,7 +88,11 @@ class Agent(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="agents", foreign_keys=[tenant_id])
+    tenant = relationship(
+    "Tenant", 
+    back_populates="agents", 
+    foreign_keys=[tenant_id]  # ← Use the column directly, not string
+    )
     invited_by_user = relationship("Tenant", foreign_keys=[invited_by])
     conversations = relationship("LiveChatConversation", back_populates="agent")
     sessions = relationship("AgentSession", back_populates="agent", cascade="all, delete-orphan")

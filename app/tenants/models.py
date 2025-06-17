@@ -78,7 +78,12 @@ class Tenant(Base):
     subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
     
     # Live chat relationships (FIXED - no duplicates)
-    agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
+    agents = relationship(
+    "Agent", 
+    back_populates="tenant", 
+    foreign_keys="Agent.tenant_id",  # ← Tell SQLAlchemy which foreign key to use
+    cascade="all, delete-orphan"
+    )
     conversations = relationship("LiveChatConversation", back_populates="tenant", cascade="all, delete-orphan")
     live_chat_settings = relationship("LiveChatSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     
