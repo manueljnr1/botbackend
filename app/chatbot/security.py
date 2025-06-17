@@ -546,3 +546,80 @@ def validate_and_sanitize_tenant_prompt(tenant_prompt: str) -> Tuple[str, bool, 
     sanitized = SecurityPromptManager._sanitize_tenant_prompt(tenant_prompt)
     
     return sanitized, is_valid, issues
+
+@classmethod
+def check_user_message_security_with_context(cls, user_message: str, faq_info: str = "", 
+                                           knowledge_base_context: str = "") -> Tuple[bool, Optional[str], bool]:
+    """
+    Enhanced security check that considers available context (FAQs + KB)
+    
+    Args:
+        user_message: The user's message to check
+        faq_info: Available FAQ information
+        knowledge_base_context: Available knowledge base context
+        
+    Returns:
+        (is_safe, risk_reason, context_has_answer)
+    """
+    # First, check if message contains security risk patterns
+    is_safe, risk_type = cls.check_user_message_security(user_message)
+    
+    if not is_safe:
+        # Check if the answer might be legitimately available in context
+        context_has_answer = cls._check_context_for_legitimate_answer(
+            user_message, faq_info, knowledge_base_context, risk_type
+        )
+        
+        if context_has_answer:
+            logger.info(f"🔓 Security pattern detected but legitimate answer found in context for: {user_message[:50]}...")
+            return True, None, True  # Allow it because context has the answer
+        else:
+            logger.warning(f"🔒 Security risk detected with no legitimate context: {risk_type}")
+            return False, risk_type, False
+    
+    return True, None, False
+
+@classmethod
+def _check_context_for_legitimate_answer(cls, user_message: str, faq_info: str, 
+                                       knowledge_base_context: str, risk_type: str) -> bool:
+    """
+    Check if FAQs or knowledge base actually contain information to answer the question
+    This prevents blocking legitimate questions that happen to match security patterns
+    """
+    combined_context = f"{faq_info}\n{knowledge_base_context}".lower()
+    user_message_lower = user_message.lower()
+    
+    # If no context available, can't provide legitimate answer
+    if not combined_context.strip():
+        return False
+    
+    # Extract key terms from user question (remove common security trigger words)
+    security_noise_words = {
+        'show', 'give', 'provide', 'tell', 'what', 'how', 'where', 'when', 
+        'admin', 'access', 'system', 'database', 'api', 'secret'
+    }
+    
+    # Get meaningful words from the question
+    question_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
+    meaningful_words = question_words - security_noise_words
+    
+    # If question has no meaningful content words, it's likely a probe
+    if len(meaningful_words) < 1:
+        return False
+    
+    # Check if context contains substantial information about the meaningful terms
+    context_matches = 0
+    for word in meaningful_words:
+        if word in combined_context:
+            context_matches += 1
+    
+    # For certain risk types, be more strict
+    if risk_type in ["technical_exploitation", "system_probing"]:
+        # Need strong evidence (most question words must be in context)
+        return context_matches >= len(meaningful_words) * 0.8
+    elif risk_type in ["data_mining"]:
+        # Medium strictness
+        return context_matches >= len(meaningful_words) * 0.6
+    else:
+        # More lenient for prompt injection attempts
+        return context_matches >= len(meaningful_words) * 0.4

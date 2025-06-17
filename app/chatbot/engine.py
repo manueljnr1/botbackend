@@ -14,7 +14,7 @@ from app.utils.language_service import language_service
 from app.chatbot.response_simulator import SimpleHumanDelaySimulator
 from app.chatbot.simple_memory import SimpleChatbotMemory
 from datetime import datetime
-from app.chatbot.prompts import build_secure_chatbot_prompt, check_message_security
+from app.chatbot.security import build_secure_chatbot_prompt, check_message_security
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -81,9 +81,32 @@ class ChatbotEngine:
         return faqs
     
     def _check_message_security(self, user_message: str, tenant_name: str) -> tuple[bool, str]:
-        """Check message security before processing"""
+        """Check message security before processing (legacy method)"""
         return check_message_security(user_message, tenant_name)
 
+    def _check_message_security_with_context(self, user_message: str, tenant_name: str, 
+                                           faq_info: str = "", knowledge_base_context: str = "") -> Tuple[bool, str, bool]:
+        """
+        Enhanced security check that considers available context
+        
+        Returns:
+            (is_safe, security_response, context_override)
+        """
+        from app.chatbot.security import SecurityPromptManager
+        
+        is_safe, risk_type, context_has_answer = SecurityPromptManager.check_user_message_security_with_context(
+            user_message, faq_info, knowledge_base_context
+        )
+        
+        if not is_safe:
+            security_response = SecurityPromptManager.get_security_decline_message(risk_type, tenant_name)
+            return False, security_response, False
+        elif context_has_answer:
+            # Message was risky but context has legitimate answer
+            logger.info(f"🔓 Allowing potentially risky question due to legitimate context available")
+            return True, "", True
+        else:
+            return True, "", False
 
     # ========================== SESSION MANAGEMENT ==========================
     
@@ -258,11 +281,14 @@ class ChatbotEngine:
                     llm=llm,
                     retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
                     memory=memory,
-                    combine_docs_chain_kwargs={"prompt": qa_prompt},
+                    combine_docs_chain_kwargs={
+                        "prompt": qa_prompt,
+                        "document_variable_name": "context"
+                    },
                     return_source_documents=False,
                     verbose=True
                 )
-                
+                                
                 logger.info(f"Successfully created secure chatbot chain for tenant: {tenant.name}")
                 return chain
                 
@@ -317,8 +343,6 @@ class ChatbotEngine:
             }
         
         # Continue with normal processing if message is safe
-        # ... (rest of the original process_message code remains the same)
-        
         # Get or create session
         session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
         
@@ -376,6 +400,123 @@ class ChatbotEngine:
                 "success": True,
                 "is_new_session": is_new_session
             }
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}", exc_info=True)
+            return {"error": f"Error generating response: {str(e)}", "success": False}
+
+    def process_message_with_context_security(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
+        """Process message with context-aware security checking"""
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Get context for security checking
+        faqs = self._get_faqs(tenant.id)
+        faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs]) if faqs else ""
+        
+        # Get knowledge base context (simplified)
+        knowledge_bases = self._get_knowledge_bases(tenant.id)
+        kb_context = ""
+        if knowledge_bases:
+            # You might want to do a quick retrieval here to get relevant KB context
+            # For now, we'll use a simple approach
+            kb_context = "Knowledge base available with company information"
+        
+        # 🔒 ENHANCED SECURITY CHECK with context awareness
+        is_safe, security_response, context_override = self._check_message_security_with_context(
+            user_message, tenant.name, faq_info, kb_context
+        )
+        
+        if not is_safe:
+            logger.warning(f"Security risk detected and blocked: {user_message[:50]}...")
+            
+            # Store the security incident
+            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
+            session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            
+            # Store user message (for audit trail)
+            user_msg = ChatMessage(
+                session_id=session.id,
+                content=user_message,
+                is_from_user=True
+            )
+            self.db.add(user_msg)
+            
+            # Store security response
+            security_msg = ChatMessage(
+                session_id=session.id,
+                content=security_response,
+                is_from_user=False
+            )
+            self.db.add(security_msg)
+            self.db.commit()
+            
+            return {
+                "session_id": session_id,
+                "response": security_response,
+                "success": True,
+                "is_new_session": False,
+                "security_declined": True,
+                "context_available": bool(faq_info or kb_context)
+            }
+        
+        # Log if security was overridden due to context
+        if context_override:
+            logger.info(f"🔓 Security pattern detected but allowing due to legitimate context: {user_message[:50]}...")
+        
+        # Continue with normal processing...
+        # Get or create session
+        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
+        
+        # Store user message
+        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        user_msg = ChatMessage(
+            session_id=session.id,
+            content=user_message,
+            is_from_user=True
+        )
+        self.db.add(user_msg)
+        self.db.commit()
+        
+        # Initialize or get chatbot chain
+        if session_id not in self.active_sessions:
+            chain = self._initialize_chatbot_chain(tenant.id)
+            if not chain:
+                return {"error": "Failed to initialize chatbot", "success": False}
+            self.active_sessions[session_id] = chain
+        else:
+            chain = self.active_sessions[session_id]
+        
+        # Generate response
+        try:
+            if hasattr(chain, 'run'):
+                bot_response = chain.run(user_message)
+            elif hasattr(chain, '__call__'):
+                response = chain({"question": user_message})
+                bot_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
+            else:
+                bot_response = "I'm sorry, I'm having trouble accessing my knowledge base."
+            
+            # Store bot response
+            bot_msg = ChatMessage(
+                session_id=session.id,
+                content=bot_response,
+                is_from_user=False
+            )
+            self.db.add(bot_msg)
+            self.db.commit()
+            
+            return {
+                "session_id": session_id,
+                "response": bot_response,
+                "success": True,
+                "is_new_session": is_new_session,
+                "security_context_override": context_override
+            }
+            
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
@@ -707,6 +848,73 @@ class ChatbotEngine:
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
+
+    def process_message_simple_memory_with_context_security(self, api_key: str, user_message: str, 
+                                                          user_identifier: str, platform: str = "web", 
+                                                          max_context: int = 20) -> Dict[str, Any]:
+        """
+        Process message with simple conversation memory and enhanced context-aware security
+        """
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Get context for security checking
+        faqs = self._get_faqs(tenant.id)
+        faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs]) if faqs else ""
+        
+        # Get knowledge base context
+        knowledge_bases = self._get_knowledge_bases(tenant.id)
+        kb_context = ""
+        if knowledge_bases:
+            kb_context = "Knowledge base available with company information"
+        
+        # 🔒 ENHANCED SECURITY CHECK with context awareness
+        is_safe, security_response, context_override = self._check_message_security_with_context(
+            user_message, tenant.name, faq_info, kb_context
+        )
+        
+        if not is_safe:
+            logger.warning(f"Security risk detected and blocked: {user_message[:50]}...")
+            
+            # Initialize memory for storing security incident
+            memory = SimpleChatbotMemory(self.db, tenant.id)
+            session_id, _ = memory.get_or_create_session(user_identifier, platform)
+            
+            # Store messages
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, security_response, False)
+            
+            return {
+                "session_id": session_id,
+                "response": security_response,
+                "success": True,
+                "is_new_session": False,
+                "security_declined": True,
+                "context_available": bool(faq_info or kb_context),
+                "platform": platform
+            }
+        
+        # Log if security was overridden due to context
+        if context_override:
+            logger.info(f"🔓 Security pattern detected but allowing due to legitimate context")
+        
+        # Continue with normal simple memory processing
+        result = self.process_message_simple_memory(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform=platform,
+            max_context=max_context
+        )
+        
+        # Add context override info to result
+        if result.get("success"):
+            result["security_context_override"] = context_override
+        
+        return result
     
     def process_discord_message_simple(self, api_key: str, user_message: str, discord_user_id: str, 
                                      channel_id: str, guild_id: str, max_context: int = 20) -> Dict[str, Any]:
@@ -795,8 +1003,6 @@ class ChatbotEngine:
             # Process normally with chatbot
             return self.process_message(api_key, user_message, user_identifier)
 
-
-
     # ========================== DISCORD MEMORY WITH DELAY ==========================
     
     async def process_discord_message_simple_with_delay(self, api_key: str, user_message: str, discord_user_id: str, 
@@ -816,7 +1022,6 @@ class ChatbotEngine:
         user_identifier = f"discord:{discord_user_id}"
         
         # Initialize simple memory manager
-        from app.chatbot.simple_memory import SimpleChatbotMemory
         memory = SimpleChatbotMemory(self.db, tenant.id)
         
         # Get or create session
@@ -906,7 +1111,6 @@ class ChatbotEngine:
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
-        
 
     # ========================== SMART FEEDBACK SYSTEM ==========================
     
@@ -929,7 +1133,6 @@ class ChatbotEngine:
             return {"error": "Invalid API key", "success": False}
         
         # Initialize managers
-        from app.chatbot.simple_memory import SimpleChatbotMemory
         memory = SimpleChatbotMemory(self.db, tenant.id)
         feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
         
@@ -1031,52 +1234,50 @@ class ChatbotEngine:
         
         return result
 
-        def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
-            """
-            Handle tenant's email response using advanced feedback system
-            """
-            from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
-            
-            # Get tenant from API key
-            tenant = self._get_tenant_by_api_key(api_key)
-            if not tenant:
-                return {"error": "Invalid API key", "success": False}
-            
-            feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
-            
-            success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
-            
-            return {
-                "success": success,
-                "feedback_id": feedback_id,
-                "system": "advanced",
-                "message": "Advanced tenant response processed and customer notified with professional follow-up" if success else "Failed to process response"
-            }
+    def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
+        """
+        Handle tenant's email response using advanced feedback system
+        """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        
+        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+        
+        return {
+            "success": success,
+            "feedback_id": feedback_id,
+            "system": "advanced",
+            "message": "Advanced tenant response processed and customer notified with professional follow-up" if success else "Failed to process response"
+        }
 
-        def get_advanced_feedback_stats(self, api_key: str) -> Dict[str, Any]:
-            """
-            Get advanced feedback system statistics with real-time data
-            """
-            from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
-            
-            tenant = self._get_tenant_by_api_key(api_key)
-            if not tenant:
-                return {"error": "Invalid API key", "success": False}
-            
-            feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
-            analytics = feedback_manager.get_feedback_analytics()
-            
-            return {
-                "success": True,
-                "tenant_id": tenant.id,
-                "tenant_name": tenant.name,
-                "system": "advanced",
-                "analytics": analytics
-            }
+    def get_advanced_feedback_stats(self, api_key: str) -> Dict[str, Any]:
+        """
+        Get advanced feedback system statistics with real-time data
+        """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        analytics = feedback_manager.get_feedback_analytics()
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "system": "advanced",
+            "analytics": analytics
+        }
 
-
-
-    
+    # ========================== SLACK PROCESSING ==========================
 
     def process_slack_message_simple(self, api_key: str, user_message: str, slack_user_id: str, 
                                channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
@@ -1102,16 +1303,12 @@ class ChatbotEngine:
             }
         
         return result
-    
 
     async def process_slack_message_simple_with_delay(self, api_key: str, user_message: str, slack_user_id: str, 
                                                     channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
         """
         Slack message processing with both simple memory AND delay simulation
         """
-        import time
-        import asyncio
-        
         # Get tenant from API key
         tenant = self._get_tenant_by_api_key(api_key)
         if not tenant:
@@ -1124,7 +1321,6 @@ class ChatbotEngine:
         user_identifier = f"slack:{slack_user_id}"
         
         # Initialize simple memory manager
-        from app.chatbot.simple_memory import SimpleChatbotMemory
         memory = SimpleChatbotMemory(self.db, tenant.id)
         
         # Get or create session
@@ -1214,9 +1410,3 @@ class ChatbotEngine:
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
-        
-
-
-    
-
-    
