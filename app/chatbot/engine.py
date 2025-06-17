@@ -238,24 +238,25 @@ class ChatbotEngine:
 
         if completed_kbs:
             processor = DocumentProcessor(tenant_id)
-            
+                
             for kb in completed_kbs:
                 try:
-                    logger.info(f"Attempting to load vector store for KB ID: {kb.id}, Vector Store ID: {kb.vector_store_id}")
-                    vector_store = processor.get_vector_store(kb.vector_store_id)
-                    
-                    if vector_store:
-                        # --- Successfully loaded a vector store, now build the chain ---
+                        logger.info(f"Attempting to load vector store for KB ID: {kb.id}, Vector Store ID: {kb.vector_store_id}")
+                        vector_store = processor.get_vector_store(kb.vector_store_id)
                         
                         # Build secure prompt with security layer
                         secure_prompt_content = build_secure_chatbot_prompt(
                             tenant_prompt=getattr(tenant, 'system_prompt', None),
                             company_name=tenant.name,
                             faq_info=faq_info,
-                            knowledge_base_info="{context}"  # Will be filled by LangChain
+                            knowledge_base_info="Use this context: {context}"
                         )
                         
                         qa_prompt_template = f"""{secure_prompt_content}
+            
+                    Use the following context to answer the question. If the context doesn't contain relevant information, use your general knowledge while staying within the security guidelines above.
+
+    Context: {{context}}
 
     User Question: {{question}}
 
