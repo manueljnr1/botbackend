@@ -91,7 +91,7 @@ class Agent(Base):
     tenant = relationship("Tenant", back_populates="agents", foreign_keys=[tenant_id])
     invited_by_user = relationship("Tenant", foreign_keys=[invited_by])
     conversations = relationship("LiveChatConversation", back_populates="agent", foreign_keys="LiveChatConversation.assigned_agent_id")
-    previous_conversations = relationship("LiveChatConversation", foreign_keys="LiveChatConversation.previous_agent_id")
+    previous_conversations = relationship("LiveChatConversation", foreign_keys="LiveChatConversation.previous_agent_id", overlaps="previous_agent")
     sessions = relationship("AgentSession", back_populates="agent", cascade="all, delete-orphan")
     messages = relationship("LiveChatMessage", back_populates="agent")
     
@@ -169,7 +169,7 @@ class LiveChatConversation(Base):
     # Relationships (FIXED - specify foreign keys explicitly)
     tenant = relationship("Tenant", back_populates="conversations")
     agent = relationship("Agent", back_populates="conversations", foreign_keys=[assigned_agent_id])
-    previous_agent = relationship("Agent", foreign_keys=[previous_agent_id])
+    previous_agent = relationship("Agent", foreign_keys=[previous_agent_id], overlaps="previous_conversations")
     messages = relationship("LiveChatMessage", back_populates="conversation", cascade="all, delete-orphan")
     queue_entry = relationship("ChatQueue", back_populates="conversation", uselist=False)
     
