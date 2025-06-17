@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.knowledge_base.processor import DocumentProcessor
 from app.chatbot.chains import create_chatbot_chain
 from app.tenants.models import Tenant
-from app.knowledge_base.models import KnowledgeBase, FAQ
+from app.knowledge_base.models import KnowledgeBase, FAQ, ProcessingStatus
 from app.chatbot.models import ChatSession, ChatMessage
 from app.config import settings
 from app.utils.language_service import language_service
@@ -234,69 +234,78 @@ class ChatbotEngine:
         from langchain.memory import ConversationBufferMemory
         from langchain.prompts import PromptTemplate
         
-        if knowledge_bases:
-            kb = knowledge_bases[0]
+        completed_kbs = [kb for kb in knowledge_bases if kb.processing_status == ProcessingStatus.COMPLETED]
+
+        if completed_kbs:
             processor = DocumentProcessor(tenant_id)
             
-            try:
-                vector_store = processor.get_vector_store(kb.vector_store_id)
-                if vector_store is None:
-                    return self._create_simple_chain(tenant, faq_info)
-                
-                # Build secure prompt with security layer
-                secure_prompt_content = build_secure_chatbot_prompt(
-                    tenant_prompt=getattr(tenant, 'system_prompt', None),
-                    company_name=tenant.name,
-                    faq_info=faq_info,
-                    knowledge_base_info="{context}"  # Will be filled by LangChain
-                )
-                
-                qa_prompt_template = f"""{secure_prompt_content}
+            for kb in completed_kbs:
+                try:
+                    logger.info(f"Attempting to load vector store for KB ID: {kb.id}, Vector Store ID: {kb.vector_store_id}")
+                    vector_store = processor.get_vector_store(kb.vector_store_id)
+                    
+                    if vector_store:
+                        # --- Successfully loaded a vector store, now build the chain ---
+                        
+                        # Build secure prompt with security layer
+                        secure_prompt_content = build_secure_chatbot_prompt(
+                            tenant_prompt=getattr(tenant, 'system_prompt', None),
+                            company_name=tenant.name,
+                            faq_info=faq_info,
+                            knowledge_base_info="{context}"  # Will be filled by LangChain
+                        )
+                        
+                        qa_prompt_template = f"""{secure_prompt_content}
 
     User Question: {{question}}
 
     Your response:"""
+                        
+                        qa_prompt = PromptTemplate(
+                            template=qa_prompt_template,
+                            input_variables=["context", "question"]
+                        )
+                        
+                        # Initialize LLM
+                        llm = ChatOpenAI(
+                            model_name="gpt-3.5-turbo",
+                            temperature=0.3,
+                            openai_api_key=settings.OPENAI_API_KEY
+                        )
+                        
+                        # Create memory
+                        memory = ConversationBufferMemory(
+                            memory_key="chat_history",
+                            return_messages=True,
+                            output_key="answer"
+                        )
+                        
+                        # Create the chain with secure prompt
+                        chain = ConversationalRetrievalChain.from_llm(
+                            llm=llm,
+                            retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
+                            memory=memory,
+                            combine_docs_chain_kwargs={
+                                "prompt": qa_prompt,
+                                "document_variable_name": "context"
+                            },
+                            return_source_documents=False,
+                            verbose=True
+                        )
+                                        
+                        logger.info(f"Successfully created secure chatbot chain for tenant: {tenant.name} using KB ID: {kb.id}")
+                        return chain # Return the successfully created chain
                 
-                qa_prompt = PromptTemplate(
-                    template=qa_prompt_template,
-                    input_variables=["context", "question"]
-                )
-                
-                # Initialize LLM
-                llm = ChatOpenAI(
-                    model_name="gpt-3.5-turbo",
-                    temperature=0.3,
-                    openai_api_key=settings.OPENAI_API_KEY
-                )
-                
-                # Create memory
-                memory = ConversationBufferMemory(
-                    memory_key="chat_history",
-                    return_messages=True,
-                    output_key="answer"
-                )
-                
-                # Create the chain with secure prompt
-                chain = ConversationalRetrievalChain.from_llm(
-                    llm=llm,
-                    retriever=vector_store.as_retriever(search_kwargs={"k": 3}),
-                    memory=memory,
-                    combine_docs_chain_kwargs={
-                        "prompt": qa_prompt,
-                        "document_variable_name": "context"
-                    },
-                    return_source_documents=False,
-                    verbose=True
-                )
-                                
-                logger.info(f"Successfully created secure chatbot chain for tenant: {tenant.name}")
-                return chain
-                
-            except Exception as e:
-                logger.error(f"Error creating chatbot chain: {e}", exc_info=True)
-                return self._create_simple_chain(tenant, faq_info)
-        else:
-            return self._create_simple_chain(tenant, faq_info)
+                except FileNotFoundError:
+                    logger.warning(f"Vector store not found for KB ID: {kb.id}. Trying next available knowledge base.")
+                    continue # Try the next knowledge base
+                except Exception as e:
+                    logger.error(f"Failed to load KB ID: {kb.id} due to an unexpected error: {e}", exc_info=True)
+                    continue # Try the next knowledge base
+
+        # If loop finishes without returning a chain, or if no completed_kbs, fall back
+        logger.warning(f"No valid knowledge base could be loaded for tenant {tenant.id}. Falling back to simple chain.")
+        return self._create_simple_chain(tenant, faq_info)
 
     # ========================== BASIC MESSAGE PROCESSING ==========================
     
