@@ -14,6 +14,7 @@ from app.knowledge_base.processor import DocumentProcessor
 from app.tenants.models import Tenant
 from app.auth.models import User
 from app.auth.router import get_current_user, get_admin_user
+from app.services.storage import storage_service
 
 
 logging.basicConfig(level=logging.INFO)
@@ -91,7 +92,7 @@ async def delete_knowledge_base(
     db: Session = Depends(get_db)
 ):
     """
-    Delete a knowledge base
+    Delete a knowledge base with cloud storage support
     """
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
@@ -102,28 +103,30 @@ async def delete_knowledge_base(
         logger.warning(f"Knowledge base not found: {kb_id}")
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     
-    # Delete the vector store
+    # Delete the vector store from cloud
     processor = DocumentProcessor(tenant_id)
     try:
-        logger.info(f"Deleting vector store: {kb.vector_store_id}")
+        logger.info(f"Deleting vector store from cloud: {kb.vector_store_id}")
         vector_store_deleted = processor.delete_vector_store(kb.vector_store_id)
         if vector_store_deleted:
-            logger.info(f"Vector store deleted successfully")
+            logger.info(f"Vector store deleted successfully from cloud")
         else:
-            logger.warning(f"Vector store not found for deletion")
+            logger.warning(f"Vector store not found for deletion in cloud")
     except Exception as e:
-        logger.error(f"Error deleting vector store: {str(e)}")
+        logger.error(f"Error deleting vector store from cloud: {str(e)}")
         # Continue with deletion even if vector store deletion fails
     
-    # Delete the uploaded file
-    if os.path.exists(kb.file_path):
-        try:
-            os.remove(kb.file_path)
-            logger.info(f"File deleted: {kb.file_path}")
-        except Exception as e:
-            logger.error(f"Error deleting file: {str(e)}")
-    else:
-        logger.warning(f"File not found: {kb.file_path}")
+    # Delete the uploaded file from cloud storage
+    try:
+        from app.services.storage import storage_service
+        file_deleted = storage_service.delete_file("knowledge-base-files", kb.file_path)
+        if file_deleted:
+            logger.info(f"File deleted from cloud: {kb.file_path}")
+        else:
+            logger.warning(f"File not found in cloud: {kb.file_path}")
+    except Exception as e:
+        logger.error(f"Error deleting file from cloud: {str(e)}")
+        # Continue with deletion even if file deletion fails
     
     # Delete from database
     db.delete(kb)
@@ -293,7 +296,7 @@ async def upload_knowledge_base(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db),
 ):
-    """Upload and automatically process knowledge base document"""
+    """Upload and automatically process knowledge base document with cloud storage"""
     logger.info(f"Knowledge base upload requested: {name}")
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
@@ -305,20 +308,27 @@ async def upload_knowledge_base(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
     
-    # Save uploaded file
-    upload_dir = os.path.join("uploads", f"tenant_{tenant_id}")
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
+    # Read file content and upload to cloud storage (CHANGED)
+    try:
+        file_content = await file.read()
+        logger.info(f"Read {len(file_content)} bytes from uploaded file")
+        
+        # Upload to cloud instead of saving locally
+        from app.services.storage import storage_service
+        cloud_file_path = storage_service.upload_knowledge_base_file(
+            tenant_id, file.filename, file_content
+        )
+        logger.info(f"Uploaded file to cloud: {cloud_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to upload file to cloud storage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file to cloud storage")
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Create database record FIRST (with pending status)
+    # Create database record FIRST (with pending status) - SAME AS BEFORE
     kb = KnowledgeBase(
         tenant_id=tenant_id,
         name=name,
         description=description,
-        file_path=file_path,
+        file_path=cloud_file_path,  # CHANGED: now stores cloud path instead of local path
         document_type=doc_type,
         vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",  # Generate ID upfront
         processing_status=ProcessingStatus.PENDING
@@ -327,15 +337,15 @@ async def upload_knowledge_base(
     db.commit()
     db.refresh(kb)
     
-    # Process document with error handling
+    # Process document with error handling - SAME LOGIC AS BEFORE
     processor = DocumentProcessor(tenant_id)
     try:
         kb.processing_status = ProcessingStatus.PROCESSING
         db.commit()
         
         logger.info(f"Processing document for KB {kb.id}...")
-        # Use the pre-generated vector_store_id
-        processor.process_document_with_id(file_path, doc_type, kb.vector_store_id)
+        # Use the pre-generated vector_store_id with cloud file path (CHANGED)
+        processor.process_document_with_id(cloud_file_path, doc_type, kb.vector_store_id)
         
         kb.processing_status = ProcessingStatus.COMPLETED
         kb.processed_at = datetime.utcnow()
@@ -348,11 +358,17 @@ async def upload_knowledge_base(
         kb.processing_error = str(e)
         logger.error(f"Failed to process document: {e}")
         
+        # Clean up uploaded file on processing failure (ADDED)
+        try:
+            storage_service.delete_file("knowledge-base-files", cloud_file_path)
+            logger.info(f"Cleaned up failed upload: {cloud_file_path}")
+        except Exception as cleanup_error:
+            logger.error(f"Failed to cleanup file after processing failure: {cleanup_error}")
+        
         # Don't raise exception - keep the record for retry
         
     db.commit()
     return kb
-
 
 @router.post("/{kb_id}/reprocess")
 async def reprocess_knowledge_base(
@@ -360,7 +376,7 @@ async def reprocess_knowledge_base(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Reprocess a failed or pending knowledge base"""
+    """Reprocess a failed or pending knowledge base with cloud storage support"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     
     kb = db.query(KnowledgeBase).filter(
@@ -371,8 +387,14 @@ async def reprocess_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     
-    if not os.path.exists(kb.file_path):
-        raise HTTPException(status_code=400, detail="Source file no longer exists")
+    # Check if source file exists in cloud storage
+    try:
+        from app.services.storage import storage_service
+        if not storage_service.file_exists("knowledge-base-files", kb.file_path):
+            raise HTTPException(status_code=400, detail="Source file no longer exists in cloud storage")
+    except Exception as e:
+        logger.error(f"Error checking file existence: {e}")
+        raise HTTPException(status_code=400, detail="Could not verify source file existence")
     
     processor = DocumentProcessor(tenant.id)
     try:
@@ -383,7 +405,7 @@ async def reprocess_knowledge_base(
         # Clean up old vector store if exists
         processor.delete_vector_store(kb.vector_store_id)
         
-        # Reprocess
+        # Reprocess with cloud file path
         processor.process_document_with_id(kb.file_path, kb.document_type, kb.vector_store_id)
         
         kb.processing_status = ProcessingStatus.COMPLETED
@@ -396,6 +418,8 @@ async def reprocess_knowledge_base(
         
     db.commit()
     return {"message": "Reprocessing completed", "status": kb.processing_status.value}
+
+
 
 @router.get("/status", response_model=List[dict])
 async def get_processing_status(

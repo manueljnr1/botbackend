@@ -2,6 +2,8 @@ import os
 import uuid
 import pandas as pd
 import logging
+import tempfile
+import shutil
 from typing import List, Dict, Any, Optional
 from langchain_community.document_loaders import (
     PyPDFLoader,
@@ -15,25 +17,22 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from app.config import settings
 from app.knowledge_base.models import DocumentType
+from app.services.storage import storage_service
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
-    """Process and load documents for vector storage"""
+    """Process and load documents for vector storage with cloud storage support"""
     
     def __init__(self, tenant_id: int):
         """Initialize DocumentProcessor with tenant ID and required components"""
         self.tenant_id = tenant_id
         self.embeddings = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
-        self.vector_store_path = os.path.join("vector_stores", f"tenant_{tenant_id}")
+        self.storage = storage_service
         
-        # Ensure the vector store directory exists
-        os.makedirs(self.vector_store_path, exist_ok=True)
-        
-        logger.info(f"DocumentProcessor initialized for tenant {tenant_id}")
-        logger.info(f"Vector store path: {self.vector_store_path}")
+        logger.info(f"DocumentProcessor initialized for tenant {tenant_id} with cloud storage")
     
     def process_document(self, file_path: str, doc_type: DocumentType) -> str:
         """Process a document and store it in the vector store (original method)"""
@@ -43,13 +42,21 @@ class DocumentProcessor:
         # Use the new method with the generated ID
         return self.process_document_with_id(file_path, doc_type, vector_store_id)
 
-    def process_document_with_id(self, file_path: str, doc_type: DocumentType, vector_store_id: str) -> str:
-        """Process document with pre-defined vector store ID"""
-        logger.info(f"Processing document: {file_path} -> {vector_store_id}")
+    def process_document_with_id(self, cloud_file_path: str, doc_type: DocumentType, vector_store_id: str) -> str:
+        """Process document from cloud storage with pre-defined vector store ID"""
+        logger.info(f"Processing document from cloud: {cloud_file_path} -> {vector_store_id}")
+        
+        # Download source file to temp location
+        temp_file_path = None
+        temp_vector_dir = None
         
         try:
+            # Download source file
+            temp_file_path = self.storage.download_to_temp("knowledge-base-files", cloud_file_path)
+            logger.info(f"Downloaded source file to: {temp_file_path}")
+            
             # Load and process document
-            loader = self._get_loader(file_path, doc_type)
+            loader = self._get_loader(temp_file_path, doc_type)
             documents = loader.load()
             
             if not documents:
@@ -76,36 +83,52 @@ class DocumentProcessor:
             
             logger.info(f"Split into {len(splits)} chunks")
             
-            # Create vector store path
-            vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
-            os.makedirs(vector_store_path, exist_ok=True)
-            logger.info(f"Creating vector store at: {vector_store_path}")
+            # Create vector store in temp directory
+            temp_vector_dir = tempfile.mkdtemp()
+            logger.info(f"Creating vector store in temp dir: {temp_vector_dir}")
             
-            # Create and save vector store
+            # Create and save vector store locally first
             vector_store = FAISS.from_documents(documents=splits, embedding=self.embeddings)
-            vector_store.save_local(vector_store_path)
-            logger.info(f"Vector store saved successfully")
+            vector_store.save_local(temp_vector_dir)
+            logger.info(f"Vector store saved to temp directory")
             
-            # Verify creation
-            if not os.path.exists(vector_store_path):
-                raise ValueError("Vector store directory not created")
+            # Verify local creation
+            required_files = ["index.faiss", "index.pkl"]
+            for file in required_files:
+                file_path = os.path.join(temp_vector_dir, file)
+                if not os.path.exists(file_path):
+                    raise ValueError(f"Required vector store file not created: {file}")
             
-            files = os.listdir(vector_store_path)
-            if not files:
-                raise ValueError("Vector store files not created")
+            # Upload vector store files to cloud
+            self.storage.upload_vector_store_files(self.tenant_id, vector_store_id, temp_vector_dir)
+            logger.info(f"Vector store uploaded to cloud successfully")
             
-            logger.info(f"Vector store created successfully with {len(files)} files: {files}")
             return vector_store_id
             
         except Exception as e:
             logger.error(f"Document processing failed: {e}")
-            # Clean up partial files
-            vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
-            if os.path.exists(vector_store_path):
-                import shutil
-                shutil.rmtree(vector_store_path)
-                logger.info(f"Cleaned up failed vector store at: {vector_store_path}")
+            # Clean up any partial cloud files
+            try:
+                self.storage.delete_vector_store(self.tenant_id, vector_store_id)
+            except:
+                pass  # Ignore cleanup errors
             raise
+            
+        finally:
+            # Clean up temp files
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    logger.info(f"Cleaned up temp source file: {temp_file_path}")
+                except:
+                    pass
+                    
+            if temp_vector_dir and os.path.exists(temp_vector_dir):
+                try:
+                    shutil.rmtree(temp_vector_dir)
+                    logger.info(f"Cleaned up temp vector dir: {temp_vector_dir}")
+                except:
+                    pass
     
     def _get_loader(self, file_path: str, doc_type: DocumentType):
         """Get the appropriate document loader based on file type"""
@@ -143,33 +166,48 @@ class DocumentProcessor:
             raise ValueError(f"Unsupported document type: {doc_type}")
     
     def get_vector_store(self, vector_store_id: str):
-        """Load a vector store by ID"""
-        vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
-        logger.info(f"Attempting to load vector store from: {vector_store_path}")
+        """Load a vector store from cloud storage"""
+        logger.info(f"Loading vector store from cloud: {vector_store_id}")
         
-        if not os.path.exists(vector_store_path):
-            logger.warning(f"Vector store path does not exist: {vector_store_path}")
-            raise FileNotFoundError(f"Vector store not found: {vector_store_id}")
-        
+        temp_dir = None
         try:
-            vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
-            logger.info(f"Vector store loaded successfully")
+            # Download vector store files to temp directory
+            temp_dir = self.storage.download_vector_store_files(self.tenant_id, vector_store_id)
+            
+            # Load FAISS from temp directory
+            vector_store = FAISS.load_local(
+                temp_dir, 
+                self.embeddings, 
+                allow_dangerous_deserialization=True
+            )
+            logger.info(f"Vector store loaded successfully from cloud")
             return vector_store
+            
         except Exception as e:
-            logger.error(f"Failed to load vector store: {vector_store_id}", exc_info=True)
-            raise
+            logger.error(f"Failed to load vector store {vector_store_id} from cloud: {e}")
+            raise FileNotFoundError(f"Vector store not found: {vector_store_id}")
+            
+        finally:
+            # Clean up temp directory
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.info(f"Cleaned up temp vector store dir: {temp_dir}")
+                except:
+                    pass
     
     def delete_vector_store(self, vector_store_id: str):
-        """Delete a vector store by ID"""
-        vector_store_path = os.path.join(self.vector_store_path, vector_store_id)
-        if os.path.exists(vector_store_path):
-            import shutil
-            shutil.rmtree(vector_store_path)
-            logger.info(f"Deleted vector store: {vector_store_id}")
-            return True
-        else:
-            logger.warning(f"Vector store not found for deletion: {vector_store_id}")
-        return False
+        """Delete a vector store from cloud storage"""
+        try:
+            success = self.storage.delete_vector_store(self.tenant_id, vector_store_id)
+            if success:
+                logger.info(f"Deleted vector store from cloud: {vector_store_id}")
+            else:
+                logger.warning(f"Vector store not found for deletion: {vector_store_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error deleting vector store {vector_store_id}: {e}")
+            return False
 
     def process_faq_sheet(self, file_path: str) -> List[Dict[str, str]]:
         """Process FAQ spreadsheet and return list of Q&A pairs"""
