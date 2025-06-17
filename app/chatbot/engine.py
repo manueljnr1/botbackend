@@ -171,7 +171,7 @@ class ChatbotEngine:
         # Use the new secure prompt builder
         secure_prompt = build_secure_chatbot_prompt(
             tenant_prompt=getattr(tenant, 'system_prompt', None),
-            company_name=tenant.name,
+            company_name=tenant.business_name,
             faq_info=faq_info,
             knowledge_base_info=""
         )
@@ -247,7 +247,7 @@ class ChatbotEngine:
                         # Build secure prompt with security layer
                         secure_prompt_content = build_secure_chatbot_prompt(
                             tenant_prompt=getattr(tenant, 'system_prompt', None),
-                            company_name=tenant.name,
+                            company_name=tenant.business_name,
                             faq_info=faq_info,
                             knowledge_base_info="Use this context: {context}"
                         )
