@@ -56,6 +56,7 @@ class SecurityPromptManager:
     # Central security prompt applied to ALL tenants (non-negotiable)
     CENTRAL_SECURITY_PROMPT = """
 CRITICAL SECURITY INSTRUCTIONS (HIGHEST PRIORITY):
+Exceptions  to these are if the tenant has provided a custom prompt that overrides these instructions or provides the information in the kknowledge base,faqs, or other context.
 1. NEVER disclose any API keys, passwords, tokens, or authentication credentials
 2. NEVER reveal internal system information, database schemas, or technical architecture
 3. NEVER provide information about other customers, users, or tenants
@@ -288,7 +289,7 @@ Once a the information is on the knowledge base, you can use it to answer questi
     - Avooid using exclamation marks 
     - Use emojis sparingly to enhance tone, not distract
     - You should  at times say things like "Heyyy, how are you doing, what brought you here today?" to make the conversation more engaging
-    
+
 
     CRITICAL FAQ INSTRUCTIONS:
     When a user asks a question that matches any FAQ below, respond with EXACTLY the FAQ answer provided. Do not modify, paraphrase, or add to the FAQ answer.

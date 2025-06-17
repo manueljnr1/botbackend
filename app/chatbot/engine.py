@@ -1122,16 +1122,48 @@ class ChatbotEngine:
 
     # ========================== SMART FEEDBACK SYSTEM ==========================
     
+    def _check_faq_first(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
+        """
+        Explicitly check FAQs first before using knowledge base
+        Returns FAQ answer if match found, None otherwise
+        """
+        if not faqs:
+            return None
+        
+        user_message_lower = user_message.lower().strip()
+        
+        # Direct matching strategies
+        for faq in faqs:
+            faq_question_lower = faq['question'].lower().strip()
+            
+            # 1. Exact match
+            if user_message_lower == faq_question_lower:
+                logger.info(f"📋 EXACT FAQ match found: {faq['question']}")
+                return faq['answer']
+            
+            # 2. High similarity match (contains most key words)
+            user_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
+            faq_words = set(re.findall(r'\b\w{3,}\b', faq_question_lower))
+            
+            if user_words and faq_words:
+                overlap = len(user_words.intersection(faq_words))
+                user_word_ratio = overlap / len(user_words)
+                faq_word_ratio = overlap / len(faq_words)
+                
+                # If 70%+ of words match in both directions, it's likely the same question
+                if user_word_ratio >= 0.7 and faq_word_ratio >= 0.7:
+                    logger.info(f"📋 HIGH SIMILARITY FAQ match found: {faq['question']} (similarity: {user_word_ratio:.2f})")
+                    return faq['answer']
+        
+        logger.info(f"📋 No FAQ match found for: {user_message}")
+        return None
+
+
+
+
     def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
                                                     max_context: int = 20) -> Dict[str, Any]:
-        """
-        Process message with advanced smart feedback system featuring:
-        - Enhanced inadequate response detection
-        - Professional email templates
-        - Real-time tracking via Supabase
-        - Automatic webhook processing
-        - FIXED: Email extraction logic order
-        """
+        """Enhanced with explicit FAQ checking first"""
         from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
         
         # Get tenant from API key
@@ -1190,7 +1222,32 @@ class ChatbotEngine:
                 "platform": "web"
             }
         
-        # THIRD: Process message normally with memory
+        # 🔍 NEW: CHECK FAQS FIRST before processing with knowledge base
+        faqs = self._get_faqs(tenant.id)
+        logger.info(f"🔍 Checking {len(faqs)} FAQs first before using knowledge base")
+        
+        faq_answer = self._check_faq_first(user_message, faqs)
+        
+        if faq_answer:
+            logger.info(f"✅ FAQ ANSWER FOUND - Using direct FAQ response")
+            
+            # Store messages
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, faq_answer, False)
+            
+            return {
+                "session_id": session_id,
+                "response": faq_answer,
+                "success": True,
+                "is_new_session": is_new_session,
+                "answered_by": "FAQ",
+                "faq_matched": True,
+                "platform": "web"
+            }
+        
+        # If no FAQ match, proceed with knowledge base processing
+        logger.info(f"📚 No FAQ match - proceeding with knowledge base processing")
+        
         result = self.process_message_simple_memory(
             api_key=api_key,
             user_message=user_message,
@@ -1198,6 +1255,10 @@ class ChatbotEngine:
             platform="web",
             max_context=max_context
         )
+        
+        if result.get("success"):
+            result["answered_by"] = "KnowledgeBase"
+            result["faq_matched"] = False
         
         if not result.get("success"):
             return result
@@ -1239,76 +1300,6 @@ class ChatbotEngine:
             logger.error(f"💥 Error in advanced feedback detection: {e}")
             import traceback
             logger.error(traceback.format_exc())
-        
-        return result
-
-    def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
-        """
-        Handle tenant's email response using advanced feedback system
-        """
-        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
-        
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
-        
-        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
-        
-        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
-        
-        return {
-            "success": success,
-            "feedback_id": feedback_id,
-            "system": "advanced",
-            "message": "Advanced tenant response processed and customer notified with professional follow-up" if success else "Failed to process response"
-        }
-
-    def get_advanced_feedback_stats(self, api_key: str) -> Dict[str, Any]:
-        """
-        Get advanced feedback system statistics with real-time data
-        """
-        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
-        
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
-        
-        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
-        analytics = feedback_manager.get_feedback_analytics()
-        
-        return {
-            "success": True,
-            "tenant_id": tenant.id,
-            "tenant_name": tenant.name,
-            "system": "advanced",
-            "analytics": analytics
-        }
-
-    # ========================== SLACK PROCESSING ==========================
-
-    def process_slack_message_simple(self, api_key: str, user_message: str, slack_user_id: str, 
-                               channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
-        """
-        Simplified Slack message processing with basic memory
-        """
-        user_identifier = f"slack:{slack_user_id}"
-        
-        result = self.process_message_simple_memory(
-            api_key=api_key,
-            user_message=user_message,
-            user_identifier=user_identifier,
-            platform="slack",
-            max_context=max_context
-        )
-        
-        # Add Slack-specific info to result
-        if result.get("success"):
-            result["slack_info"] = {
-                "user_id": slack_user_id,
-                "channel_id": channel_id,
-                "team_id": team_id
-            }
         
         return result
 
