@@ -1704,3 +1704,217 @@ async def chat_with_handoff_detection(
     except Exception as e:
         logger.error(f"Error in handoff-enabled chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+
+
+@router.post("/chat/smart/streaming")
+async def smart_chat_with_formatting_streaming(
+    request: SmartChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Smart chat with streaming that PRESERVES formatting
+    - Breaks content at logical points (not sentences)
+    - Maintains bullet points, numbered lists, and structure
+    - Still provides real-time streaming experience
+    """
+    
+    async def stream_formatted_response():
+        try:
+            logger.info(f"🎬 Starting smart streaming with formatting preservation")
+            
+            # Get tenant and check limits
+            tenant = get_tenant_from_api_key(api_key, db)
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+            # Auto-generate user ID if needed
+            user_id = request.user_identifier
+            auto_generated = False
+            
+            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+                user_id = f"auto_{str(uuid.uuid4())}"
+                auto_generated = True
+            
+            # Send initial metadata
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
+            
+            # Get response from chatbot (non-streaming first)
+            engine = ChatbotEngine(db)
+            result = engine.process_web_message_with_advanced_feedback_llm(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=user_id,
+                max_context=request.max_context,
+                use_smart_llm=True
+            )
+            
+            if not result.get("success"):
+                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+                return
+            
+            # Track conversation
+            track_conversation_started_with_super_tenant(
+                tenant_id=tenant.id,
+                user_identifier=user_id,
+                platform="web",
+                db=db
+            )
+            
+            # Process response with smart formatting-aware streaming
+            bot_response = result["response"]
+            
+            # Send response info
+            yield f"{json.dumps({'type': 'info', 'session_id': result.get('session_id'), 'answered_by': result.get('answered_by')})}\n"
+            
+            # Stream the formatted response intelligently
+            chunks = break_formatted_response_smartly(bot_response)
+            
+            for i, chunk in enumerate(chunks):
+                # Add natural delays between chunks
+                if i > 0:
+                    delay = calculate_formatting_aware_delay(chunk)
+                    await asyncio.sleep(delay)
+                
+                chunk_data = {
+                    'type': 'chunk',
+                    'content': chunk,
+                    'chunk_index': i,
+                    'is_complete': i == len(chunks) - 1
+                }
+                yield f"{json.dumps(chunk_data)}\n"
+            
+            # Send completion signal
+            yield f"{json.dumps({'type': 'complete', 'total_chunks': len(chunks)})}\n"
+            
+            logger.info(f"✅ Smart streaming completed with {len(chunks)} formatted chunks")
+            
+        except HTTPException as e:
+            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error in smart streaming: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+    return StreamingResponse(
+        stream_formatted_response(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+def break_formatted_response_smartly(response: str) -> List[str]:
+    """
+    Break response into chunks while PRESERVING formatting structure
+    This is the key to maintaining formatting during streaming
+    """
+    import re
+    
+    # First, detect if response has formatting
+    has_numbered_list = re.search(r'^\d+\.', response, re.MULTILINE)
+    has_bullet_points = re.search(r'^[•\-\*]\s', response, re.MULTILINE) 
+    has_headers = re.search(r'^#{1,3}\s', response, re.MULTILINE)
+    has_steps = re.search(r'step\s+\d+', response, re.IGNORECASE)
+    
+    if has_numbered_list or has_bullet_points or has_headers or has_steps:
+        return break_by_logical_sections(response)
+    else:
+        return break_by_sentences_with_context(response)
+
+def break_by_logical_sections(response: str) -> List[str]:
+    """
+    Break formatted content by logical sections, not sentences
+    This preserves the structure of lists, steps, etc.
+    """
+    chunks = []
+    current_chunk = ""
+    
+    lines = response.split('\n')
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        
+        # Check if this line starts a new logical section
+        is_new_section = (
+            re.match(r'^Step \d+:', line, re.IGNORECASE) or           # Step headers
+            re.match(r'^\d+\.', line) or                              # Numbered items  
+            re.match(r'^#{1,3}\s', line) or                          # Headers
+            re.match(r'^[•\-\*]\s', line) or                         # Bullet points
+            re.match(r'^\*\*.*\*\*:?$', line) or                     # Bold headers
+            (line.endswith(':') and len(line) < 50 and i < len(lines) - 1)  # Short lines ending with :
+        )
+        
+        # If starting new section and we have content, yield current chunk
+        if is_new_section and current_chunk.strip():
+            chunks.append(current_chunk.strip())
+            current_chunk = ""
+        
+        # Add line to current chunk
+        if line:
+            current_chunk += line + '\n'
+        else:
+            current_chunk += '\n'
+        
+        # For very long sections, break them up
+        if len(current_chunk) > 300 and not is_new_section:
+            # Look for good break points within the section
+            sentences = re.split(r'(?<=[.!?])\s+', current_chunk)
+            if len(sentences) > 1:
+                # Keep first part, start new chunk with remainder
+                break_point = len(sentences) // 2
+                chunks.append(' '.join(sentences[:break_point]).strip())
+                current_chunk = ' '.join(sentences[break_point:]) + '\n'
+    
+    # Add final chunk
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return [chunk for chunk in chunks if chunk.strip()]
+
+def break_by_sentences_with_context(response: str) -> List[str]:
+    """
+    For unformatted text, break by sentences but keep context
+    """
+    import re
+    
+    # Split into sentences but preserve some context
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', response)
+    chunks = []
+    
+    i = 0
+    while i < len(sentences):
+        chunk = sentences[i]
+        
+        # If sentence is very short, combine with next
+        if len(chunk) < 50 and i < len(sentences) - 1:
+            chunk += ' ' + sentences[i + 1]
+            i += 1
+        
+        chunks.append(chunk.strip())
+        i += 1
+    
+    return chunks
+
+def calculate_formatting_aware_delay(chunk: str) -> float:
+    """
+    Calculate delay based on chunk content and complexity
+    Longer delays for headers, shorter for list items
+    """
+    import re
+    
+    base_delay = 0.8
+    
+    # Headers need more thinking time
+    if re.match(r'^#{1,3}\s|^Step \d+:|^\*\*.*\*\*:?$', chunk):
+        return base_delay + 1.5
+    
+    # List items are quicker
+    if re.match(r'^\d+\.|^[•\-\*]\s', chunk):
+        return base_delay + 0.5
+    
+    # Regular content - based on length
+    length_factor = min(len(chunk) / 100, 2.0)
+    return base_delay + length_factor
