@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatbotEngine:
-    """The main chatbot engine that handles conversations"""
+    """The main chatbot engine that handles conversations with FAQ quality filtering and KB integration"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -80,6 +80,252 @@ class ChatbotEngine:
             logger.warning("No FAQs found! Check if FAQs are properly saved in database.")
         
         return faqs
+
+    # ========================== FAQ QUALITY AND MATCHING ==========================
+    
+    def _check_faq_first_with_quality_filter(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
+        """
+        Check FAQs first but filter out low-quality answers
+        Returns high-quality FAQ answer if match found, None otherwise
+        """
+        if not faqs:
+            return None
+        
+        user_message_lower = user_message.lower().strip()
+        
+        for faq in faqs:
+            faq_question_lower = faq['question'].lower().strip()
+            
+            # 1. Exact match
+            if user_message_lower == faq_question_lower:
+                # Check if FAQ answer is high quality
+                if self._is_faq_answer_adequate(faq['answer']):
+                    logger.info(f"📋 EXACT FAQ match found with good answer: {faq['question']}")
+                    return self._make_faq_conversational(faq['answer'])
+                else:
+                    logger.info(f"📋 FAQ match found but answer is inadequate, will use KB instead")
+                    return None
+            
+            # 2. High similarity match (90%+ for stricter matching)
+            user_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
+            faq_words = set(re.findall(r'\b\w{3,}\b', faq_question_lower))
+            
+            if user_words and faq_words:
+                overlap = len(user_words.intersection(faq_words))
+                user_word_ratio = overlap / len(user_words)
+                faq_word_ratio = overlap / len(faq_words)
+                
+                # Much stricter: 90%+ match AND similar question length
+                length_ratio = min(len(user_message), len(faq['question'])) / max(len(user_message), len(faq['question']))
+                
+                if user_word_ratio >= 0.9 and faq_word_ratio >= 0.9 and length_ratio >= 0.8:
+                    if self._is_faq_answer_adequate(faq['answer']):
+                        logger.info(f"📋 VERY HIGH SIMILARITY FAQ match found with good answer: {faq['question']}")
+                        return self._make_faq_conversational(faq['answer'])
+                    else:
+                        logger.info(f"📋 High similarity FAQ found but answer inadequate, using KB instead")
+                        return None
+        
+        logger.info(f"📋 No adequate FAQ match found for: {user_message}")
+        return None
+
+    def _is_faq_answer_adequate(self, faq_answer: str) -> bool:
+        """
+        Check if FAQ answer is detailed enough or just a redirect
+        """
+        faq_lower = faq_answer.lower()
+        
+        # Inadequate patterns that indicate redirects rather than answers
+        inadequate_patterns = [
+            r'check.*youtube',
+            r'check.*google',
+            r'search.*online',
+            r'look.*up',
+            r'see.*documentation',
+            r'visit.*website',
+            r'contact.*support',
+            r'email.*us',
+            r'google.*it',
+            r'youtube.*tutorial',
+            r'find.*online'
+        ]
+        
+        # If it matches redirect patterns, it's inadequate
+        for pattern in inadequate_patterns:
+            if re.search(pattern, faq_lower):
+                logger.info(f"🔍 FAQ answer contains redirect pattern: {pattern}")
+                return False
+        
+        # If it's too short (less than 50 characters), probably inadequate
+        if len(faq_answer.strip()) < 50:
+            logger.info(f"🔍 FAQ answer too short: {len(faq_answer)} chars")
+            return False
+        
+        # Otherwise, it's probably adequate
+        return True
+
+    def _make_faq_conversational(self, faq_answer: str) -> str:
+        """
+        Convert robotic FAQ answer to conversational tone
+        """
+        import random
+        
+        # Conversational starters
+        starters = [
+            "Great question! ",
+            "Happy to help with that! ",
+            "Sure thing! ",
+            "Absolutely! ",
+            "Here's what you need to do: ",
+            "No problem! ",
+            "Perfect timing for this question! "
+        ]
+        
+        # Conversational endings
+        enders = [
+            " Let me know if you need any clarification!",
+            " Feel free to reach out if you have more questions!",
+            " Hope that helps! Anything else I can assist with?",
+            " Does that make sense? Happy to explain further!",
+            " Let me know how it goes!",
+            " That should get you sorted! 😊"
+        ]
+        
+        # Add random starter and ender
+        starter = random.choice(starters)
+        ender = random.choice(enders)
+        
+        # Clean up the FAQ answer (remove overly formal language)
+        conversational_answer = faq_answer
+        
+        # Replace formal phrases with casual ones
+        replacements = {
+            "Please follow these steps:": "Here's how to do it:",
+            "Navigate to": "Go to",
+            "Click on": "Click",
+            "You will see": "You'll see",
+            "In order to": "To",
+            "Please note": "Just so you know",
+            "It is recommended": "I'd suggest",
+            "You should": "You can",
+            "Please contact": "Feel free to contact"
+        }
+        
+        for formal, casual in replacements.items():
+            conversational_answer = conversational_answer.replace(formal, casual)
+        
+        return f"{starter}{conversational_answer}{ender}"
+
+    def _get_kb_answer(self, user_message: str, tenant_id: int) -> Optional[str]:
+        """
+        Get answer from knowledge base using the chatbot chain
+        """
+        try:
+            # Get a temporary session for KB lookup
+            temp_session_id = f"temp_kb_{uuid.uuid4()}"
+            
+            # Initialize chatbot chain for this tenant
+            chain = self._initialize_chatbot_chain(tenant_id)
+            if not chain:
+                logger.warning(f"No KB chain available for tenant {tenant_id}")
+                return None
+            
+            # Generate response using KB
+            if hasattr(chain, '__call__'):
+                response = chain({"question": user_message})
+                kb_response = response.get("answer", None)
+            elif hasattr(chain, 'run'):
+                kb_response = chain.run(user_message)
+            else:
+                logger.error(f"Unexpected chain type: {type(chain)}")
+                return None
+            
+            logger.info(f"📚 KB answer retrieved: {kb_response[:100]}...")
+            return kb_response
+            
+        except Exception as e:
+            logger.error(f"Error getting KB answer: {e}")
+            return None
+
+    def _answers_are_compatible(self, faq_answer: str, kb_answer: str) -> bool:
+        """
+        Check if FAQ and KB answers are compatible (not contradictory)
+        """
+        if not faq_answer or not kb_answer:
+            return True
+        
+        # Simple compatibility check - look for obvious contradictions
+        faq_lower = faq_answer.lower()
+        kb_lower = kb_answer.lower()
+        
+        # Check for contradictory words
+        contradictions = [
+            ("yes", "no"),
+            ("true", "false"),
+            ("can", "cannot"),
+            ("will", "will not"),
+            ("is", "is not"),
+            ("available", "unavailable"),
+            ("possible", "impossible")
+        ]
+        
+        for word1, word2 in contradictions:
+            if word1 in faq_lower and word2 in kb_lower:
+                logger.warning(f"Potential contradiction detected: '{word1}' in FAQ vs '{word2}' in KB")
+                return False
+            if word2 in faq_lower and word1 in kb_lower:
+                logger.warning(f"Potential contradiction detected: '{word2}' in FAQ vs '{word1}' in KB")
+                return False
+        
+        return True
+
+    def _get_harmonized_answer(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
+        """
+        Get harmonized answer using hierarchical approach:
+        1. FAQ (authoritative, current) - with quality filter
+        2. KB (detailed context)
+        3. Combined (if both exist and compatible)
+        """
+        faqs = self._get_faqs(tenant_id)
+        
+        # Step 1: Check FAQ first (with quality filter)
+        faq_answer = self._check_faq_first_with_quality_filter(user_message, faqs)
+        
+        # Step 2: Get KB context if FAQ is inadequate or missing
+        kb_answer = None
+        if not faq_answer:
+            kb_answer = self._get_kb_answer(user_message, tenant_id)
+        
+        # Step 3: Decide how to combine
+        if faq_answer and kb_answer:
+            # Both exist - check for harmony
+            if self._answers_are_compatible(faq_answer, kb_answer):
+                # Combine: FAQ as primary, KB as additional detail
+                final_answer = f"{faq_answer}\n\n💡 Additional information: {kb_answer}"
+                source = "FAQ+KB"
+            else:
+                # Conflict detected - FAQ wins, log the issue
+                logger.warning(f"⚠️ FAQ/KB conflict detected for: {user_message}")
+                final_answer = faq_answer + "\n\n(Note: Please contact support if you need more specific details)"
+                source = "FAQ_OVERRIDE"
+        elif faq_answer:
+            final_answer = faq_answer
+            source = "FAQ"
+        elif kb_answer:
+            final_answer = kb_answer
+            source = "KB"
+        else:
+            final_answer = None
+            source = "NONE"
+        
+        return {
+            "answer": final_answer,
+            "source": source,
+            "faq_content": faq_answer,
+            "kb_content": kb_answer
+        }
+
+    # ========================== SECURITY METHODS ==========================
     
     def _check_message_security(self, user_message: str, tenant_name: str) -> tuple[bool, str]:
         """Check message security before processing (legacy method)"""
@@ -307,472 +553,6 @@ class ChatbotEngine:
         logger.warning(f"No valid knowledge base could be loaded for tenant {tenant.id}. Falling back to simple chain.")
         return self._create_simple_chain(tenant, faq_info)
 
-    # ========================== BASIC MESSAGE PROCESSING ==========================
-    
-    def process_message(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
-        """Process an incoming message and return a response with security checking"""
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
-        
-        # 🔒 SECURITY CHECK: Validate user message before processing
-        is_safe, security_response = self._check_message_security(user_message, tenant.name)
-        if not is_safe:
-            logger.warning(f"Security risk detected in message from {user_identifier}: {user_message[:50]}...")
-            
-            # Store the security incident for audit
-            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
-            session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            
-            # Store user message (for audit trail)
-            user_msg = ChatMessage(
-                session_id=session.id,
-                content=user_message,
-                is_from_user=True
-            )
-            self.db.add(user_msg)
-            
-            # Store security response
-            security_msg = ChatMessage(
-                session_id=session.id,
-                content=security_response,
-                is_from_user=False
-            )
-            self.db.add(security_msg)
-            self.db.commit()
-            
-            return {
-                "session_id": session_id,
-                "response": security_response,
-                "success": True,
-                "is_new_session": False,
-                "security_declined": True
-            }
-        
-        # Continue with normal processing if message is safe
-        # Get or create session
-        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
-        
-        # Store user message
-        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        user_msg = ChatMessage(
-            session_id=session.id,
-            content=user_message,
-            is_from_user=True
-        )
-        self.db.add(user_msg)
-        self.db.commit()
-        logger.info(f"Stored user message for session {session_id}")
-        
-        # Initialize or get chatbot chain
-        if session_id not in self.active_sessions:
-            logger.info(f"Initializing new chatbot chain for session {session_id}")
-            chain = self._initialize_chatbot_chain(tenant.id)
-            if not chain:
-                logger.error(f"Failed to initialize chatbot chain for tenant {tenant.id}")
-                return {"error": "Failed to initialize chatbot", "success": False}
-            self.active_sessions[session_id] = chain
-        else:
-            logger.info(f"Using existing chatbot chain for session {session_id}")
-            chain = self.active_sessions[session_id]
-        
-        # Generate response
-        try:
-            logger.info(f"Generating response for: '{user_message}'")
-            if hasattr(chain, 'run'):
-                # ConversationChain uses .run()
-                bot_response = chain.run(user_message)
-            elif hasattr(chain, '__call__'):
-                # ConversationalRetrievalChain uses __call__
-                response = chain({"question": user_message})
-                bot_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
-            else:
-                logger.error(f"Unexpected chain type: {type(chain)}")
-                bot_response = "I'm sorry, I'm having trouble accessing my knowledge base."
-                
-            logger.info(f"Generated response: '{bot_response[:50]}...'")
-            
-            # Store bot response
-            bot_msg = ChatMessage(
-                session_id=session.id,
-                content=bot_response,
-                is_from_user=False
-            )
-            self.db.add(bot_msg)
-            self.db.commit()
-            
-            return {
-                "session_id": session_id,
-                "response": bot_response,
-                "success": True,
-                "is_new_session": is_new_session
-            }
-        except Exception as e:
-            logger.error(f"Error generating response: {str(e)}", exc_info=True)
-            return {"error": f"Error generating response: {str(e)}", "success": False}
-
-    def process_message_with_context_security(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
-        """Process message with context-aware security checking"""
-        
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
-        
-        # Get context for security checking
-        faqs = self._get_faqs(tenant.id)
-        faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs]) if faqs else ""
-        
-        # Get knowledge base context (simplified)
-        knowledge_bases = self._get_knowledge_bases(tenant.id)
-        kb_context = ""
-        if knowledge_bases:
-            # You might want to do a quick retrieval here to get relevant KB context
-            # For now, we'll use a simple approach
-            kb_context = "Knowledge base available with company information"
-        
-        # 🔒 ENHANCED SECURITY CHECK with context awareness
-        is_safe, security_response, context_override = self._check_message_security_with_context(
-            user_message, tenant.name, faq_info, kb_context
-        )
-        
-        if not is_safe:
-            logger.warning(f"Security risk detected and blocked: {user_message[:50]}...")
-            
-            # Store the security incident
-            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
-            session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-            
-            # Store user message (for audit trail)
-            user_msg = ChatMessage(
-                session_id=session.id,
-                content=user_message,
-                is_from_user=True
-            )
-            self.db.add(user_msg)
-            
-            # Store security response
-            security_msg = ChatMessage(
-                session_id=session.id,
-                content=security_response,
-                is_from_user=False
-            )
-            self.db.add(security_msg)
-            self.db.commit()
-            
-            return {
-                "session_id": session_id,
-                "response": security_response,
-                "success": True,
-                "is_new_session": False,
-                "security_declined": True,
-                "context_available": bool(faq_info or kb_context)
-            }
-        
-        # Log if security was overridden due to context
-        if context_override:
-            logger.info(f"🔓 Security pattern detected but allowing due to legitimate context: {user_message[:50]}...")
-        
-        # Continue with normal processing...
-        # Get or create session
-        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
-        
-        # Store user message
-        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        user_msg = ChatMessage(
-            session_id=session.id,
-            content=user_message,
-            is_from_user=True
-        )
-        self.db.add(user_msg)
-        self.db.commit()
-        
-        # Initialize or get chatbot chain
-        if session_id not in self.active_sessions:
-            chain = self._initialize_chatbot_chain(tenant.id)
-            if not chain:
-                return {"error": "Failed to initialize chatbot", "success": False}
-            self.active_sessions[session_id] = chain
-        else:
-            chain = self.active_sessions[session_id]
-        
-        # Generate response
-        try:
-            if hasattr(chain, 'run'):
-                bot_response = chain.run(user_message)
-            elif hasattr(chain, '__call__'):
-                response = chain({"question": user_message})
-                bot_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
-            else:
-                bot_response = "I'm sorry, I'm having trouble accessing my knowledge base."
-            
-            # Store bot response
-            bot_msg = ChatMessage(
-                session_id=session.id,
-                content=bot_response,
-                is_from_user=False
-            )
-            self.db.add(bot_msg)
-            self.db.commit()
-            
-            return {
-                "session_id": session_id,
-                "response": bot_response,
-                "success": True,
-                "is_new_session": is_new_session,
-                "security_context_override": context_override
-            }
-            
-        except Exception as e:
-            logger.error(f"Error generating response: {str(e)}", exc_info=True)
-            return {"error": f"Error generating response: {str(e)}", "success": False}
-
-    # ========================== LANGUAGE PROCESSING ==========================
-    
-    def process_message_with_language(self, api_key: str, user_message: str, user_identifier: str, 
-                                    target_language: Optional[str] = None) -> Dict[str, Any]:
-        """Process an incoming message with language detection and translation"""
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
-        
-        # Get or create session
-        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
-        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        
-        # Detect language if not specified
-        detected_language = language_service.detect_language(user_message)
-        source_language = detected_language or "en"
-        
-        # Update session language if detected
-        if detected_language and not target_language:
-            session.language_code = detected_language
-            self.db.commit()
-            logger.info(f"Updated session language to: {detected_language}")
-        
-        # If target language is specified, use it; otherwise use session language
-        target_language = target_language or session.language_code or "en"
-        
-        # Store original message
-        original_message = user_message
-        was_translated = False
-        
-        # Translate message to English for processing if needed
-        if source_language != "en":
-            user_message, was_translated = language_service.translate(user_message, target_lang="en", source_lang=source_language)
-            logger.info(f"Translated user message from {source_language} to English for processing")
-        
-        # Store user message
-        user_msg = ChatMessage(
-            session_id=session.id,
-            content=original_message,  # Store original message
-            translated_content=user_message if was_translated else None,  # Store translated message if any
-            source_language=source_language,
-            is_from_user=True
-        )
-        self.db.add(user_msg)
-        self.db.commit()
-        logger.info(f"Stored user message for session {session_id}")
-        
-        # Initialize or get chatbot chain
-        if session_id not in self.active_sessions:
-            logger.info(f"Initializing new chatbot chain for session {session_id}")
-            chain = self._initialize_chatbot_chain(tenant.id)
-            if not chain:
-                logger.error(f"Failed to initialize chatbot chain for tenant {tenant.id}")
-                return {"error": "Failed to initialize chatbot", "success": False}
-            self.active_sessions[session_id] = chain
-        else:
-            logger.info(f"Using existing chatbot chain for session {session_id}")
-            chain = self.active_sessions[session_id]
-        
-        # Generate response
-        try:
-            logger.info(f"Generating response for: '{user_message}'")
-            
-            # Use the chain to generate a response in English
-            if hasattr(chain, '__call__'):
-                # For LangChain conversation chains
-                if hasattr(chain, 'run'):
-                    # ConversationChain uses .run()
-                    english_response = chain.run(input=user_message)
-                else:
-                    # ConversationalRetrievalChain uses __call__
-                    response = chain({"question": user_message})
-                    english_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
-            else:
-                # Fallback for any other type of chain
-                english_response = "I'm sorry, I'm having trouble accessing my knowledge base."
-                logger.error(f"Unexpected chain type: {type(chain)}")
-            
-            logger.info(f"Generated English response: '{english_response[:50]}...'")
-            
-            # Translate response back to the target language if needed
-            final_response = english_response
-            was_bot_translated = False
-            
-            if target_language != "en":
-                final_response, was_bot_translated = language_service.translate(
-                    english_response, target_lang=target_language, source_lang="en"
-                )
-                logger.info(f"Translated bot response from English to {target_language}")
-            
-            # Store bot response
-            bot_msg = ChatMessage(
-                session_id=session.id,
-                content=final_response,  # Store the final (possibly translated) response
-                translated_content=english_response if was_bot_translated else None,  # Store original English response if translated
-                source_language="en",  # Bot responses are generated in English
-                target_language=target_language if was_bot_translated else None,
-                is_from_user=False
-            )
-            self.db.add(bot_msg)
-            self.db.commit()
-            
-            return {
-                "session_id": session_id,
-                "response": final_response,
-                "detected_language": source_language,
-                "language_name": language_service.get_language_name(source_language),
-                "was_translated": was_translated or was_bot_translated,
-                "success": True,
-                "is_new_session": is_new_session
-            }
-        except Exception as e:
-            logger.error(f"Error generating response: {str(e)}", exc_info=True)
-            return {"error": f"Error generating response: {str(e)}", "success": False}
-
-    # ========================== DELAY PROCESSING ==========================
-    
-    async def process_message_with_delay(self, api_key: str, user_message: str, user_identifier: str,
-                                       target_language: Optional[str] = None) -> Dict[str, Any]:
-        """Process message with human-like delay"""
-        
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
-        
-        # Record start time
-        start_time = time.time()
-        
-        # Get or create session
-        session_id, is_new_session = self._get_or_create_session(tenant.id, user_identifier)
-        session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        
-        # Detect language if not specified
-        detected_language = language_service.detect_language(user_message) if hasattr(self, 'language_service') else None
-        source_language = detected_language or "en"
-        target_language = target_language or session.language_code or "en"
-        
-        # Store original message
-        original_message = user_message
-        was_translated = False
-        
-        # Translate message to English for processing if needed
-        if source_language != "en" and hasattr(self, 'language_service'):
-            user_message, was_translated = language_service.translate(user_message, target_lang="en", source_lang=source_language)
-            logger.info(f"Translated user message from {source_language} to English for processing")
-        
-        # Store user message
-        user_msg = ChatMessage(
-            session_id=session.id,
-            content=original_message,
-            translated_content=user_message if was_translated else None,
-            source_language=source_language,
-            is_from_user=True
-        )
-        self.db.add(user_msg)
-        self.db.commit()
-        logger.info(f"Stored user message for session {session_id}")
-        
-        # Initialize or get chatbot chain
-        if session_id not in self.active_sessions:
-            logger.info(f"Initializing new chatbot chain for session {session_id}")
-            chain = self._initialize_chatbot_chain(tenant.id)
-            if not chain:
-                logger.error(f"Failed to initialize chatbot chain for tenant {tenant.id}")
-                return {"error": "Failed to initialize chatbot", "success": False}
-            self.active_sessions[session_id] = chain
-        else:
-            logger.info(f"Using existing chatbot chain for session {session_id}")
-            chain = self.active_sessions[session_id]
-        
-        # Generate response first
-        try:
-            logger.info(f"Generating response for: '{user_message}'")
-            
-            # Use the chain to generate a response in English
-            if hasattr(chain, '__call__'):
-                if hasattr(chain, 'run'):
-                    # ConversationChain uses .run()
-                    english_response = chain.run(input=user_message)
-                else:
-                    # ConversationalRetrievalChain uses __call__
-                    response = chain({"question": user_message})
-                    english_response = response.get("answer", "I'm sorry, I couldn't generate a response.")
-            else:
-                english_response = "I'm sorry, I'm having trouble accessing my knowledge base."
-                logger.error(f"Unexpected chain type: {type(chain)}")
-            
-            logger.info(f"Generated English response: '{english_response[:50]}...'")
-            
-            # Calculate human-like delay based on question and response
-            if self.delay_simulator:
-                response_delay = self.delay_simulator.calculate_response_delay(user_message, english_response)
-                
-                # Wait for the calculated delay
-                logger.info(f"Simulating human thinking/typing time: {response_delay:.2f} seconds")
-                await asyncio.sleep(response_delay)
-            else:
-                response_delay = 0
-            
-            # Translate response back to the target language if needed
-            final_response = english_response
-            was_bot_translated = False
-            
-            if target_language != "en" and hasattr(self, 'language_service'):
-                final_response, was_bot_translated = language_service.translate(
-                    english_response, target_lang=target_language, source_lang="en"
-                )
-                logger.info(f"Translated bot response from English to {target_language}")
-            
-            # Store bot response
-            bot_msg = ChatMessage(
-                session_id=session.id,
-                content=final_response,
-                translated_content=english_response if was_bot_translated else None,
-                source_language="en",
-                target_language=target_language if was_bot_translated else None,
-                is_from_user=False
-            )
-            self.db.add(bot_msg)
-            self.db.commit()
-            
-            # Calculate total processing time
-            total_time = time.time() - start_time
-            
-            return {
-                "session_id": session_id,
-                "response": final_response,
-                "detected_language": source_language,
-                "language_name": language_service.get_language_name(source_language) if hasattr(self, 'language_service') else None,
-                "was_translated": was_translated or was_bot_translated,
-                "response_delay": response_delay,
-                "total_processing_time": total_time,
-                "success": True,
-                "is_new_session": is_new_session
-            }
-        except Exception as e:
-            logger.error(f"Error generating response: {str(e)}", exc_info=True)
-            return {"error": f"Error generating response: {str(e)}", "success": False}
-
     # ========================== SIMPLIFIED MEMORY PROCESSING ==========================
     
     def process_message_simple_memory(self, api_key: str, user_message: str, user_identifier: str, 
@@ -858,72 +638,197 @@ class ChatbotEngine:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
 
-    def process_message_simple_memory_with_context_security(self, api_key: str, user_message: str, 
-                                                          user_identifier: str, platform: str = "web", 
-                                                          max_context: int = 20) -> Dict[str, Any]:
+    # ========================== SMART FEEDBACK SYSTEM ==========================
+    
+    def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
+                                                    max_context: int = 20) -> Dict[str, Any]:
         """
-        Process message with simple conversation memory and enhanced context-aware security
+        Enhanced with explicit FAQ quality filtering first, then KB fallback
         """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
         # Get tenant from API key
         tenant = self._get_tenant_by_api_key(api_key)
         if not tenant:
             logger.error(f"Invalid API key: {api_key[:5]}...")
             return {"error": "Invalid API key", "success": False}
         
-        # Get context for security checking
-        faqs = self._get_faqs(tenant.id)
-        faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs]) if faqs else ""
+        # Initialize managers
+        memory = SimpleChatbotMemory(self.db, tenant.id)
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
         
-        # Get knowledge base context
-        knowledge_bases = self._get_knowledge_bases(tenant.id)
-        kb_context = ""
-        if knowledge_bases:
-            kb_context = "Knowledge base available with company information"
+        # Get or create session
+        session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
         
-        # 🔒 ENHANCED SECURITY CHECK with context awareness
-        is_safe, security_response, context_override = self._check_message_security_with_context(
-            user_message, tenant.name, faq_info, kb_context
-        )
-        
-        if not is_safe:
-            logger.warning(f"Security risk detected and blocked: {user_message[:50]}...")
+        # FIRST: Check if user is providing email (BEFORE checking if we should request)
+        extracted_email = feedback_manager.extract_email_from_message(user_message)
+        if extracted_email:
+            logger.info(f"📧 Extracted email from message: {extracted_email}")
             
-            # Initialize memory for storing security incident
-            memory = SimpleChatbotMemory(self.db, tenant.id)
-            session_id, _ = memory.get_or_create_session(user_identifier, platform)
+            # Store email and acknowledge
+            if feedback_manager.store_user_email(session_id, extracted_email):
+                acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                
+                # Store both user message and bot response
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, acknowledgment, False)
+                
+                logger.info(f"✅ Email captured and stored: {extracted_email}")
+                
+                return {
+                    "session_id": session_id,
+                    "response": acknowledgment,
+                    "success": True,
+                    "is_new_session": is_new_session,
+                    "email_captured": True,
+                    "user_email": extracted_email,
+                    "platform": "web"
+                }
+        
+        # SECOND: Check if we should ask for email (new conversations without email)
+        if feedback_manager.should_request_email(session_id, user_identifier):
+            email_request = feedback_manager.generate_email_request_message(tenant.name)
             
-            # Store messages
-            memory.store_message(session_id, user_message, True)
-            memory.store_message(session_id, security_response, False)
+            # Store the email request as bot message
+            memory.store_message(session_id, email_request, False)
+            
+            logger.info(f"📧 Requesting email for new conversation: {user_identifier}")
             
             return {
                 "session_id": session_id,
-                "response": security_response,
+                "response": email_request,
                 "success": True,
-                "is_new_session": False,
-                "security_declined": True,
-                "context_available": bool(faq_info or kb_context),
-                "platform": platform
+                "is_new_session": is_new_session,
+                "email_requested": True,
+                "platform": "web"
             }
         
-        # Log if security was overridden due to context
-        if context_override:
-            logger.info(f"🔓 Security pattern detected but allowing due to legitimate context")
+        # 🔍 ENHANCED: CHECK FAQS WITH QUALITY FILTER, THEN KB
+        faqs = self._get_faqs(tenant.id)
+        logger.info(f"🔍 Checking {len(faqs)} FAQs with quality filter before using knowledge base")
         
-        # Continue with normal simple memory processing
+        # Try FAQ first with quality check
+        faq_answer = self._check_faq_first_with_quality_filter(user_message, faqs)
+        
+        if faq_answer:
+            logger.info(f"✅ HIGH-QUALITY FAQ ANSWER FOUND - Using direct FAQ response")
+            
+            # Store messages
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, faq_answer, False)
+            
+            return {
+                "session_id": session_id,
+                "response": faq_answer,
+                "success": True,
+                "is_new_session": is_new_session,
+                "answered_by": "FAQ",
+                "faq_matched": True,
+                "platform": "web"
+            }
+        
+        # If no adequate FAQ, proceed with KB (which has detailed content)
+        logger.info(f"📚 No adequate FAQ found - using knowledge base for detailed answer")
+        
         result = self.process_message_simple_memory(
             api_key=api_key,
             user_message=user_message,
             user_identifier=user_identifier,
-            platform=platform,
+            platform="web",
             max_context=max_context
         )
         
-        # Add context override info to result
         if result.get("success"):
-            result["security_context_override"] = context_override
+            result["answered_by"] = "KnowledgeBase"
+            result["faq_matched"] = False
+        
+        if not result.get("success"):
+            return result
+        
+        bot_response = result["response"]
+        
+        # Enhanced inadequate response detection with advanced scoring
+        logger.info(f"🔍 Advanced feedback: Analyzing bot response for inadequate patterns")
+        
+        try:
+            is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+            logger.info(f"🔍 Advanced inadequate response detection result: {is_inadequate}")
+            
+            if is_inadequate:
+                logger.info(f"🔔 Detected inadequate response, triggering advanced feedback system")
+                
+                # Get conversation context
+                conversation_history = memory.get_conversation_history(user_identifier, 10)
+                
+                # Create advanced feedback request (sends professional email to tenant)
+                feedback_id = feedback_manager.create_feedback_request(
+                    session_id=session_id,
+                    user_question=user_message,
+                    bot_response=bot_response,
+                    conversation_context=conversation_history
+                )
+                
+                if feedback_id:
+                    logger.info(f"✅ Created advanced feedback request {feedback_id} with real-time tracking")
+                    result["feedback_triggered"] = True
+                    result["feedback_id"] = feedback_id
+                    result["feedback_system"] = "advanced"
+                else:
+                    logger.error(f"❌ Failed to create advanced feedback request")
+            else:
+                logger.info(f"✅ Response appears adequate, no feedback needed")
+                
+        except Exception as e:
+            logger.error(f"💥 Error in advanced feedback detection: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return result
+
+    def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
+        """
+        Handle tenant's email response using advanced feedback system
+        """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        
+        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+        
+        return {
+            "success": success,
+            "feedback_id": feedback_id,
+            "system": "advanced",
+            "message": "Advanced tenant response processed and customer notified with professional follow-up" if success else "Failed to process response"
+        }
+
+    def get_advanced_feedback_stats(self, api_key: str) -> Dict[str, Any]:
+        """
+        Get advanced feedback system statistics with real-time data
+        """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        analytics = feedback_manager.get_feedback_analytics()
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "system": "advanced",
+            "analytics": analytics
+        }
+
+    # ========================== PLATFORM-SPECIFIC METHODS ==========================
     
     def process_discord_message_simple(self, api_key: str, user_message: str, discord_user_id: str, 
                                      channel_id: str, guild_id: str, max_context: int = 20) -> Dict[str, Any]:
@@ -949,70 +854,33 @@ class ChatbotEngine:
             }
         
         return result
-    
-    def get_user_memory_stats(self, api_key: str, user_identifier: str) -> Dict[str, Any]:
-        """
-        Get memory statistics for a user - useful for debugging
-        """
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
-        
-        memory = SimpleChatbotMemory(self.db, tenant.id)
-        stats = memory.get_session_stats(user_identifier)
-        
-        return {
-            "success": True,
-            "user_identifier": user_identifier,
-            "stats": stats
-        }
 
-    # ========================== HANDOFF DETECTION ==========================
-    
-    def process_message_with_handoff_detection(self, api_key: str, user_message: str, 
-                                            user_identifier: str) -> Dict[str, Any]:
+    def process_slack_message_simple(self, api_key: str, user_message: str, slack_user_id: str, 
+                               channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
         """
-        Enhanced message processing with automatic handoff detection for live chat
+        Simplified Slack message processing with basic memory
         """
-        # Import here to avoid circular imports
-        from app.live_chat.manager import LiveChatManager
+        user_identifier = f"slack:{slack_user_id}"
         
-        # Get tenant
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            return {"error": "Invalid API key", "success": False}
+        result = self.process_message_simple_memory(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform="slack",
+            max_context=max_context
+        )
         
-        # Check for handoff request
-        chat_manager = LiveChatManager(self.db)
-        is_handoff, reason, department = chat_manager.detect_handoff_request(user_message)
-        
-        if is_handoff:
-            # Get or create session for context
-            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
-            
-            # Initiate live chat
-            live_chat = chat_manager.initiate_live_chat(
-                tenant_id=tenant.id,
-                user_identifier=user_identifier,
-                chatbot_session_id=session_id,
-                handoff_reason=reason,
-                platform="web",  # Default platform - can be enhanced to detect platform
-                department=department
-            )
-            
-            return {
-                "success": True,
-                "handoff_initiated": True,
-                "live_chat_session_id": live_chat.session_id,
-                "response": "I'm connecting you with one of our support agents. Please wait a moment...",
-                "handoff_reason": reason,
-                "department": department
+        # Add Slack-specific info to result
+        if result.get("success"):
+            result["slack_info"] = {
+                "user_id": slack_user_id,
+                "channel_id": channel_id,
+                "team_id": team_id
             }
-        else:
-            # Process normally with chatbot
-            return self.process_message(api_key, user_message, user_identifier)
+        
+        return result
 
-    # ========================== DISCORD MEMORY WITH DELAY ==========================
+    # ========================== DELAY PROCESSING ==========================
     
     async def process_discord_message_simple_with_delay(self, api_key: str, user_message: str, discord_user_id: str, 
                                                       channel_id: str, guild_id: str, max_context: int = 20) -> Dict[str, Any]:
@@ -1121,267 +989,6 @@ class ChatbotEngine:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
 
-    # ========================== SMART FEEDBACK SYSTEM ==========================
-    
-    def _check_faq_first(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
-        """
-        Explicitly check FAQs first before using knowledge base
-        Returns FAQ answer if match found, None otherwise
-        """
-        if not faqs:
-            return None
-        
-        user_message_lower = user_message.lower().strip()
-        
-        # Direct matching strategies
-        for faq in faqs:
-            faq_question_lower = faq['question'].lower().strip()
-            
-            # 1. Exact match
-            if user_message_lower == faq_question_lower:
-                logger.info(f"📋 EXACT FAQ match found: {faq['question']}")
-                return faq['answer']
-            
-            # 2. High similarity match (contains most key words)
-            user_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
-            faq_words = set(re.findall(r'\b\w{3,}\b', faq_question_lower))
-            
-            if user_words and faq_words:
-                overlap = len(user_words.intersection(faq_words))
-                user_word_ratio = overlap / len(user_words)
-                faq_word_ratio = overlap / len(faq_words)
-                
-                # If 70%+ of words match in both directions, it's likely the same question
-                if user_word_ratio >= 0.7 and faq_word_ratio >= 0.7:
-                    logger.info(f"📋 HIGH SIMILARITY FAQ match found: {faq['question']} (similarity: {user_word_ratio:.2f})")
-                    return faq['answer']
-        
-        logger.info(f"📋 No FAQ match found for: {user_message}")
-        return None
-
-
-    def _make_faq_conversational_with_llm(self, faq_answer: str, tenant_name: str) -> str:
-        """
-        Use LLM to make FAQ answer more conversational while keeping the facts
-        """
-        from langchain_openai import ChatOpenAI
-        from langchain.prompts import PromptTemplate
-        
-        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        
-        prompt = PromptTemplate(
-            input_variables=["faq_answer", "company_name"],
-            template="""
-            Rewrite this FAQ answer to be more conversational and friendly while keeping ALL the factual information:
-            
-            Original FAQ Answer: {faq_answer}
-            Company: {company_name}
-            
-            Make it sound like a helpful customer service representative talking to a friend. Keep all specific details, URLs, and instructions exactly the same. Just make the tone warmer and more natural.
-            
-            Conversational Answer:"""
-        )
-        
-        try:
-            result = llm(prompt.format(faq_answer=faq_answer, company_name=tenant_name))
-            return result.strip()
-        except Exception as e:
-            logger.error(f"Error making FAQ conversational: {e}")
-            # Fallback to original if LLM fails
-            return faq_answer
-
-
-
-
-
-    def _get_harmonized_answer(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
-        """
-        Get harmonized answer using hierarchical approach:
-        1. FAQ (authoritative, current)
-        2. KB (detailed context)
-        3. Combined (if needed)
-        """
-        faqs = self._get_faqs(tenant_id)
-        
-        # Step 1: Check FAQ first
-        faq_answer = self._check_faq_first(user_message, faqs)
-        
-        # Step 2: Get KB context regardless
-        kb_answer = self._get_kb_answer(user_message, tenant_id)
-        
-        # Step 3: Decide how to combine
-        if faq_answer and kb_answer:
-            # Both exist - check for harmony
-            if self._answers_are_compatible(faq_answer, kb_answer):
-                # Combine: FAQ as primary, KB as additional detail
-                final_answer = f"{faq_answer}\n\n💡 Additional information: {kb_answer}"
-                source = "FAQ+KB"
-            else:
-                # Conflict detected - FAQ wins, log the issue
-                logger.warning(f"⚠️ FAQ/KB conflict detected for: {user_message}")
-                final_answer = faq_answer + "\n\n(Note: Please contact support if you need more specific details)"
-                source = "FAQ_OVERRIDE"
-        elif faq_answer:
-            final_answer = faq_answer
-            source = "FAQ"
-        elif kb_answer:
-            final_answer = kb_answer
-            source = "KB"
-        else:
-            final_answer = None
-            source = "NONE"
-        
-        return {
-            "answer": final_answer,
-            "source": source,
-            "faq_content": faq_answer,
-            "kb_content": kb_answer
-        }
-
-
-
-    def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
-                                                    max_context: int = 20) -> Dict[str, Any]:
-        """Enhanced with explicit FAQ checking first"""
-        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
-        
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
-        
-        # Initialize managers
-        memory = SimpleChatbotMemory(self.db, tenant.id)
-        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
-        
-        # Get or create session
-        session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
-        
-        # FIRST: Check if user is providing email (BEFORE checking if we should request)
-        extracted_email = feedback_manager.extract_email_from_message(user_message)
-        if extracted_email:
-            logger.info(f"📧 Extracted email from message: {extracted_email}")
-            
-            # Store email and acknowledge
-            if feedback_manager.store_user_email(session_id, extracted_email):
-                acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
-                
-                # Store both user message and bot response
-                memory.store_message(session_id, user_message, True)
-                memory.store_message(session_id, acknowledgment, False)
-                
-                logger.info(f"✅ Email captured and stored: {extracted_email}")
-                
-                return {
-                    "session_id": session_id,
-                    "response": acknowledgment,
-                    "success": True,
-                    "is_new_session": is_new_session,
-                    "email_captured": True,
-                    "user_email": extracted_email,
-                    "platform": "web"
-                }
-        
-        # SECOND: Check if we should ask for email (new conversations without email)
-        if feedback_manager.should_request_email(session_id, user_identifier):
-            email_request = feedback_manager.generate_email_request_message(tenant.name)
-            
-            # Store the email request as bot message
-            memory.store_message(session_id, email_request, False)
-            
-            logger.info(f"📧 Requesting email for new conversation: {user_identifier}")
-            
-            return {
-                "session_id": session_id,
-                "response": email_request,
-                "success": True,
-                "is_new_session": is_new_session,
-                "email_requested": True,
-                "platform": "web"
-            }
-        
-        # 🔍 NEW: CHECK FAQS FIRST before processing with knowledge base
-        faqs = self._get_faqs(tenant.id)
-        logger.info(f"🔍 Checking {len(faqs)} FAQs first before using knowledge base")
-        
-        faq_answer = self._check_faq_first(user_message, faqs)
-        
-        if faq_answer:
-            logger.info(f"✅ FAQ ANSWER FOUND - Using direct FAQ response")
-            
-            # Store messages
-            memory.store_message(session_id, user_message, True)
-            memory.store_message(session_id, faq_answer, False)
-            
-            return {
-                "session_id": session_id,
-                "response": faq_answer,
-                "success": True,
-                "is_new_session": is_new_session,
-                "answered_by": "FAQ",
-                "faq_matched": True,
-                "platform": "web"
-            }
-        
-        # If no FAQ match, proceed with knowledge base processing
-        logger.info(f"📚 No FAQ match - proceeding with knowledge base processing")
-        
-        result = self.process_message_simple_memory(
-            api_key=api_key,
-            user_message=user_message,
-            user_identifier=user_identifier,
-            platform="web",
-            max_context=max_context
-        )
-        
-        if result.get("success"):
-            result["answered_by"] = "KnowledgeBase"
-            result["faq_matched"] = False
-        
-        if not result.get("success"):
-            return result
-        
-        bot_response = result["response"]
-        
-        # Enhanced inadequate response detection with advanced scoring
-        logger.info(f"🔍 Advanced feedback: Analyzing bot response for inadequate patterns")
-        
-        try:
-            is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
-            logger.info(f"🔍 Advanced inadequate response detection result: {is_inadequate}")
-            
-            if is_inadequate:
-                logger.info(f"🔔 Detected inadequate response, triggering advanced feedback system")
-                
-                # Get conversation context
-                conversation_history = memory.get_conversation_history(user_identifier, 10)
-                
-                # Create advanced feedback request (sends professional email to tenant)
-                feedback_id = feedback_manager.create_feedback_request(
-                    session_id=session_id,
-                    user_question=user_message,
-                    bot_response=bot_response,
-                    conversation_context=conversation_history
-                )
-                
-                if feedback_id:
-                    logger.info(f"✅ Created advanced feedback request {feedback_id} with real-time tracking")
-                    result["feedback_triggered"] = True
-                    result["feedback_id"] = feedback_id
-                    result["feedback_system"] = "advanced"
-                else:
-                    logger.error(f"❌ Failed to create advanced feedback request")
-            else:
-                logger.info(f"✅ Response appears adequate, no feedback needed")
-                
-        except Exception as e:
-            logger.error(f"💥 Error in advanced feedback detection: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-        
-        return result
-
     async def process_slack_message_simple_with_delay(self, api_key: str, user_message: str, slack_user_id: str, 
                                                     channel_id: str, team_id: str = None, max_context: int = 20) -> Dict[str, Any]:
         """
@@ -1488,3 +1095,99 @@ class ChatbotEngine:
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}", exc_info=True)
             return {"error": f"Error generating response: {str(e)}", "success": False}
+
+    # ========================== UTILITY METHODS ==========================
+    
+    def get_user_memory_stats(self, api_key: str, user_identifier: str) -> Dict[str, Any]:
+        """
+        Get memory statistics for a user - useful for debugging
+        """
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            return {"error": "Invalid API key", "success": False}
+        
+        memory = SimpleChatbotMemory(self.db, tenant.id)
+        stats = memory.get_session_stats(user_identifier)
+        
+        return {
+            "success": True,
+            "user_identifier": user_identifier,
+            "stats": stats
+        }
+
+    # ========================== LEGACY METHODS (For Backward Compatibility) ==========================
+    
+    def process_message(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
+        """Legacy method - redirects to simple memory processing"""
+        logger.info(f"Using legacy process_message method - redirecting to simple memory processing")
+        return self.process_message_simple_memory(api_key, user_message, user_identifier)
+
+    def process_message_with_context_security(self, api_key: str, user_message: str, user_identifier: str) -> Dict[str, Any]:
+        """Legacy method with context-aware security checking"""
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Get context for security checking
+        faqs = self._get_faqs(tenant.id)
+        faq_info = "\n\n".join([f"Question: {faq['question']}\nAnswer: {faq['answer']}" for faq in faqs]) if faqs else ""
+        
+        # Get knowledge base context (simplified)
+        knowledge_bases = self._get_knowledge_bases(tenant.id)
+        kb_context = ""
+        if knowledge_bases:
+            kb_context = "Knowledge base available with company information"
+        
+        # 🔒 ENHANCED SECURITY CHECK with context awareness
+        is_safe, security_response, context_override = self._check_message_security_with_context(
+            user_message, tenant.name, faq_info, kb_context
+        )
+        
+        if not is_safe:
+            logger.warning(f"Security risk detected and blocked: {user_message[:50]}...")
+            
+            # Store the security incident
+            session_id, _ = self._get_or_create_session(tenant.id, user_identifier)
+            session = self.db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            
+            # Store user message (for audit trail)
+            user_msg = ChatMessage(
+                session_id=session.id,
+                content=user_message,
+                is_from_user=True
+            )
+            self.db.add(user_msg)
+            
+            # Store security response
+            security_msg = ChatMessage(
+                session_id=session.id,
+                content=security_response,
+                is_from_user=False
+            )
+            self.db.add(security_msg)
+            self.db.commit()
+            
+            return {
+                "session_id": session_id,
+                "response": security_response,
+                "success": True,
+                "is_new_session": False,
+                "security_declined": True,
+                "context_available": bool(faq_info or kb_context)
+            }
+        
+        # Log if security was overridden due to context
+        if context_override:
+            logger.info(f"🔓 Security pattern detected but allowing due to legitimate context: {user_message[:50]}...")
+        
+        # Continue with normal processing
+        result = self.process_message_simple_memory(api_key, user_message, user_identifier)
+        
+        # Add context override info to result
+        if result.get("success"):
+            result["security_context_override"] = context_override
+        
+        return result
