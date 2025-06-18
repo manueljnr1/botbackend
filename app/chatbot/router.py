@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Request, Form
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from pydantic import EmailStr
 from fastapi import Form
@@ -1981,79 +1981,6 @@ def calculate_followup_delay(followup: str) -> float:
     
     return (base_delay + length_factor) * variation
 
-# # Also update your existing /chat/smart endpoint to optionally redirect to follow-up version
-# @router.post("/chat/smart", response_model=ChatResponse)
-# async def chat_with_advanced_smart_feedback_enhanced(
-#     request: SmartChatRequest,
-#     enable_followups: bool = False,  # New parameter
-#     api_key: str = Header(..., alias="X-API-Key"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Enhanced smart feedback endpoint with optional follow-up streaming
-    
-#     If enable_followups=True, redirects to streaming version with follow-ups
-#     Otherwise, provides instant response as before
-#     """
-    
-#     # If follow-ups requested, redirect to streaming endpoint
-#     if enable_followups:
-#         logger.info("🔄 Follow-ups requested, using streaming implementation")
-#         # Note: In production, you might want to redirect or handle this differently
-#         # For now, we'll process normally but log the request
-    
-#     try:
-#         user_id = request.user_identifier
-#         auto_generated = False
-        
-#         # Auto-generate user ID if empty or temporary
-#         if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#             user_id = f"auto_{str(uuid.uuid4())}"
-#             auto_generated = True
-#             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-        
-#         # Check tenant limits
-#         tenant = get_tenant_from_api_key(api_key, db)
-#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-#         # Process message with advanced feedback
-#         engine = ChatbotEngine(db)
-#         result = engine.process_web_message_with_advanced_feedback_llm(
-#             api_key=api_key,
-#             user_message=request.message,
-#             user_identifier=user_id,
-#             max_context=request.max_context,
-#             use_smart_llm=True
-#         )
-        
-#         if not result.get("success"):
-#             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-#         # Track conversation usage
-#         track_conversation_started_with_super_tenant(
-#             tenant_id=tenant.id,
-#             user_identifier=user_id,
-#             platform="web",
-#             db=db
-#         )
-        
-#         # Add user ID to response for frontend persistence
-#         result["user_id"] = user_id
-#         result["auto_generated_user_id"] = auto_generated
-        
-#         # If follow-ups were requested, add suggestion
-#         if enable_followups:
-#             result["followups_available"] = True
-#             result["followup_endpoint"] = "/chat/smart/with-followup"
-        
-#         logger.info("✅ Smart feedback chat completed successfully")
-#         return result
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 
