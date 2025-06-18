@@ -822,7 +822,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
         
         # Process message with advanced feedback
         engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback(
+        result = engine.process_web_message_with_advanced_feedback_llm(
             api_key=api_key,
             user_message=request.message,
             user_identifier=user_id,
@@ -912,7 +912,7 @@ async def chat_with_advanced_smart_feedback(
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback(
+        result = engine.process_web_message_with_advanced_feedback_llm(
             api_key=api_key,
             user_message=request.message,
             user_identifier=user_id,  # 🆕 Use the processed user_id
