@@ -785,10 +785,83 @@ async def slack_chat_simple(
 
 
 
+# @router.post("/chat/smart", response_model=ChatResponse)
+# async def chat_with_advanced_smart_feedback_enhanced(
+#     request: SmartChatRequest,
+#     enable_streaming: bool = False,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Enhanced smart feedback endpoint with email collection and auto-generated user IDs
+    
+#     Features:
+#     - Auto-generates user IDs when not provided
+#     - 30-day email memory system
+#     - Smart feedback detection for inadequate responses
+#     - Cross-session conversation continuity
+#     """
+#     if enable_streaming:
+#         raise HTTPException(status_code=500, detail="Streaming functionality is not implemented.")
+    
+#     try:
+#         user_id = request.user_identifier
+#         auto_generated = False
+        
+#         # Auto-generate user ID if empty or temporary
+#         if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#             user_id = f"auto_{str(uuid.uuid4())}"
+#             auto_generated = True
+#             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
+#         else:
+#             logger.debug(f"👤 Using provided user_identifier: {user_id}")
+        
+#         # Check tenant limits
+#         tenant = get_tenant_from_api_key(api_key, db)
+#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+#         # Process message with advanced feedback
+#         engine = ChatbotEngine(db)
+#         result = engine.process_web_message_with_advanced_feedback_llm(
+#             api_key=api_key,
+#             user_message=request.message,
+#             user_identifier=user_id,
+#             max_context=request.max_context,
+#             use_smart_llm=True
+#         )
+        
+#         if not result.get("success"):
+#             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        
+#         # Track conversation usage
+#         track_conversation_started_with_super_tenant(
+#             tenant_id=tenant.id,
+#             user_identifier=user_id,
+#             platform="web",
+#             db=db
+#         )
+        
+#         # Add user ID to response for frontend persistence
+#         result["user_id"] = user_id
+#         result["auto_generated_user_id"] = auto_generated
+        
+#         logger.info("✅ Smart feedback chat completed successfully")
+#         return result
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+
+
+
+
 @router.post("/chat/smart", response_model=ChatResponse)
 async def chat_with_advanced_smart_feedback_enhanced(
     request: SmartChatRequest,
-    enable_streaming: bool = False,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
@@ -800,9 +873,8 @@ async def chat_with_advanced_smart_feedback_enhanced(
     - 30-day email memory system
     - Smart feedback detection for inadequate responses
     - Cross-session conversation continuity
+    - PROPER FORMATTING with bullet points and structure
     """
-    if enable_streaming:
-        raise HTTPException(status_code=500, detail="Streaming functionality is not implemented.")
     
     try:
         user_id = request.user_identifier
@@ -827,7 +899,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
             user_message=request.message,
             user_identifier=user_id,
             max_context=request.max_context,
-            use_smart_llm=True
+            use_smart_llm=True  # This should enable better formatting
         )
         
         if not result.get("success"):
@@ -845,7 +917,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
         result["user_id"] = user_id
         result["auto_generated_user_id"] = auto_generated
         
-        logger.info("✅ Smart feedback chat completed successfully")
+        logger.info("✅ Smart feedback chat completed successfully with proper formatting")
         return result
         
     except HTTPException:
@@ -853,6 +925,7 @@ async def chat_with_advanced_smart_feedback_enhanced(
     except Exception as e:
         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 
 # Add a specific model for the enhanced smart request
