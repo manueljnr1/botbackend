@@ -501,13 +501,15 @@ class ChatbotEngine:
                         
                         qa_prompt_template = f"""{secure_prompt_content}
             
-                    Use the following context to answer the question. If the context doesn't contain relevant information, use your general knowledge while staying within the security guidelines above.
+CRITICAL: You have access to detailed documentation. You MUST use the provided context to give specific, step-by-step instructions. Do NOT refer users to external guides or say "refer to the guide" - you ARE the guide.
 
-    Context: {{context}}
+If the context contains setup instructions, provide them directly with numbered steps. Be helpful and detailed.
 
-    User Question: {{question}}
+Context: {{context}}
 
-    Your response:"""
+User Question: {{question}}
+
+Your detailed, step-by-step response:""""
                         
                         qa_prompt = PromptTemplate(
                             template=qa_prompt_template,
