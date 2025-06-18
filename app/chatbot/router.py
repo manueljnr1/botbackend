@@ -859,72 +859,74 @@ async def slack_chat_simple(
 
 
 
-@router.post("/chat/smart", response_model=ChatResponse)
-async def chat_with_advanced_smart_feedback_enhanced(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Enhanced smart feedback endpoint with email collection and auto-generated user IDs
+# @router.post("/chat/smart", response_model=ChatResponse) 
+# async def chat_with_advanced_smart_feedback_enhanced(
+#     request: SmartChatRequest,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+
+#     0222
+#     Enhanced smart feedback endpoint with email collection and auto-generated user IDs
     
-    Features:
-    - Auto-generates user IDs when not provided
-    - 30-day email memory system
-    - Smart feedback detection for inadequate responses
-    - Cross-session conversation continuity
-    - PROPER FORMATTING with bullet points and structure
-    """
+#     Features:
+#     - Auto-generates user IDs when not provided
+#     - 30-day email memory system
+#     - Smart feedback detection for inadequate responses
+#     - Cross-session conversation continuity
+#     - PROPER FORMATTING with bullet points and structure
+#     """
     
-    try:
-        user_id = request.user_identifier
-        auto_generated = False
+#     try:
+#         user_id = request.user_identifier
+#         auto_generated = False
         
-        # Auto-generate user ID if empty or temporary
-        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-            user_id = f"auto_{str(uuid.uuid4())}"
-            auto_generated = True
-            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-        else:
-            logger.debug(f"👤 Using provided user_identifier: {user_id}")
+#         # Auto-generate user ID if empty or temporary
+#         if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#             user_id = f"auto_{str(uuid.uuid4())}"
+#             auto_generated = True
+#             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
+#         else:
+#             logger.debug(f"👤 Using provided user_identifier: {user_id}")
         
-        # Check tenant limits
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+#         # Check tenant limits
+#         tenant = get_tenant_from_api_key(api_key, db)
+#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
-        # Process message with advanced feedback
-        engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback_llm(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=user_id,
-            max_context=request.max_context,
-            use_smart_llm=True  # This should enable better formatting
-        )
+#         # Process message with advanced feedback
+#         engine = ChatbotEngine(db)
+#         result = engine.process_web_message_with_advanced_feedback_llm(
+#             api_key=api_key,
+#             user_message=request.message,
+#             user_identifier=user_id,
+#             max_context=request.max_context,
+#             use_smart_llm=True  # This should enable better formatting
+#         )
         
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+#         if not result.get("success"):
+#             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
         
-        # Track conversation usage
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=user_id,
-            platform="web",
-            db=db
-        )
+#         # Track conversation usage
+#         track_conversation_started_with_super_tenant(
+#             tenant_id=tenant.id,
+#             user_identifier=user_id,
+#             platform="web",
+#             db=db
+#         )
         
-        # Add user ID to response for frontend persistence
-        result["user_id"] = user_id
-        result["auto_generated_user_id"] = auto_generated
+#         # Add user ID to response for frontend persistence
+#         result["user_id"] = user_id
+#         result["auto_generated_user_id"] = auto_generated
         
-        logger.info("✅ Smart feedback chat completed successfully with proper formatting")
-        return result
+#         logger.info("✅ Smart feedback chat completed successfully with proper formatting")
+#         return result
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 
@@ -1708,103 +1710,6 @@ async def chat_with_handoff_detection(
 
 
 
-@router.post("/chat/smart/streaming")
-async def smart_chat_with_formatting_streaming(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Smart chat with streaming that PRESERVES formatting
-    - Breaks content at logical points (not sentences)
-    - Maintains bullet points, numbered lists, and structure
-    - Still provides real-time streaming experience
-    """
-    
-    async def stream_formatted_response():
-        try:
-            logger.info(f"🎬 Starting smart streaming with formatting preservation")
-            
-            # Get tenant and check limits
-            tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-            
-            # Auto-generate user ID if needed
-            user_id = request.user_identifier
-            auto_generated = False
-            
-            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-                user_id = f"auto_{str(uuid.uuid4())}"
-                auto_generated = True
-            
-            # Send initial metadata
-            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
-            
-            # Get response from chatbot (non-streaming first)
-            engine = ChatbotEngine(db)
-            result = engine.process_web_message_with_advanced_feedback_llm(
-                api_key=api_key,
-                user_message=request.message,
-                user_identifier=user_id,
-                max_context=request.max_context,
-                use_smart_llm=True
-            )
-            
-            if not result.get("success"):
-                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-                return
-            
-            # Track conversation
-            track_conversation_started_with_super_tenant(
-                tenant_id=tenant.id,
-                user_identifier=user_id,
-                platform="web",
-                db=db
-            )
-            
-            # Process response with smart formatting-aware streaming
-            bot_response = result["response"]
-            
-            # Send response info
-            yield f"{json.dumps({'type': 'info', 'session_id': result.get('session_id'), 'answered_by': result.get('answered_by')})}\n"
-            
-            # Stream the formatted response intelligently
-            chunks = break_formatted_response_smartly(bot_response)
-            
-            for i, chunk in enumerate(chunks):
-                # Add natural delays between chunks
-                if i > 0:
-                    delay = calculate_formatting_aware_delay(chunk)
-                    await asyncio.sleep(delay)
-                
-                chunk_data = {
-                    'type': 'chunk',
-                    'content': chunk,
-                    'chunk_index': i,
-                    'is_complete': i == len(chunks) - 1
-                }
-                yield f"{json.dumps(chunk_data)}\n"
-            
-            # Send completion signal
-            yield f"{json.dumps({'type': 'complete', 'total_chunks': len(chunks)})}\n"
-            
-            logger.info(f"✅ Smart streaming completed with {len(chunks)} formatted chunks")
-            
-        except HTTPException as e:
-            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-        except Exception as e:
-            logger.error(f"💥 Error in smart streaming: {str(e)}")
-            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-    return StreamingResponse(
-        stream_formatted_response(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
-        }
-    )
 
 def break_formatted_response_smartly(response: str) -> List[str]:
     """
@@ -1918,3 +1823,263 @@ def calculate_formatting_aware_delay(chunk: str) -> float:
     # Regular content - based on length
     length_factor = min(len(chunk) / 100, 2.0)
     return base_delay + length_factor
+
+
+
+@router.post("/chat/smart/with-followup")
+async def smart_chat_with_followup_streaming(
+    request: SmartChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Smart chat with instant main response + streamed follow-up suggestions
+    Perfect balance of speed and conversational engagement
+    """
+    
+    async def stream_with_followups():
+        try:
+            logger.info(f"🚀 Smart chat with follow-up streaming for: {request.user_identifier}")
+            
+            # Get tenant and check limits
+            tenant = get_tenant_from_api_key(api_key, db)
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+            # Auto-generate user ID if needed
+            user_id = request.user_identifier
+            auto_generated = False
+            
+            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+                user_id = f"auto_{str(uuid.uuid4())}"
+                auto_generated = True
+            
+            # Send initial metadata
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
+            
+            # Get main response from chatbot (instant)
+            engine = ChatbotEngine(db)
+            result = engine.process_web_message_with_advanced_feedback_llm(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=user_id,
+                max_context=request.max_context,
+                use_smart_llm=True
+            )
+            
+            if not result.get("success"):
+                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+                return
+            
+            # Track conversation
+            track_conversation_started_with_super_tenant(
+                tenant_id=tenant.id,
+                user_identifier=user_id,
+                platform="web",
+                db=db
+            )
+            
+            # Send main response INSTANTLY (no streaming)
+            main_response = {
+                'type': 'main_response',
+                'content': result["response"],
+                'session_id': result.get('session_id'),
+                'answered_by': result.get('answered_by'),
+                'email_captured': result.get('email_captured', False),
+                'feedback_triggered': result.get('feedback_triggered', False)
+            }
+            yield f"{json.dumps(main_response)}\n"
+            
+            # Wait a moment before follow-ups (feels natural)
+            await asyncio.sleep(1.5)
+            
+            # Generate and stream follow-up suggestions
+            followups = generate_smart_followups(request.message, result["response"], tenant.name)
+            
+            if followups:
+                for i, followup in enumerate(followups):
+                    # Natural delay between follow-ups
+                    if i > 0:
+                        delay = calculate_followup_delay(followup)
+                        await asyncio.sleep(delay)
+                    
+                    followup_data = {
+                        'type': 'followup',
+                        'content': followup,
+                        'index': i,
+                        'is_last': i == len(followups) - 1
+                    }
+                    yield f"{json.dumps(followup_data)}\n"
+            
+            # Send completion signal
+            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0})}\n"
+            
+            logger.info(f"✅ Smart chat with follow-ups completed")
+            
+        except HTTPException as e:
+            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+    return StreamingResponse(
+        stream_with_followups(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+def generate_smart_followups(user_question: str, bot_response: str, company_name: str) -> List[str]:
+    """
+    Generate intelligent follow-up questions based on user's question and bot's response
+    """
+    import re
+    
+    user_q_lower = user_question.lower()
+    response_lower = bot_response.lower()
+    followups = []
+    
+    # Discord/Integration Setup Follow-ups
+    if any(term in user_q_lower for term in ['discord', 'slack', 'integration', 'setup', 'configure']):
+        followups.extend([
+            "Would you like me to walk you through any specific step in detail?",
+            "Need help with troubleshooting common setup issues?",
+            "Should I explain how to test if the integration is working?"
+        ])
+    
+    # Features/Pricing Follow-ups
+    elif any(term in user_q_lower for term in ['features', 'pricing', 'plans', 'what do you offer']):
+        followups.extend([
+            "Would you like to know more about any specific feature?",
+            "Interested in seeing how this compares to other solutions?",
+            "Should I help you choose the right plan for your needs?"
+        ])
+    
+    # Support/Help Follow-ups  
+    elif any(term in user_q_lower for term in ['support', 'help', 'contact', 'problem', 'issue']):
+        followups.extend([
+            "Is there a specific issue you're facing that I can help with?",
+            "Would you like me to connect you with our technical support team?",
+            "Need immediate assistance with something urgent?"
+        ])
+    
+    # API/Technical Follow-ups
+    elif any(term in user_q_lower for term in ['api', 'documentation', 'technical', 'code', 'developer']):
+        followups.extend([
+            "Would you like examples of how to implement this?",
+            "Need help with authentication or API keys?",
+            "Should I show you some common code snippets?"
+        ])
+    
+    # General/Broad Question Follow-ups
+    else:
+        # Analyze bot response to suggest relevant follow-ups
+        if 'step' in response_lower or 'process' in response_lower:
+            followups.append("Would you like me to explain any of these steps in more detail?")
+        
+        if 'plan' in response_lower or 'option' in response_lower:
+            followups.append("Need help choosing between these options?")
+        
+        if 'contact' in response_lower or 'support' in response_lower:
+            followups.append("Should I help you get in touch with our team?")
+        
+        # Always add these generic helpful follow-ups
+        followups.extend([
+            "Is there anything specific about this you'd like me to clarify?",
+            f"Any other questions about {company_name}?"
+        ])
+    
+    # Limit to 3 follow-ups max (not overwhelming)
+    return followups[:3]
+
+def calculate_followup_delay(followup: str) -> float:
+    """
+    Calculate natural delay for follow-up questions
+    Shorter delays for follow-ups to feel conversational
+    """
+    base_delay = 1.2  # Slightly faster than main content
+    
+    # Longer questions need slightly more time
+    length_factor = min(len(followup) / 150, 1.0)
+    
+    # Add some natural variation
+    import random
+    variation = random.uniform(0.8, 1.2)
+    
+    return (base_delay + length_factor) * variation
+
+# Also update your existing /chat/smart endpoint to optionally redirect to follow-up version
+@router.post("/chat/smart", response_model=ChatResponse)
+async def chat_with_advanced_smart_feedback_enhanced(
+    request: SmartChatRequest,
+    enable_followups: bool = False,  # New parameter
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Enhanced smart feedback endpoint with optional follow-up streaming
+    
+    If enable_followups=True, redirects to streaming version with follow-ups
+    Otherwise, provides instant response as before
+    """
+    
+    # If follow-ups requested, redirect to streaming endpoint
+    if enable_followups:
+        logger.info("🔄 Follow-ups requested, using streaming implementation")
+        # Note: In production, you might want to redirect or handle this differently
+        # For now, we'll process normally but log the request
+    
+    try:
+        user_id = request.user_identifier
+        auto_generated = False
+        
+        # Auto-generate user ID if empty or temporary
+        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+            user_id = f"auto_{str(uuid.uuid4())}"
+            auto_generated = True
+            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
+        
+        # Check tenant limits
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Process message with advanced feedback
+        engine = ChatbotEngine(db)
+        result = engine.process_web_message_with_advanced_feedback_llm(
+            api_key=api_key,
+            user_message=request.message,
+            user_identifier=user_id,
+            max_context=request.max_context,
+            use_smart_llm=True
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        
+        # Track conversation usage
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=user_id,
+            platform="web",
+            db=db
+        )
+        
+        # Add user ID to response for frontend persistence
+        result["user_id"] = user_id
+        result["auto_generated_user_id"] = auto_generated
+        
+        # If follow-ups were requested, add suggestion
+        if enable_followups:
+            result["followups_available"] = True
+            result["followup_endpoint"] = "/chat/smart/with-followup"
+        
+        logger.info("✅ Smart feedback chat completed successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
