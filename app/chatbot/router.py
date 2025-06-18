@@ -28,7 +28,7 @@ from app.chatbot.memory import EnhancedChatbotMemory
 from app.tenants.models import Tenant
 from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
 from app.chatbot.security import SecurityPromptManager
-from app.chatbot.security import SecurityPromptManager, SecurityIncident, EnhancedSecurityManager
+from app.chatbot.security import SecurityPromptManager, SecurityIncident
 from app.chatbot.security import validate_and_sanitize_tenant_prompt
 from app.live_chat.models import LiveChatConversation
 from app.live_chat.queue_service import LiveChatQueueService
@@ -1411,7 +1411,7 @@ async def get_security_incident_details(
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
-        security_manager = EnhancedSecurityManager(db, tenant.id)
+        security_manager = SecurityPromptManager(db, tenant.id)
         incident_details = security_manager.get_incident_details(incident_id)
         
         if not incident_details:
@@ -1442,7 +1442,7 @@ async def mark_incident_reviewed(
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
-        security_manager = EnhancedSecurityManager(db, tenant.id)
+        security_manager = SecurityPromptManager(db, tenant.id)
         success = security_manager.mark_incident_reviewed(
             incident_id, 
             request.reviewer_notes
@@ -1472,7 +1472,7 @@ async def cleanup_old_security_incidents(
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
-        security_manager = EnhancedSecurityManager(db, tenant.id)
+        security_manager = SecurityPromptManager(db, tenant.id)
         cleaned_count = security_manager.cleanup_old_incidents(days_old)
         
         return {
