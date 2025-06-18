@@ -83,51 +83,72 @@ class ChatbotEngine:
 
     # ========================== FAQ QUALITY AND MATCHING ==========================
     
-    def _check_faq_first_with_quality_filter(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
+    def _check_faq_with_llm(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
         """
-        Check FAQs first but filter out low-quality answers
-        Returns high-quality FAQ answer if match found, None otherwise
+        Use LLM to intelligently match user questions to FAQs
         """
         if not faqs:
             return None
         
-        user_message_lower = user_message.lower().strip()
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
         
-        for faq in faqs:
-            faq_question_lower = faq['question'].lower().strip()
-            
-            # 1. Exact match
-            if user_message_lower == faq_question_lower:
-                # Check if FAQ answer is high quality
-                if self._is_faq_answer_adequate(faq['answer']):
-                    logger.info(f"📋 EXACT FAQ match found with good answer: {faq['question']}")
-                    return self._make_faq_conversational(faq['answer'])
-                else:
-                    logger.info(f"📋 FAQ match found but answer is inadequate, will use KB instead")
-                    return None
-            
-            # 2. High similarity match (90%+ for stricter matching)
-            user_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
-            faq_words = set(re.findall(r'\b\w{3,}\b', faq_question_lower))
-            
-            if user_words and faq_words:
-                overlap = len(user_words.intersection(faq_words))
-                user_word_ratio = overlap / len(user_words)
-                faq_word_ratio = overlap / len(faq_words)
-                
-                # Much stricter: 90%+ match AND similar question length
-                length_ratio = min(len(user_message), len(faq['question'])) / max(len(user_message), len(faq['question']))
-                
-                if user_word_ratio >= 0.9 and faq_word_ratio >= 0.9 and length_ratio >= 0.8:
-                    if self._is_faq_answer_adequate(faq['answer']):
-                        logger.info(f"📋 VERY HIGH SIMILARITY FAQ match found with good answer: {faq['question']}")
-                        return self._make_faq_conversational(faq['answer'])
-                    else:
-                        logger.info(f"📋 High similarity FAQ found but answer inadequate, using KB instead")
-                        return None
+        # Format FAQs for the LLM
+        faq_list = ""
+        for i, faq in enumerate(faqs):
+            faq_list += f"{i+1}. Q: {faq['question']}\n   A: {faq['answer']}\n\n"
         
-        logger.info(f"📋 No adequate FAQ match found for: {user_message}")
-        return None
+        prompt = PromptTemplate(
+            input_variables=["user_question", "faq_list"],
+            template="""
+    You are an FAQ matching assistant. Given a user question and a list of FAQs, determine if any FAQ answers the user's question.
+
+    User Question: "{user_question}"
+
+    Available FAQs:
+    {faq_list}
+
+    Instructions:
+    1. If an FAQ directly answers the user's question, respond with: "MATCH: [FAQ_NUMBER]"
+    2. If no FAQ matches, respond with: "NO_MATCH"
+    3. Consider variations in wording (e.g., "business hours" matches "what time are you open")
+    4. Ignore FAQs with poor answers like "check google" or "look up online"
+
+    Response:"""
+        )
+        
+        try:
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1)
+            
+            result = llm(prompt.format(
+                user_question=user_message,
+                faq_list=faq_list
+            )).strip()
+            
+            # Parse the result
+            if result.startswith("MATCH:"):
+                try:
+                    faq_number = int(result.split(":")[1].strip()) - 1
+                    if 0 <= faq_number < len(faqs):
+                        matched_faq = faqs[faq_number]
+                        
+                        # Check if answer is adequate
+                        if self._is_faq_answer_adequate(matched_faq['answer']):
+                            logger.info(f"🤖 LLM FAQ match found: {matched_faq['question']}")
+                            return self._make_faq_conversational(matched_faq['answer'])
+                        else:
+                            logger.info(f"🤖 LLM found FAQ match but answer inadequate")
+                            return None
+                except (ValueError, IndexError):
+                    logger.warning(f"Could not parse LLM FAQ result: {result}")
+            
+            logger.info(f"🤖 LLM found no FAQ match for: {user_message}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in LLM FAQ matching: {e}")
+            # Fallback to basic check if LLM fails
+            return None
 
     def _is_faq_answer_adequate(self, faq_answer: str) -> bool:
         """
@@ -289,7 +310,7 @@ class ChatbotEngine:
         faqs = self._get_faqs(tenant_id)
         
         # Step 1: Check FAQ first (with quality filter)
-        faq_answer = self._check_faq_first_with_quality_filter(user_message, faqs)
+        faq_answer = self._check_faq_with_llm(user_message, faqs)
         
         # Step 2: Get KB context if FAQ is inadequate or missing
         kb_answer = None
@@ -710,7 +731,7 @@ Your detailed, step-by-step response:"""
         logger.info(f"🔍 Checking {len(faqs)} FAQs with quality filter before using knowledge base")
         
         # Try FAQ first with quality check
-        faq_answer = self._check_faq_first_with_quality_filter(user_message, faqs)
+        faq_answer = self._check_faq_with_llm(user_message, faqs)
         
         if faq_answer:
             logger.info(f"✅ HIGH-QUALITY FAQ ANSWER FOUND - Using direct FAQ response")
@@ -1191,5 +1212,313 @@ Your detailed, step-by-step response:"""
         # Add context override info to result
         if result.get("success"):
             result["security_context_override"] = context_override
+        
+        return result
+    
+
+
+    def _check_faq_with_llm(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
+        """
+        Use LLM to intelligently match user questions to FAQs
+        Much more flexible than string matching
+        """
+        if not faqs:
+            return None
+        
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        # Format FAQs for the LLM
+        faq_list = ""
+        for i, faq in enumerate(faqs):
+            faq_list += f"{i+1}. Q: {faq['question']}\n   A: {faq['answer']}\n\n"
+        
+        prompt = PromptTemplate(
+            input_variables=["user_question", "faq_list"],
+            template="""You are an FAQ matching assistant. Given a user question and a list of FAQs, determine if any FAQ answers the user's question.
+
+    User Question: "{user_question}"
+
+    Available FAQs:
+    {faq_list}
+
+    Instructions:
+    1. If an FAQ directly answers the user's question, respond with: "MATCH: [FAQ_NUMBER]"
+    2. If no FAQ matches, respond with: "NO_MATCH"
+    3. Consider variations in wording (e.g., "business hours" matches "what time are you open")
+    4. Look for semantic similarity, not just exact words
+
+    Examples:
+    - "what are your hours" matches "business hour"
+    - "how to integrate slack" matches "How can i set up slack"
+    - "when are you open" matches "business hour"
+
+    Response:"""
+        )
+        
+        try:
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+            
+            result = llm(prompt.format(
+                user_question=user_message,
+                faq_list=faq_list
+            )).strip()
+            
+            logger.info(f"🤖 LLM FAQ matching result: {result}")
+            
+            # Parse the result
+            if result.startswith("MATCH:"):
+                try:
+                    faq_number = int(result.split(":")[1].strip()) - 1
+                    if 0 <= faq_number < len(faqs):
+                        matched_faq = faqs[faq_number]
+                        
+                        # Check if answer is adequate
+                        if self._is_faq_answer_adequate(matched_faq['answer']):
+                            logger.info(f"🤖 LLM FAQ match found with good answer: {matched_faq['question']}")
+                            return self._make_faq_conversational(matched_faq['answer'])
+                        else:
+                            logger.info(f"🤖 LLM found FAQ match but answer inadequate: {matched_faq['answer'][:50]}...")
+                            return None
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse LLM FAQ result: {result}, error: {e}")
+            
+            logger.info(f"🤖 LLM found no FAQ match for: {user_message}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in LLM FAQ matching: {e}")
+            # Fallback to original method if LLM fails
+            logger.info(f"Falling back to original FAQ matching method")
+            return self._check_faq_first_with_quality_filter(user_message, faqs)
+
+    def _get_smart_answer_with_llm(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
+        """
+        Let LLM intelligently choose between FAQ and KB and format the response
+        This is the ultimate smart approach
+        """
+        faqs = self._get_faqs(tenant_id)
+        
+        # Format FAQs for LLM
+        faq_content = ""
+        if faqs:
+            for faq in faqs:
+                faq_content += f"Q: {faq['question']}\nA: {faq['answer']}\n\n"
+        
+        # Get KB context if available
+        kb_context = ""
+        try:
+            # Try to get relevant KB content
+            kb_answer = self._get_kb_answer(user_message, tenant_id)
+            if kb_answer and len(kb_answer) > 100:  # Only use if substantial content
+                kb_context = kb_answer[:1000]  # Limit context size
+        except Exception as e:
+            logger.warning(f"Could not get KB context: {e}")
+        
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        prompt = PromptTemplate(
+            input_variables=["user_question", "faq_content", "kb_context"],
+            template="""You are a helpful customer service assistant. Answer the user's question using the best available information.
+
+    User Question: {user_question}
+
+    Available FAQs:
+    {faq_content}
+
+    Knowledge Base Context:
+    {kb_context}
+
+    Instructions:
+    1. First check if any FAQ directly answers the question with a GOOD answer
+    2. If FAQ answer is poor (like "check google", "look it up"), ignore it and use KB instead
+    3. If you have detailed KB context, provide specific step-by-step instructions
+    4. Be conversational, helpful, and detailed
+    5. Don't refer users to external guides - provide the information directly
+    6. If you don't have enough information, say so politely
+
+    Your helpful response:"""
+        )
+        
+        try:
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.3, openai_api_key=settings.OPENAI_API_KEY)
+            
+            response = llm(prompt.format(
+                user_question=user_message,
+                faq_content=faq_content if faq_content else "No FAQs available",
+                kb_context=kb_context if kb_context else "No knowledge base context available"
+            )).strip()
+            
+            # Determine what source was likely used
+            source = "LLM_SMART"
+            if any(faq['question'].lower() in response.lower() or 
+                any(word in response.lower() for word in faq['question'].lower().split()) 
+                for faq in faqs):
+                source = "FAQ_LLM"
+            elif kb_context and len(kb_context) > 50:
+                source = "KB_LLM"
+            
+            logger.info(f"🤖 Smart LLM response generated using source: {source}")
+            
+            return {
+                "answer": response,
+                "source": source,
+                "faq_available": bool(faqs),
+                "kb_available": bool(kb_context)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in smart LLM answer generation: {e}")
+            return {
+                "answer": None,
+                "source": "ERROR",
+                "error": str(e)
+            }
+
+    # Update your main method to use LLM-based FAQ matching
+    def process_web_message_with_advanced_feedback_llm(self, api_key: str, user_message: str, user_identifier: str, 
+                                                    max_context: int = 20, use_smart_llm: bool = False) -> Dict[str, Any]:
+        """
+        Enhanced with LLM-based FAQ matching and smart answer generation
+        """
+        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+        # Get tenant from API key
+        tenant = self._get_tenant_by_api_key(api_key)
+        if not tenant:
+            logger.error(f"Invalid API key: {api_key[:5]}...")
+            return {"error": "Invalid API key", "success": False}
+        
+        # Initialize managers
+        memory = SimpleChatbotMemory(self.db, tenant.id)
+        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        
+        # Get or create session
+        session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
+        
+        # Email handling (same as before)
+        extracted_email = feedback_manager.extract_email_from_message(user_message)
+        if extracted_email:
+            logger.info(f"📧 Extracted email from message: {extracted_email}")
+            
+            if feedback_manager.store_user_email(session_id, extracted_email):
+                acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, acknowledgment, False)
+                
+                return {
+                    "session_id": session_id,
+                    "response": acknowledgment,
+                    "success": True,
+                    "is_new_session": is_new_session,
+                    "email_captured": True,
+                    "user_email": extracted_email,
+                    "platform": "web"
+                }
+        
+        if feedback_manager.should_request_email(session_id, user_identifier):
+            email_request = feedback_manager.generate_email_request_message(tenant.name)
+            memory.store_message(session_id, email_request, False)
+            
+            return {
+                "session_id": session_id,
+                "response": email_request,
+                "success": True,
+                "is_new_session": is_new_session,
+                "email_requested": True,
+                "platform": "web"
+            }
+        
+        # 🤖 NEW: LLM-BASED SMART ANSWER GENERATION
+        if use_smart_llm:
+            logger.info(f"🤖 Using smart LLM answer generation")
+            
+            smart_result = self._get_smart_answer_with_llm(user_message, tenant.id)
+            
+            if smart_result.get("answer"):
+                logger.info(f"✅ SMART LLM ANSWER GENERATED - Source: {smart_result['source']}")
+                
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, smart_result["answer"], False)
+                
+                return {
+                    "session_id": session_id,
+                    "response": smart_result["answer"],
+                    "success": True,
+                    "is_new_session": is_new_session,
+                    "answered_by": smart_result["source"],
+                    "faq_available": smart_result.get("faq_available", False),
+                    "kb_available": smart_result.get("kb_available", False),
+                    "platform": "web"
+                }
+        
+        # 🤖 ENHANCED: LLM-BASED FAQ MATCHING (fallback or primary method)
+        faqs = self._get_faqs(tenant.id)
+        logger.info(f"🤖 Using LLM-based FAQ matching for {len(faqs)} FAQs")
+        
+        # Try LLM-based FAQ matching first
+        faq_answer = self._check_faq_with_llm(user_message, faqs)
+        
+        if faq_answer:
+            logger.info(f"✅ LLM FAQ MATCH FOUND - Using FAQ response")
+            
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, faq_answer, False)
+            
+            return {
+                "session_id": session_id,
+                "response": faq_answer,
+                "success": True,
+                "is_new_session": is_new_session,
+                "answered_by": "FAQ_LLM",
+                "faq_matched": True,
+                "platform": "web"
+            }
+        
+        # If no FAQ match, proceed with knowledge base
+        logger.info(f"📚 No adequate FAQ found with LLM - using knowledge base")
+        
+        result = self.process_message_simple_memory(
+            api_key=api_key,
+            user_message=user_message,
+            user_identifier=user_identifier,
+            platform="web",
+            max_context=max_context
+        )
+        
+        if result.get("success"):
+            result["answered_by"] = "KnowledgeBase"
+            result["faq_matched"] = False
+        
+        # Continue with feedback detection...
+        if not result.get("success"):
+            return result
+        
+        bot_response = result["response"]
+        
+        try:
+            is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+            
+            if is_inadequate:
+                logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                
+                conversation_history = memory.get_conversation_history(user_identifier, 10)
+                
+                feedback_id = feedback_manager.create_feedback_request(
+                    session_id=session_id,
+                    user_question=user_message,
+                    bot_response=bot_response,
+                    conversation_context=conversation_history
+                )
+                
+                if feedback_id:
+                    result["feedback_triggered"] = True
+                    result["feedback_id"] = feedback_id
+                    result["feedback_system"] = "advanced"
+            
+        except Exception as e:
+            logger.error(f"💥 Error in feedback detection: {e}")
         
         return result

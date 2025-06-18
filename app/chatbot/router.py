@@ -28,7 +28,7 @@ from app.chatbot.memory import EnhancedChatbotMemory
 from app.tenants.models import Tenant
 from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager, PendingFeedback, FeedbackWebhookHandler
 from app.chatbot.security import SecurityPromptManager
-from app.chatbot.security import SecurityPromptManager, SecurityIncident
+from app.chatbot.security import SecurityPromptManager, SecurityIncident, EnhancedSecurityManager
 from app.chatbot.security import validate_and_sanitize_tenant_prompt
 from app.live_chat.models import LiveChatConversation
 from app.live_chat.queue_service import LiveChatQueueService
@@ -826,7 +826,8 @@ async def chat_with_advanced_smart_feedback_enhanced(
             api_key=api_key,
             user_message=request.message,
             user_identifier=user_id,
-            max_context=request.max_context
+            max_context=request.max_context,
+            use_smart_llm=True
         )
         
         if not result.get("success"):
@@ -915,7 +916,8 @@ async def chat_with_advanced_smart_feedback(
             api_key=api_key,
             user_message=request.message,
             user_identifier=user_id,  # 🆕 Use the processed user_id
-            max_context=request.max_context
+            max_context=request.max_context,
+            use_smart_llm=True
         )
         
         if not result.get("success"):
