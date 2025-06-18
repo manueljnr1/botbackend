@@ -84,9 +84,7 @@ class ChatbotEngine:
     # ========================== FAQ QUALITY AND MATCHING ==========================
     
     def _check_faq_with_llm(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
-        """
-        Use LLM to intelligently match user questions to FAQs
-        """
+        """Use LLM to intelligently match user questions to FAQs"""
         if not faqs:
             return None
         
@@ -100,8 +98,7 @@ class ChatbotEngine:
         
         prompt = PromptTemplate(
             input_variables=["user_question", "faq_list"],
-            template="""
-    You are an FAQ matching assistant. Given a user question and a list of FAQs, determine if any FAQ answers the user's question.
+            template="""You are an FAQ matching assistant. Given a user question and a list of FAQs, determine if any FAQ answers the user's question.
 
     User Question: "{user_question}"
 
@@ -112,42 +109,50 @@ class ChatbotEngine:
     1. If an FAQ directly answers the user's question, respond with: "MATCH: [FAQ_NUMBER]"
     2. If no FAQ matches, respond with: "NO_MATCH"
     3. Consider variations in wording (e.g., "business hours" matches "what time are you open")
-    4. Ignore FAQs with poor answers like "check google" or "look up online"
+    4. Look for semantic similarity, not just exact words
 
     Response:"""
         )
         
         try:
-            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1)
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
             
-            result = llm(prompt.format(
+            # FIX: Use invoke() instead of direct call
+            result = llm.invoke(prompt.format(
                 user_question=user_message,
                 faq_list=faq_list
-            )).strip()
+            ))
+            
+            # FIX: Handle both string and message object responses
+            if hasattr(result, 'content'):
+                result_text = result.content.strip()
+            else:
+                result_text = str(result).strip()
+            
+            logger.info(f"🤖 LLM FAQ matching result: {result_text}")
             
             # Parse the result
-            if result.startswith("MATCH:"):
+            if result_text.startswith("MATCH:"):
                 try:
-                    faq_number = int(result.split(":")[1].strip()) - 1
+                    faq_number = int(result_text.split(":")[1].strip()) - 1
                     if 0 <= faq_number < len(faqs):
                         matched_faq = faqs[faq_number]
                         
                         # Check if answer is adequate
                         if self._is_faq_answer_adequate(matched_faq['answer']):
-                            logger.info(f"🤖 LLM FAQ match found: {matched_faq['question']}")
+                            logger.info(f"🤖 LLM FAQ match found with good answer: {matched_faq['question']}")
                             return self._make_faq_conversational(matched_faq['answer'])
                         else:
                             logger.info(f"🤖 LLM found FAQ match but answer inadequate")
                             return None
-                except (ValueError, IndexError):
-                    logger.warning(f"Could not parse LLM FAQ result: {result}")
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse LLM FAQ result: {result_text}, error: {e}")
             
             logger.info(f"🤖 LLM found no FAQ match for: {user_message}")
             return None
             
         except Exception as e:
             logger.error(f"Error in LLM FAQ matching: {e}")
-            # Fallback to basic check if LLM fails
             return None
 
     def _is_faq_answer_adequate(self, faq_answer: str) -> bool:
@@ -1293,10 +1298,7 @@ Your detailed, step-by-step response:"""
             return self._check_faq_first_with_quality_filter(user_message, faqs)
 
     def _get_smart_answer_with_llm(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
-        """
-        Let LLM intelligently choose between FAQ and KB and format the response
-        This is the ultimate smart approach
-        """
+        """Let LLM intelligently choose between FAQ and KB and format the response"""
         faqs = self._get_faqs(tenant_id)
         
         # Format FAQs for LLM
@@ -1308,10 +1310,9 @@ Your detailed, step-by-step response:"""
         # Get KB context if available
         kb_context = ""
         try:
-            # Try to get relevant KB content
             kb_answer = self._get_kb_answer(user_message, tenant_id)
-            if kb_answer and len(kb_answer) > 100:  # Only use if substantial content
-                kb_context = kb_answer[:1000]  # Limit context size
+            if kb_answer and len(kb_answer) > 100:
+                kb_context = kb_answer[:1000]
         except Exception as e:
             logger.warning(f"Could not get KB context: {e}")
         
@@ -1344,17 +1345,22 @@ Your detailed, step-by-step response:"""
         try:
             llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.3, openai_api_key=settings.OPENAI_API_KEY)
             
-            response = llm(prompt.format(
+            # FIX: Use invoke() and handle response properly
+            result = llm.invoke(prompt.format(
                 user_question=user_message,
                 faq_content=faq_content if faq_content else "No FAQs available",
                 kb_context=kb_context if kb_context else "No knowledge base context available"
-            )).strip()
+            ))
             
-            # Determine what source was likely used
+            # FIX: Handle both string and message object responses
+            if hasattr(result, 'content'):
+                response = result.content.strip()
+            else:
+                response = str(result).strip()
+            
+            # Determine source
             source = "LLM_SMART"
-            if any(faq['question'].lower() in response.lower() or 
-                any(word in response.lower() for word in faq['question'].lower().split()) 
-                for faq in faqs):
+            if any(faq['question'].lower() in response.lower() for faq in faqs):
                 source = "FAQ_LLM"
             elif kb_context and len(kb_context) > 50:
                 source = "KB_LLM"
@@ -1522,3 +1528,50 @@ Your detailed, step-by-step response:"""
             logger.error(f"💥 Error in feedback detection: {e}")
         
         return result
+    
+
+    def _check_faq_first_with_quality_filter(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
+        """
+        Check FAQs first but filter out low-quality answers
+        Returns high-quality FAQ answer if match found, None otherwise
+        """
+        if not faqs:
+            return None
+        
+        user_message_lower = user_message.lower().strip()
+        
+        for faq in faqs:
+            faq_question_lower = faq['question'].lower().strip()
+            
+            # 1. Exact match
+            if user_message_lower == faq_question_lower:
+                # Check if FAQ answer is high quality
+                if self._is_faq_answer_adequate(faq['answer']):
+                    logger.info(f"📋 EXACT FAQ match found with good answer: {faq['question']}")
+                    return self._make_faq_conversational(faq['answer'])
+                else:
+                    logger.info(f"📋 FAQ match found but answer is inadequate, will use KB instead")
+                    return None
+            
+            # 2. High similarity match (90%+ for stricter matching)
+            user_words = set(re.findall(r'\b\w{3,}\b', user_message_lower))
+            faq_words = set(re.findall(r'\b\w{3,}\b', faq_question_lower))
+            
+            if user_words and faq_words:
+                overlap = len(user_words.intersection(faq_words))
+                user_word_ratio = overlap / len(user_words)
+                faq_word_ratio = overlap / len(faq_words)
+                
+                # Much stricter: 90%+ match AND similar question length
+                length_ratio = min(len(user_message), len(faq['question'])) / max(len(user_message), len(faq['question']))
+                
+                if user_word_ratio >= 0.9 and faq_word_ratio >= 0.9 and length_ratio >= 0.8:
+                    if self._is_faq_answer_adequate(faq['answer']):
+                        logger.info(f"📋 VERY HIGH SIMILARITY FAQ match found with good answer: {faq['question']}")
+                        return self._make_faq_conversational(faq['answer'])
+                    else:
+                        logger.info(f"📋 High similarity FAQ found but answer inadequate, using KB instead")
+                        return None
+        
+        logger.info(f"📋 No adequate FAQ match found for: {user_message}")
+        return None
