@@ -9,12 +9,11 @@ import logging
 import os
 import uuid
 import asyncio
+import re
 from datetime import datetime
-from svix import Webhook, WebhookVerificationError  # Add this import for Webhook and WebhookVerificationError
+from svix import Webhook, WebhookVerificationError
 import random
 import time
-import re
-
 
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -32,13 +31,13 @@ from app.chatbot.security import SecurityPromptManager, SecurityIncident
 from app.chatbot.security import validate_and_sanitize_tenant_prompt
 from app.live_chat.models import LiveChatConversation
 from app.live_chat.queue_service import LiveChatQueueService
+from app.config import settings
 
-
-# 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
+# Pricing integration imports
 from app.pricing.integration_helpers import (
     check_conversation_limit_dependency_with_super_tenant,
     check_integration_limit_dependency_with_super_tenant,
-    track_conversation_started_with_super_tenant,  # ← ADD THIS LINE
+    track_conversation_started_with_super_tenant,
     track_conversation_started,
     track_message_sent
 )
@@ -51,7 +50,10 @@ templates = Jinja2Templates(directory="templates")
 
 router = APIRouter()
 
-# Pydantic models
+# ============================================================================
+# PYDANTIC MODELS
+# ============================================================================
+
 class ChatRequest(BaseModel):
     message: str
     user_identifier: str
@@ -61,20 +63,16 @@ class ChatResponse(BaseModel):
     response: str
     success: bool
     is_new_session: bool
-    user_id: str  # 🆕 NEW
-    auto_generated_user_id: bool = False  # 🆕 NEW
+    user_id: str
+    auto_generated_user_id: bool = False
 
 class ChatHistory(BaseModel):
     session_id: str
     messages: List[dict]
 
-
 class SupportedLanguage(BaseModel):
     code: str
     name: str
-
-
-
 
 class StreamingChatRequest(BaseModel):
     message: str
@@ -99,7 +97,6 @@ class DiscordChatRequest(BaseModel):
     channel_id: str
     guild_id: str
 
-
 class SlackChatRequest(BaseModel):
     message: str
     slack_user_id: str
@@ -107,7 +104,6 @@ class SlackChatRequest(BaseModel):
     team_id: str
     thread_ts: Optional[str] = None
     max_context: int = 50
-
 
 class WhatsAppChatRequest(BaseModel):
     message: str
@@ -121,12 +117,10 @@ class WebChatRequest(BaseModel):
 class TenantPromptUpdate(BaseModel):
     system_prompt: str
 
-
-
 class SimpleChatRequest(BaseModel):
     message: str
     user_identifier: str
-    max_context: int = 200  # How many previous messages to remember
+    max_context: int = 200
 
 class SimpleDiscordRequest(BaseModel):
     message: str
@@ -134,7 +128,6 @@ class SimpleDiscordRequest(BaseModel):
     channel_id: str
     guild_id: str
     max_context: int = 50
-
 
 class SmartChatRequest(BaseModel):
     message: str
@@ -145,32 +138,32 @@ class TenantFeedbackResponse(BaseModel):
     feedback_id: str
     response: str
 
-
 class WebChatbotRequest(BaseModel):
     message: str
     user_identifier: str
     max_context: int = 20
     enable_streaming: bool = True
 
-
-class ChatRequest(BaseModel):
+class SmartChatStreamingRequest(BaseModel):
     message: str
     user_identifier: str
+    max_context: int = 20
+    enable_streaming: bool = True
 
+class IncidentReviewRequest(BaseModel):
+    reviewer_notes: Optional[str] = None
 
+class SecuritySettingsRequest(BaseModel):
+    security_level: str = "standard"
+    allow_custom_prompts: bool = True
+    security_notifications_enabled: bool = True
 
-class ChatHistory(BaseModel):
-    session_id: str
-    messages: List[dict]
-
-class SmartChatRequest(BaseModel):
-    message: str
-    user_identifier: str
-    max_context: int = 200
-
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
 def detect_handoff_triggers(user_message: str) -> bool:
-    '''Detect if user message should trigger handoff to live chat'''
+    """Detect if user message should trigger handoff to live chat"""
     handoff_triggers = [
         "speak to human", "talk to human", "human agent", "live agent",
         "customer service", "customer support", "speak to agent",
@@ -182,10 +175,8 @@ def detect_handoff_triggers(user_message: str) -> bool:
     message_lower = user_message.lower()
     return any(trigger in message_lower for trigger in handoff_triggers)
 
-
 def break_into_sentences(response: str) -> list:
     """Break response into natural sentences for streaming"""
-    
     response = response.strip()
     
     # Split by sentence endings, keeping the punctuation
@@ -195,8 +186,7 @@ def break_into_sentences(response: str) -> list:
     clean_sentences = []
     for sentence in sentences:
         sentence = sentence.strip()
-        if sentence and len(sentence) > 10:  # Only meaningful sentences
-            # Ensure sentence ends with punctuation
+        if sentence and len(sentence) > 10:
             if not sentence.endswith(('.', '!', '?')):
                 sentence += '.'
             clean_sentences.append(sentence)
@@ -205,19 +195,13 @@ def break_into_sentences(response: str) -> list:
 
 def calculate_sentence_delay(sentence: str, is_last: bool = False) -> float:
     """Calculate realistic delay for typing a sentence"""
-    
-    # Base typing speed (characters per second)
     typing_speed = random.uniform(18, 30)
     typing_time = len(sentence) / typing_speed
     
-    # Add thinking pause based on sentence complexity
     thinking_pause = 0
-    
-    # Longer pause for complex sentences
     if any(word in sentence.lower() for word in ['however', 'therefore', 'additionally', 'furthermore']):
         thinking_pause += random.uniform(0.5, 1.0)
     
-    # Pause based on sentence ending
     if sentence.endswith('.'):
         end_pause = random.uniform(1.0, 2.0)
     elif sentence.endswith('!'):
@@ -227,1497 +211,16 @@ def calculate_sentence_delay(sentence: str, is_last: bool = False) -> float:
     else:
         end_pause = random.uniform(0.6, 1.0)
     
-    # Longer pause for the last sentence
     if is_last:
         end_pause *= random.uniform(1.3, 1.8)
     
     total_delay = thinking_pause + end_pause
-    
-    # Add human variation
     total_delay *= random.uniform(0.8, 1.3)
     
-    # Set bounds (1-6 seconds per sentence)
     return max(1.0, min(total_delay, 6.0))
 
-
-# Chat endpoint - 🔥 MODIFIED WITH PRICING AND DEBUG LOGGING
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-    """
-    Send a message to the chatbot and get a response - UPDATED for conversation-based pricing
-    """
-    try:
-        # Debug - Log the API key being used
-        logger.info(f"💬 Processing chat request with API key: {api_key[:10]}...")
-        logger.info(f"📝 Message: {request.message[:50]}...")
-        
-        # 🔒 PRICING CHECK - Get tenant and check conversation limits (UPDATED)
-        logger.info("🔍 Getting tenant from API key...")
-        tenant = get_tenant_from_api_key(api_key, db)
-        logger.info(f"✅ Found tenant: {tenant.name} (ID: {tenant.id})")
-        
-        logger.info("🚦 Checking conversation limits...")
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
-        logger.info("✅ Conversation limit check passed")
-        
-        # Initialize chatbot engine
-        logger.info("🤖 Initializing chatbot engine...")
-        engine = ChatbotEngine(db)
-        
-        # Process message
-        logger.info("⚡ Processing message with chatbot engine...")
-        result = engine.process_message(api_key, request.message, request.user_identifier)
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Chatbot error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # 📊 PRICING TRACK - Track conversation usage (UPDATED)
-        logger.info("📊 Tracking conversation usage...")
-        track_success = track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
-            platform="web", 
-            db=db
-        )
-        logger.info(f"📈 Conversation tracking result: {track_success}")
-        
-        # Log the response for debugging
-        logger.info(f"✅ Chat successful, response length: {len(result.get('response', ''))}")
-        
-        return result
-    except HTTPException:
-        # Re-raise HTTP exceptions (including pricing limit errors)
-        logger.error("🚫 HTTP Exception occurred (conversation limit or other)")
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in chat endpoint: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        
-        # Return a more user-friendly error
-        raise HTTPException(
-            status_code=500, 
-            detail="An internal server error occurred. Please try again later."
-        )
-
-# Get chat history
-@router.get("/history/{session_id}", response_model=ChatHistory)
-async def get_chat_history(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-    """
-    Get the chat history for a specific session
-    """
-    # Verify the API key and get tenant
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    # Get session
-    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-    if not session or session.tenant_id != tenant.id:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Get messages
-    messages = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at).all()
-    
-    return {
-        "session_id": session_id,
-        "messages": [
-            {
-                "content": msg.content,
-                "is_from_user": msg.is_from_user,
-                "created_at": msg.created_at.isoformat()
-            }
-            for msg in messages
-        ]
-    }
-
-# End chat session
-@router.post("/end-session")
-async def end_chat_session(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
-    """
-    End a chat session
-    """
-    # Verify the API key and get tenant
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    # Verify session belongs to tenant
-    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-    if not session or session.tenant_id != tenant.id:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    # End session
-    success = engine.end_session(session_id)
-    
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to end session")
-    
-    return {"message": "Session ended successfully"}
-
-
-
-
-
-
-
-# Add a simple test endpoint
-@router.get("/ping")
-async def ping():
-    """
-    Simple endpoint to test if the router is working
-    """
-    return {"message": "Chatbot router is working!"}
-
-
-
-
-# 🔥 MODIFIED STREAMING ENDPOINT WITH PRICING AND DEBUG LOGGING
-@router.post("/chat/delayed")
-async def chat_with_simple_sentence_streaming(
-    request: ChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Simplified streaming - Send JSON messages with realistic typing delays
-    - Breaks response into sentences
-    - Streams each sentence with a delay
-    """
-    
-    async def stream_sentences():
-        try:
-            logger.info(f"🎬 Starting streaming chat for API key: {api_key[:10]}...")
-            
-            # 🔒 PRICING CHECK - Get tenant and check limits FIRST (UPDATED)
-            logger.info("🔍 Getting tenant and checking limits for streaming...")
-            tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
-            logger.info(f"✅ Streaming limits OK for tenant: {tenant.name}")
-            
-            start_time = time.time()
-            
-            # ... existing delay calculation code ...
-            
-            # Get response
-            logger.info("🤖 Getting response from chatbot engine...")
-            engine = ChatbotEngine(db)
-            result = engine.process_message(
-                api_key=api_key,
-                user_message=request.message,
-                user_identifier=request.user_identifier
-            )
-            
-            if not result.get("success"):
-                logger.error(f"❌ Streaming chat failed: {result.get('error')}")
-                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-                return
-            
-            logger.info("✅ Chatbot response received successfully")
-            
-            # 📊 PRICING TRACK - Track conversation usage (UPDATED)
-            logger.info("📊 Tracking streaming conversation usage...")
-            track_success = track_conversation_started_with_super_tenant(
-                tenant_id=tenant.id,
-                user_identifier=request.user_identifier,
-                platform="web",
-                db=db
-            )
-            logger.info(f"📈 Streaming conversation tracking result: {track_success}")
-            
-            # ... rest of streaming logic remains the same ...
-            
-        except HTTPException as e:
-            # Handle conversation limit errors and other HTTP exceptions (UPDATED)
-            logger.error(f"🚫 HTTP error in streaming: {e.detail}")
-            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-        except Exception as e:
-            logger.error(f"💥 Error in streaming: {str(e)}")
-            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-    return StreamingResponse(
-        stream_sentences(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
-
-
-
-# Fix the broken enhanced memory endpoint:
-
-@router.post("/chat/with-handoff", response_model=ChatResponse)
-async def chat_with_handoff_detection(
-    request: ChatRequest, 
-    api_key: str = Header(..., alias="X-API-Key"), 
-    db: Session = Depends(get_db)
-):
-    """
-    Enhanced chat endpoint that automatically detects handoff requests
-    """
-    try:
-        # Check pricing limits first
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process with handoff detection
-        result = engine.process_message_with_handoff_detection(
-            api_key, request.message, request.user_identifier
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track message usage
-        track_message_sent(tenant.id, db)
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in handoff-enabled chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-@router.post("/chat/simple", response_model=ChatResponse)
-async def chat_with_simple_memory(
-    request: SimpleChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Simple chat endpoint with basic conversation memory
-    - Remembers conversation within the same platform/session
-    - No cross-platform complexity
-    - Configurable context length
-    """
-    try:
-        logger.info(f"🧠 Simple memory chat for: {request.user_identifier}")
-        
-        # Pricing check (UPDATED)
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process with simple memory
-        result = engine.process_message_simple_memory(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=request.user_identifier,
-            platform="web",
-            max_context=request.max_context
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Simple memory chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track conversation usage (UPDATED)
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
-            platform="web",
-            db=db
-        )
-        
-        logger.info(f"✅ Simple memory chat successful - used {result.get('context_messages', 0)} context messages")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in simple memory chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-
-@router.post("/chat/discord/simple", response_model=ChatResponse)
-async def discord_chat_simple(
-    request: SimpleDiscordRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Simplified Discord chat endpoint with basic memory
-    - Remembers Discord conversations for the same user
-    - No cross-platform memory
-    - Clean and simple
-    """
-    try:
-        logger.info(f"🎮 Simple Discord chat for user: {request.discord_user_id}")
-        
-        # Pricing check (UPDATED)
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)  # UPDATED
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process Discord message with simple memory
-        result = engine.process_discord_message_simple(
-            api_key=api_key,
-            user_message=request.message,
-            discord_user_id=request.discord_user_id,
-            channel_id=request.channel_id,
-            guild_id=request.guild_id,
-            max_context=request.max_context
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Simple Discord chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track conversation usage (UPDATED)
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=f"discord:{request.discord_user_id}",
-            platform="discord",
-            db=db
-        )
-        
-        logger.info(f"✅ Simple Discord chat successful - remembered {result.get('context_messages', 0)} previous messages")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in simple Discord chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-@router.get("/memory/simple/stats/{user_identifier}")
-async def get_simple_memory_stats(
-    user_identifier: str,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get simple memory statistics for a user - useful for debugging
-    """
-    try:
-        engine = ChatbotEngine(db)
-        result = engine.get_user_memory_stats(api_key, user_identifier)
-        
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting memory stats: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-@router.post("/memory/simple/cleanup")
-async def cleanup_simple_memory(
-    days_old: int = 90,  # More generous than the complex system
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Clean up old conversation sessions - simplified version
-    """
-    from app.chatbot.simple_memory import SimpleChatbotMemory
-    
-    engine = ChatbotEngine(db)
-    tenant = engine._get_tenant_by_api_key(api_key)
-    if not tenant:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    
-    memory = SimpleChatbotMemory(db, tenant.id)
-    cleaned_sessions = memory.cleanup_old_sessions(days_old)
-    
-    return {
-        "message": f"Cleaned up {cleaned_sessions} old sessions",
-        "days_old_threshold": days_old
-    }
-
-
-
-        
-
-
-
-    e
-
-
-
-@router.get("/analytics/conversations")
-async def get_conversation_analytics(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    days: int = 30
-):
-    """
-    Get conversation analytics for tenant (Advanced Analytics feature)
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Check if tenant has access to advanced analytics
-        from app.pricing.integration_helpers import check_feature_access_dependency
-        check_feature_access_dependency(tenant.id, "advanced_analytics", db)
-        
-        # Get conversation analytics
-        from app.pricing.integration_helpers import get_conversation_analytics
-        analytics = get_conversation_analytics(tenant.id, db, days)
-        
-        return {
-            "success": True,
-            "tenant_id": tenant.id,
-            "analytics": analytics
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting conversation analytics: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-
-@router.post("/conversation/end")
-async def end_conversation(
-    user_identifier: str,
-    platform: str = "web",
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Manually end a conversation session
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        from app.pricing.integration_helpers import end_conversation_session
-        success = end_conversation_session(tenant.id, user_identifier, platform, db)
-        
-        return {
-            "success": success,
-            "message": "Conversation ended successfully" if success else "No active conversation found"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error ending conversation: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-@router.post("/chat/slack/simple", response_model=ChatResponse)
-async def slack_chat_simple(
-    request: SlackChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Slack chat endpoint similar to Discord simple
-    - Remembers conversations per Slack channel
-    - Supports thread awareness
-    - Clean and simple like Discord endpoint
-    """
-    try:
-        logger.info(f"💬 Slack chat for user: {request.slack_user_id} in channel: {request.channel_id}")
-        
-        # Pricing check
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-        # Initialize chatbot engine
-        engine = ChatbotEngine(db)
-        
-        # Process Slack message with simple memory
-        result = engine.process_slack_message_simple_with_delay(
-            api_key=api_key,
-            user_message=request.message,
-            slack_user_id=request.slack_user_id,
-            channel_id=request.channel_id,
-            team_id=request.team_id,
-            max_context=request.max_context
-        )
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"❌ Slack chat error: {error_message}")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track conversation usage
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=f"slack:{request.slack_user_id}",
-            platform="slack",
-            db=db
-        )
-        
-        logger.info(f"✅ Slack chat successful - channel: {request.channel_id}")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in Slack chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-
-# @router.post("/chat/smart", response_model=ChatResponse)
-# async def chat_with_advanced_smart_feedback_enhanced(
-#     request: SmartChatRequest,
-#     enable_streaming: bool = False,
-#     api_key: str = Header(..., alias="X-API-Key"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Enhanced smart feedback endpoint with email collection and auto-generated user IDs
-    
-#     Features:
-#     - Auto-generates user IDs when not provided
-#     - 30-day email memory system
-#     - Smart feedback detection for inadequate responses
-#     - Cross-session conversation continuity
-#     """
-#     if enable_streaming:
-#         raise HTTPException(status_code=500, detail="Streaming functionality is not implemented.")
-    
-#     try:
-#         user_id = request.user_identifier
-#         auto_generated = False
-        
-#         # Auto-generate user ID if empty or temporary
-#         if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#             user_id = f"auto_{str(uuid.uuid4())}"
-#             auto_generated = True
-#             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-#         else:
-#             logger.debug(f"👤 Using provided user_identifier: {user_id}")
-        
-#         # Check tenant limits
-#         tenant = get_tenant_from_api_key(api_key, db)
-#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-#         # Process message with advanced feedback
-#         engine = ChatbotEngine(db)
-#         result = engine.process_web_message_with_advanced_feedback_llm(
-#             api_key=api_key,
-#             user_message=request.message,
-#             user_identifier=user_id,
-#             max_context=request.max_context,
-#             use_smart_llm=True
-#         )
-        
-#         if not result.get("success"):
-#             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-#         # Track conversation usage
-#         track_conversation_started_with_super_tenant(
-#             tenant_id=tenant.id,
-#             user_identifier=user_id,
-#             platform="web",
-#             db=db
-#         )
-        
-#         # Add user ID to response for frontend persistence
-#         result["user_id"] = user_id
-#         result["auto_generated_user_id"] = auto_generated
-        
-#         logger.info("✅ Smart feedback chat completed successfully")
-#         return result
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-
-
-
-# @router.post("/chat/smart", response_model=ChatResponse) 
-# async def chat_with_advanced_smart_feedback_enhanced(
-#     request: SmartChatRequest,
-#     api_key: str = Header(..., alias="X-API-Key"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-
-#     0222
-#     Enhanced smart feedback endpoint with email collection and auto-generated user IDs
-    
-#     Features:
-#     - Auto-generates user IDs when not provided
-#     - 30-day email memory system
-#     - Smart feedback detection for inadequate responses
-#     - Cross-session conversation continuity
-#     - PROPER FORMATTING with bullet points and structure
-#     """
-    
-#     try:
-#         user_id = request.user_identifier
-#         auto_generated = False
-        
-#         # Auto-generate user ID if empty or temporary
-#         if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#             user_id = f"auto_{str(uuid.uuid4())}"
-#             auto_generated = True
-#             logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-#         else:
-#             logger.debug(f"👤 Using provided user_identifier: {user_id}")
-        
-#         # Check tenant limits
-#         tenant = get_tenant_from_api_key(api_key, db)
-#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-#         # Process message with advanced feedback
-#         engine = ChatbotEngine(db)
-#         result = engine.process_web_message_with_advanced_feedback_llm(
-#             api_key=api_key,
-#             user_message=request.message,
-#             user_identifier=user_id,
-#             max_context=request.max_context,
-#             use_smart_llm=True  # This should enable better formatting
-#         )
-        
-#         if not result.get("success"):
-#             raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-#         # Track conversation usage
-#         track_conversation_started_with_super_tenant(
-#             tenant_id=tenant.id,
-#             user_identifier=user_id,
-#             platform="web",
-#             db=db
-#         )
-        
-#         # Add user ID to response for frontend persistence
-#         result["user_id"] = user_id
-#         result["auto_generated_user_id"] = auto_generated
-        
-#         logger.info("✅ Smart feedback chat completed successfully with proper formatting")
-#         return result
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"💥 Error in smart feedback chat: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-# Add a specific model for the enhanced smart request
-class SmartChatStreamingRequest(BaseModel):
-    message: str
-    user_identifier: str
-    max_context: int = 20
-    enable_streaming: bool = True
-
-# You could also create a dedicated streaming endpoint that's more explicit
-@router.post("/chat/smart-streaming")
-async def smart_chat_streaming_dedicated(
-    request: SmartChatStreamingRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Dedicated streaming endpoint for smart feedback chat
-    """
-    # Call the regular smart chat endpoint instead
-    return await chat_with_advanced_smart_feedback_enhanced(
-        SmartChatRequest(
-            message=request.message,
-            user_identifier=request.user_identifier,
-            max_context=request.max_context
-        ),
-        False,  # enable_streaming=False
-        api_key,
-        db
-    )
-
-
-
-
-@router.post("/chat/smart/old", response_model=ChatResponse)
-async def chat_with_advanced_smart_feedback(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Advanced web chat endpoint with enhanced smart feedback system."""
-    try:
-        logger.info(f"🧠📧 Advanced smart feedback chat for: {request.user_identifier}")
-        
-        # 🆕 NEW: Auto-generate UUID if user_identifier is missing or looks temporary
-        user_id = request.user_identifier
-        auto_generated = False
-        
-        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-            user_id = f"auto_{str(uuid.uuid4())}"
-            auto_generated = True
-            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-        else:
-            logger.info(f"👤 Using provided user_identifier: {user_id}")
-        
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-        engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback_llm(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=user_id,  # 🆕 Use the processed user_id
-            max_context=request.max_context,
-            use_smart_llm=True
-        )
-        
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=user_id,  # 🆕 Use the processed user_id
-            platform="web",
-            db=db
-        )
-        
-        logger.info("✅ Advanced smart feedback chat successful")
-        
-        # 🆕 NEW: Add the user_id to response so frontend can store it
-        result["user_id"] = user_id
-        result["auto_generated_user_id"] = auto_generated
-        
-        return result
-        
-    except HTTPException as e:
-        logger.error(f"HTTP exception in smart chat: {e.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in advanced smart feedback chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-# Add webhook endpoint for processing email replies
-@router.post("/webhook/email-reply")
-async def handle_email_reply_webhook(request: Request, db: Session = Depends(get_db)):
-    """Handle incoming events from Resend with Svix signature verification."""
-    headers = request.headers
-    try:
-        payload = await request.body()
-    except Exception as e:
-        logger.error(f"Could not read request body: {e}")
-        raise HTTPException(status_code=400, detail="Invalid request body")
-
-    expected_secret = os.getenv("WEBHOOK_SECRET")
-    if not expected_secret:
-        logger.error("CRITICAL: WEBHOOK_SECRET environment variable not set.")
-        raise HTTPException(status_code=500, detail="Webhook secret not configured on the server.")
-
-    try:
-        wh = Webhook(expected_secret)
-        webhook_data = wh.verify(payload, headers)
-        logger.info("✅ Webhook signature verified successfully.")
-    except WebhookVerificationError as e:
-        logger.warning(f"Webhook signature verification failed: {e}")
-        raise HTTPException(status_code=403, detail="Invalid signature.")
-
-    # Process only the inbound email event, ignore others like 'sent' or 'delivered'
-    if webhook_data.get("type") == "inbound.email.created":
-        try:
-            logger.info(f"📨 Received verified inbound email: {webhook_data.get('data', {}).get('subject')}")
-            # Logic to process the inbound email reply would go here if needed in the future.
-            # For the form-based system, we can just acknowledge receipt.
-            return {"success": True, "message": "Inbound email processed."}
-        except Exception as e:
-            logger.error(f"💥 Error processing inbound email: {e}")
-            raise HTTPException(status_code=500, detail="Webhook processing failed")
-    else:
-        # Acknowledge other event types without processing them
-        logger.info(f"Received and acknowledged non-critical webhook event: {webhook_data.get('type')}")
-        return {"success": True, "message": f"Event '{webhook_data.get('type')}' acknowledged."}
-
-# Enhanced feedback analytics endpoint
-@router.get("/feedback/analytics")
-async def get_advanced_feedback_analytics(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    days: int = 30
-):
-    """
-    Get comprehensive feedback analytics with real-time data
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Initialize advanced feedback manager
-        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
-        
-        # Get comprehensive analytics
-        analytics = feedback_manager.get_feedback_analytics(days)
-        
-        return {
-            "success": True,
-            "tenant_id": tenant.id,
-            "tenant_name": tenant.name,
-            "analytics": analytics
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting advanced feedback analytics: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# Enhanced pending feedback endpoint
-@router.get("/feedback/pending/advanced")
-async def get_advanced_pending_feedback(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    limit: int = 20
-):
-    """
-    Get enhanced list of pending feedback requests with tracking info
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
-        pending_requests = feedback_manager.get_pending_feedback_list(limit)
-        
-        return {
-            "success": True,
-            "pending_requests": pending_requests,
-            "total_count": len(pending_requests),
-            "tenant_id": tenant.id
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting advanced pending feedback: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# Retry failed notification endpoint
-@router.post("/feedback/retry/{feedback_id}")
-async def retry_feedback_notification(
-    feedback_id: str,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Retry sending tenant notification for failed feedback
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
-        success = feedback_manager.retry_failed_notification(feedback_id)
-        
-        if success:
-            return {"success": True, "message": f"Notification retry successful for {feedback_id}"}
-        else:
-            return {"success": False, "message": f"Notification retry failed for {feedback_id}"}
-        
-    except Exception as e:
-        logger.error(f"Error retrying feedback notification: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# Test email endpoint for debugging
-@router.post("/feedback/test-email")
-async def test_feedback_email(
-    test_email: str,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Test endpoint to send a sample feedback email (for debugging)
-    """
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
-        
-        # Create test feedback request
-        test_feedback_id = str(uuid.uuid4())
-        test_context = [
-            {"role": "user", "content": "Hello, I need help with my account"},
-            {"role": "assistant", "content": "I'm sorry, I don't have information about account issues"}
-        ]
-        
-        # Mock tenant object for testing
-        class MockTenant:
-            def __init__(self, email, name):
-                self.email = email
-                self.name = name
-        
-        mock_tenant = MockTenant(test_email, tenant.name)
-        
-        # Send test notification
-        success, email_id = feedback_manager._send_tenant_notification_advanced(
-            feedback_id=test_feedback_id,
-            tenant=mock_tenant,
-            user_question="Test question: How do I reset my password?",
-            bot_response="I'm sorry, I don't have information about password reset procedures.",
-            conversation_context=test_context,
-            user_email="testuser@example.com"
-        )
-        
-        if success:
-            return {
-                "success": True,
-                "message": f"Test email sent successfully to {test_email}",
-                "email_id": email_id,
-                "feedback_id": test_feedback_id
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"Failed to send test email to {test_email}"
-            }
-        
-    except Exception as e:
-        logger.error(f"Error sending test email: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-    
-
-@router.get("/feedback/form/{feedback_id}", response_class=HTMLResponse)
-async def get_feedback_form(request: Request, feedback_id: str, db: Session = Depends(get_db)):
-    """Serves the enhanced HTML form to the tenant with business info"""
-    logger.info(f"Serving enhanced feedback form for ID: {feedback_id}")
-    
-    # Get feedback record to check status and get business info
-    feedback_record = db.query(PendingFeedback).filter(
-        PendingFeedback.feedback_id == feedback_id
-    ).first()
-    
-    if not feedback_record:
-        return HTMLResponse(content="""
-            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
-                <h1>Form Not Found</h1>
-                <p>This feedback form does not exist or has been removed.</p>
-            </div>
-        """, status_code=404)
-    
-    # Check if form is already expired/submitted
-    if feedback_record.form_expired or feedback_record.user_notified:
-        return HTMLResponse(content="""
-            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
-                <h1>⏰ Form Expired</h1>
-                <p>This feedback form has already been used or has expired for security reasons.</p>
-                <p>If you need to provide additional feedback, please contact support.</p>
-            </div>
-        """, status_code=410)
-    
-    # Mark form as accessed
-    if not feedback_record.form_accessed:
-        feedback_record.form_accessed = True
-        feedback_record.form_accessed_at = datetime.utcnow()
-        db.commit()
-    
-    # Get business name
-    tenant = db.query(Tenant).filter(Tenant.id == feedback_record.tenant_id).first()
-    business_name = getattr(tenant, 'business_name', 'Your Business') if tenant else 'Your Business'
-    
-    # Read the enhanced template file
-    try:
-        with open("templates/enhanced_feedback_form.html", "r") as f:
-            template_content = f.read()
-        
-        # Replace template variables
-        template_content = template_content.replace("{{ feedback_id }}", feedback_id)
-        template_content = template_content.replace("{{ business_name | default('Your Business') }}", business_name)
-        template_content = template_content.replace("{{ user_question | default('') }}", feedback_record.user_question or "")
-        
-        return HTMLResponse(content=template_content)
-        
-    except FileNotFoundError:
-        # Fallback to inline template if file not found
-        logger.warning("Enhanced feedback form template file not found, using inline template")
-        return templates.TemplateResponse(
-            "feedback_form.html",  # Your existing template
-            {
-                "request": request, 
-                "feedback_id": feedback_id,
-                "business_name": business_name,
-                "user_question": feedback_record.user_question
-            }
-        )
-
-@router.post("/feedback/submit")
-async def handle_enhanced_feedback_submission(
-    feedback_id: str = Form(...),
-    tenant_response: str = Form(...),
-    add_to_faq: bool = Form(False),
-    db: Session = Depends(get_db)
-):
-    """Enhanced feedback submission with simplified FAQ integration"""
-    logger.info(f"Received enhanced feedback submission for ID: {feedback_id}")
-    
-    feedback_record = db.query(PendingFeedback).filter(
-        PendingFeedback.feedback_id == feedback_id
-    ).first()
-    
-    if not feedback_record:
-        raise HTTPException(status_code=404, detail="Feedback ID not found.")
-    
-    # Check if already processed
-    if feedback_record.form_expired or feedback_record.user_notified:
-        return HTMLResponse(content="""
-            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
-                <h1>⏰ Form Already Processed</h1>
-                <p>This feedback form has already been submitted.</p>
-            </div>
-        """, status_code=410)
-    
-    try:
-        # Store the enhanced response data
-        feedback_record.tenant_response = tenant_response.strip()
-        feedback_record.add_to_faq = add_to_faq
-        
-        # If user wants to add to FAQ, use the original question and tenant response
-        if add_to_faq:
-            feedback_record.faq_question = feedback_record.user_question
-            feedback_record.faq_answer = tenant_response.strip()
-            
-            # Create FAQ entry automatically
-            try:
-                new_faq = FAQ(
-                    tenant_id=feedback_record.tenant_id,
-                    question=feedback_record.user_question,
-                    answer=tenant_response.strip()
-                )
-                db.add(new_faq)
-                feedback_record.faq_created = True
-                logger.info(f"✅ Created FAQ entry for feedback {feedback_id}")
-            except Exception as faq_error:
-                logger.error(f"❌ Failed to create FAQ: {faq_error}")
-        
-        # Mark form as expired to prevent reuse
-        feedback_record.form_expired = True
-        feedback_record.status = "responded"
-        
-        # Process the tenant response (send to customer)
-        feedback_manager = AdvancedSmartFeedbackManager(db, feedback_record.tenant_id)
-        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
-        
-        if success:
-            db.commit()
-            
-            success_message = "Thank you! Your response has been sent to the customer."
-            if feedback_record.faq_created:
-                success_message += " The question and answer have also been added to your FAQ section."
-            
-            return HTMLResponse(content=f"""
-                <div style='font-family: Inter, sans-serif; text-align: center; padding: 60px 40px; max-width: 600px; margin: 0 auto;'>
-                    <div style='background: linear-gradient(135deg, #6B46C1, #9333EA); color: white; padding: 30px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.1);'>
-                        <div style='font-size: 48px; margin-bottom: 20px;'>✅</div>
-                        <h1 style='margin: 0 0 15px 0; font-size: 24px;'>Response Sent Successfully!</h1>
-                        <p style='margin: 0; font-size: 16px; opacity: 0.9;'>{success_message}</p>
-                        <div style='margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 14px; opacity: 0.8;'>
-                            This form has been securely closed and cannot be used again.
-                        </div>
-                    </div>
-                </div>
-            """, status_code=200)
-        else:
-            raise HTTPException(status_code=500, detail="Failed to process feedback.")
-            
-    except Exception as e:
-        logger.error(f"Error processing enhanced feedback: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to process feedback.")
-
-
-
-@router.get("/tenant-info")
-async def get_tenant_info_for_frontend(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get tenant information for frontend chatbot widget
-    Returns business name and branding info for the chatbot header
-    """
-    try:
-        # Get tenant from API key
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Return essential info for frontend
-        return {
-            "success": True,
-            "business_name": tenant.business_name,
-            "tenant_name": tenant.name,  # Fallback if business_name is empty
-            "display_name": tenant.business_name or tenant.name,
-            "branding": {
-                "primary_color": "#6d28d9",  # Default purple, could be customizable later
-                "logo_text": (tenant.business_name or tenant.name)[:2].upper(),  # First 2 letters for logo
-                "welcome_message": f"Hey there! I'm the AI assistant for {tenant.business_name or tenant.name}. How can I help you today?"
-            }
-        }
-        
-    except HTTPException as e:
-        # Return error for invalid API key
-        return {
-            "success": False,
-            "error": "Invalid API key",
-            "business_name": "Chatbot",  # Fallback
-            "display_name": "Chatbot",
-            "branding": {
-                "primary_color": "#6d28d9",
-                "logo_text": "AI",
-                "welcome_message": "Hello! How can I assist you today?"
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error getting tenant info: {str(e)}")
-        return {
-            "success": False,
-            "error": "Server error",
-            "business_name": "Chatbot",
-            "display_name": "Chatbot", 
-            "branding": {
-                "primary_color": "#6d28d9",
-                "logo_text": "AI",
-                "welcome_message": "Hello! How can I assist you today?"
-            }
-        }
-
-
-
-
-
-
-
-@router.get("/security/analytics")
-async def get_security_analytics(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    days: int = 30
-):
-    """Get comprehensive security analytics for the tenant"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        security_manager = SecurityPromptManager(db, tenant.id)
-        analytics = security_manager.get_security_analytics(days)
-        
-        return analytics
-        
-    except Exception as e:
-        logger.error(f"Error getting security analytics: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/security/incidents")
-async def get_security_incidents(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    limit: int = 50,
-    reviewed: Optional[bool] = None
-):
-    """Get list of security incidents for the tenant"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        query = db.query(SecurityIncident).filter(
-            SecurityIncident.tenant_id == tenant.id
-        )
-        
-        if reviewed is not None:
-            query = query.filter(SecurityIncident.reviewed == reviewed)
-        
-        incidents = query.order_by(
-            SecurityIncident.detected_at.desc()
-        ).limit(limit).all()
-        
-        incidents_data = []
-        for incident in incidents:
-            incidents_data.append({
-                "id": incident.id,
-                "user_identifier": incident.user_identifier,
-                "platform": incident.platform,
-                "risk_type": incident.risk_type,
-                "severity_score": incident.severity_score,
-                "detected_at": incident.detected_at.isoformat(),
-                "reviewed": incident.reviewed,
-                "user_message_preview": incident.user_message[:100] + "..." if len(incident.user_message) > 100 else incident.user_message
-            })
-        
-        return {
-            "success": True,
-            "incidents": incidents_data,
-            "total_count": len(incidents_data)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting security incidents: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-@router.get("/security/incidents/{incident_id}")
-async def get_security_incident_details(
-    incident_id: int,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Get detailed information about a specific security incident"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        security_manager = SecurityPromptManager(db, tenant.id)
-        incident_details = security_manager.get_incident_details(incident_id)
-        
-        if not incident_details:
-            raise HTTPException(status_code=404, detail="Security incident not found")
-        
-        return {
-            "success": True,
-            "incident": incident_details
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting incident details: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-class IncidentReviewRequest(BaseModel):
-    reviewer_notes: Optional[str] = None
-
-@router.post("/security/incidents/{incident_id}/review")
-async def mark_incident_reviewed(
-    incident_id: int,
-    request: IncidentReviewRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Mark a security incident as reviewed"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        security_manager = SecurityPromptManager(db, tenant.id)
-        success = security_manager.mark_incident_reviewed(
-            incident_id, 
-            request.reviewer_notes
-        )
-        
-        if not success:
-            raise HTTPException(status_code=404, detail="Security incident not found")
-        
-        return {
-            "success": True,
-            "message": f"Incident {incident_id} marked as reviewed"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error marking incident as reviewed: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/security/cleanup")
-async def cleanup_old_security_incidents(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-    days_old: int = 90
-):
-    """Clean up old reviewed security incidents"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        security_manager = SecurityPromptManager(db, tenant.id)
-        cleaned_count = security_manager.cleanup_old_incidents(days_old)
-        
-        return {
-            "success": True,
-            "message": f"Cleaned up {cleaned_count} old security incidents",
-            "days_threshold": days_old
-        }
-        
-    except Exception as e:
-        logger.error(f"Error cleaning up security incidents: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-class SecuritySettingsRequest(BaseModel):
-    security_level: str = "standard"  # standard, strict, custom
-    allow_custom_prompts: bool = True
-    security_notifications_enabled: bool = True
-
-@router.post("/security/settings")
-async def update_security_settings(
-    request: SecuritySettingsRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Update tenant security settings"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Validate security level
-        valid_levels = ["standard", "strict", "custom"]
-        if request.security_level not in valid_levels:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid security level. Must be one of: {valid_levels}"
-            )
-        
-        # Update tenant security settings
-        tenant.security_level = request.security_level
-        tenant.allow_custom_prompts = request.allow_custom_prompts
-        tenant.security_notifications_enabled = request.security_notifications_enabled
-        
-        db.commit()
-        
-        logger.info(f"Updated security settings for tenant {tenant.id}")
-        
-        return {
-            "success": True,
-            "message": "Security settings updated successfully",
-            "settings": {
-                "security_level": tenant.security_level,
-                "allow_custom_prompts": tenant.allow_custom_prompts,
-                "security_notifications_enabled": tenant.security_notifications_enabled
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating security settings: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/security/settings")
-async def get_security_settings(
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Get current tenant security settings"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        return {
-            "success": True,
-            "settings": {
-                "security_level": getattr(tenant, 'security_level', 'standard'),
-                "allow_custom_prompts": getattr(tenant, 'allow_custom_prompts', True),
-                "security_notifications_enabled": getattr(tenant, 'security_notifications_enabled', True),
-                "system_prompt_configured": bool(getattr(tenant, 'system_prompt', None)),
-                "system_prompt_validated": getattr(tenant, 'system_prompt_validated', False)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting security settings: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-
-
-
-@router.post("/chat/with-handoff", response_model=ChatResponse)
-async def chat_with_handoff_detection(
-    request: ChatRequest, 
-    api_key: str = Header(..., alias="X-API-Key"), 
-    db: Session = Depends(get_db)
-):
-    '''Enhanced chat endpoint that detects handoff requests'''
-    try:
-        # Check pricing limits first
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-        # Check for handoff triggers
-        if detect_handoff_triggers(request.message):
-            # Create live chat conversation
-            live_conversation = LiveChatConversation(
-                tenant_id=tenant.id,
-                customer_identifier=request.user_identifier,
-                handoff_reason="triggered",
-                handoff_trigger=request.message,
-                original_question=request.message,
-                status="queued"
-            )
-            
-            db.add(live_conversation)
-            db.commit()
-            db.refresh(live_conversation)
-            
-            # Add to queue
-            queue_service = LiveChatQueueService(db)
-            queue_result = queue_service.add_to_queue(
-                conversation_id=live_conversation.id,
-                priority=2,  # Higher priority for triggered handoffs
-                assignment_criteria={"source": "chatbot_trigger", "trigger": request.message}
-            )
-            
-            # Return handoff response
-            return {
-                "session_id": f"handoff_{live_conversation.id}",
-                "response": "I understand you'd like to speak with a human agent. I'm connecting you to our support team now. Please wait a moment...",
-                "success": True,
-                "is_new_session": True,
-                "handoff_triggered": True,
-                "live_chat_conversation_id": live_conversation.id,
-                "queue_position": queue_result.get("position"),
-                "estimated_wait_time": queue_result.get("estimated_wait_time")
-            }
-        
-        # Normal chatbot processing if no handoff triggered
-        engine = ChatbotEngine(db)
-        result = engine.process_message(api_key, request.message, request.user_identifier)
-        
-        if not result.get("success"):
-            error_message = result.get("error", "Unknown error")
-            raise HTTPException(status_code=400, detail=error_message)
-        
-        # Track message usage
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
-            platform="web",
-            db=db
-        )
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in handoff-enabled chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-
-
 def break_formatted_response_smartly(response: str) -> List[str]:
-    """
-    Break response into chunks while PRESERVING formatting structure
-    This is the key to maintaining formatting during streaming
-    """
-    import re
-    
+    """Break response into chunks while PRESERVING formatting structure"""
     # First, detect if response has formatting
     has_numbered_list = re.search(r'^\d+\.', response, re.MULTILINE)
     has_bullet_points = re.search(r'^[•\-\*]\s', response, re.MULTILINE) 
@@ -1730,10 +233,7 @@ def break_formatted_response_smartly(response: str) -> List[str]:
         return break_by_sentences_with_context(response)
 
 def break_by_logical_sections(response: str) -> List[str]:
-    """
-    Break formatted content by logical sections, not sentences
-    This preserves the structure of lists, steps, etc.
-    """
+    """Break formatted content by logical sections, not sentences"""
     chunks = []
     current_chunk = ""
     
@@ -1744,12 +244,12 @@ def break_by_logical_sections(response: str) -> List[str]:
         
         # Check if this line starts a new logical section
         is_new_section = (
-            re.match(r'^Step \d+:', line, re.IGNORECASE) or           # Step headers
-            re.match(r'^\d+\.', line) or                              # Numbered items  
-            re.match(r'^#{1,3}\s', line) or                          # Headers
-            re.match(r'^[•\-\*]\s', line) or                         # Bullet points
-            re.match(r'^\*\*.*\*\*:?$', line) or                     # Bold headers
-            (line.endswith(':') and len(line) < 50 and i < len(lines) - 1)  # Short lines ending with :
+            re.match(r'^Step \d+:', line, re.IGNORECASE) or
+            re.match(r'^\d+\.', line) or
+            re.match(r'^#{1,3}\s', line) or
+            re.match(r'^[•\-\*]\s', line) or
+            re.match(r'^\*\*.*\*\*:?$', line) or
+            (line.endswith(':') and len(line) < 50 and i < len(lines) - 1)
         )
         
         # If starting new section and we have content, yield current chunk
@@ -1765,10 +265,8 @@ def break_by_logical_sections(response: str) -> List[str]:
         
         # For very long sections, break them up
         if len(current_chunk) > 300 and not is_new_section:
-            # Look for good break points within the section
             sentences = re.split(r'(?<=[.!?])\s+', current_chunk)
             if len(sentences) > 1:
-                # Keep first part, start new chunk with remainder
                 break_point = len(sentences) // 2
                 chunks.append(' '.join(sentences[:break_point]).strip())
                 current_chunk = ' '.join(sentences[break_point:]) + '\n'
@@ -1780,12 +278,7 @@ def break_by_logical_sections(response: str) -> List[str]:
     return [chunk for chunk in chunks if chunk.strip()]
 
 def break_by_sentences_with_context(response: str) -> List[str]:
-    """
-    For unformatted text, break by sentences but keep context
-    """
-    import re
-    
-    # Split into sentences but preserve some context
+    """For unformatted text, break by sentences but keep context"""
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', response)
     chunks = []
     
@@ -1793,7 +286,6 @@ def break_by_sentences_with_context(response: str) -> List[str]:
     while i < len(sentences):
         chunk = sentences[i]
         
-        # If sentence is very short, combine with next
         if len(chunk) < 50 and i < len(sentences) - 1:
             chunk += ' ' + sentences[i + 1]
             i += 1
@@ -1804,12 +296,7 @@ def break_by_sentences_with_context(response: str) -> List[str]:
     return chunks
 
 def calculate_formatting_aware_delay(chunk: str) -> float:
-    """
-    Calculate delay based on chunk content and complexity
-    Longer delays for headers, shorter for list items
-    """
-    import re
-    
+    """Calculate delay based on chunk content and complexity"""
     base_delay = 0.8
     
     # Headers need more thinking time
@@ -1824,126 +311,8 @@ def calculate_formatting_aware_delay(chunk: str) -> float:
     length_factor = min(len(chunk) / 100, 2.0)
     return base_delay + length_factor
 
-
-
-@router.post("/chat/smart/with-followup")
-async def smart_chat_with_followup_streaming(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Smart chat with instant main response + streamed follow-up suggestions
-    Perfect balance of speed and conversational engagement
-    """
-    
-    async def stream_with_followups():
-        try:
-            logger.info(f"🚀 Smart chat with follow-up streaming for: {request.user_identifier}")
-            
-            # Get tenant and check limits
-            tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-            
-            # Auto-generate user ID if needed
-            user_id = request.user_identifier
-            auto_generated = False
-            
-            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-                user_id = f"auto_{str(uuid.uuid4())}"
-                auto_generated = True
-            
-            # Send initial metadata
-            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
-            
-            # Get main response from chatbot (instant)
-            engine = ChatbotEngine(db)
-            result = engine.process_web_message_with_advanced_feedback_llm(
-                api_key=api_key,
-                user_message=request.message,
-                user_identifier=user_id,
-                max_context=request.max_context,
-                use_smart_llm=True
-            )
-            
-            if not result.get("success"):
-                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-                return
-            
-            # Track conversation
-            track_conversation_started_with_super_tenant(
-                tenant_id=tenant.id,
-                user_identifier=user_id,
-                platform="web",
-                db=db
-            )
-            
-            # Send main response INSTANTLY (no streaming)
-            main_response = {
-                'type': 'main_response',
-                'content': result["response"],
-                'session_id': result.get('session_id'),
-                'answered_by': result.get('answered_by'),
-                'email_captured': result.get('email_captured', False),
-                'feedback_triggered': result.get('feedback_triggered', False)
-            }
-            yield f"{json.dumps(main_response)}\n"
-            
-            # Wait a moment before follow-ups (feels natural)
-            await asyncio.sleep(1.5)
-            
-            # Generate and stream follow-up suggestions
-            should_generate, followups = should_generate_followups_llm(
-                request.message, 
-                result["response"], 
-                tenant.name
-            )
-
-            if not should_generate:
-                logger.info(f"🚫 No follow-ups needed for this interaction")
-                followups = []
-            
-            if followups:
-                for i, followup in enumerate(followups):
-                    # Natural delay between follow-ups
-                    if i > 0:
-                        delay = calculate_followup_delay(followup)
-                        await asyncio.sleep(delay)
-                    
-                    followup_data = {
-                        'type': 'followup',
-                        'content': followup,
-                        'index': i,
-                        'is_last': i == len(followups) - 1
-                    }
-                    yield f"{json.dumps(followup_data)}\n"
-            
-            # Send completion signal
-            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0})}\n"
-            
-            logger.info(f"✅ Smart chat with follow-ups completed")
-            
-        except HTTPException as e:
-            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-        except Exception as e:
-            logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
-            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-    return StreamingResponse(
-        stream_with_followups(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
 def should_generate_followups_llm(user_question: str, bot_response: str, company_name: str) -> tuple[bool, List[str]]:
-    """
-    Use LLM to intelligently decide if follow-ups are needed and generate them
-    Returns: (should_generate, followup_list)
-    """
+    """Use LLM to intelligently decide if follow-ups are needed and generate them"""
     from langchain_openai import ChatOpenAI
     from langchain.prompts import PromptTemplate
     
@@ -2022,13 +391,10 @@ Response:"""
             
     except Exception as e:
         logger.error(f"Error in LLM follow-up generation: {e}")
-        # Fallback to simple rules
         return should_generate_followups_simple(user_question, bot_response)
 
 def should_generate_followups_simple(user_question: str, bot_response: str) -> tuple[bool, List[str]]:
     """Fallback simple rules if LLM fails"""
-    
-    # Skip follow-ups for simple cases
     user_lower = user_question.lower()
     response_lower = bot_response.lower()
     
@@ -2056,91 +422,1277 @@ def should_generate_followups_simple(user_question: str, bot_response: str) -> t
     return False, []
 
 def calculate_followup_delay(followup: str) -> float:
-    """
-    Calculate natural delay for follow-up questions
-    Shorter delays for follow-ups to feel conversational
-    """
-    base_delay = 1.2  # Slightly faster than main content
-    
-    # Longer questions need slightly more time
+    """Calculate natural delay for follow-up questions"""
+    base_delay = 1.2
     length_factor = min(len(followup) / 150, 1.0)
-    
-    # Add some natural variation
-    import random
     variation = random.uniform(0.8, 1.2)
-    
     return (base_delay + length_factor) * variation
 
-# Also update your existing /chat/smart endpoint to optionally redirect to follow-up version
-@router.post("/chat/smart", response_model=ChatResponse)
-async def chat_with_advanced_smart_feedback_enhanced(
+def analyze_conversation_context_llm(current_message: str, conversation_history: List[Dict], 
+                                   company_name: str) -> Dict[str, Any]:
+    """Use LLM to analyze conversation context and detect topic changes"""
+    from langchain_openai import ChatOpenAI
+    from langchain.prompts import PromptTemplate
+    
+    # Format recent conversation history
+    history_text = ""
+    if conversation_history and len(conversation_history) > 1:
+        recent_history = conversation_history[-6:]  # Last 3 exchanges
+        for msg in recent_history:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            history_text += f"{role}: {msg['content'][:100]}...\n"
+    
+    prompt = PromptTemplate(
+        input_variables=["current_message", "history", "company_name"],
+        template="""You are a conversation context analyzer for {company_name}'s customer service chatbot.
+
+CURRENT USER MESSAGE: "{current_message}"
+
+RECENT CONVERSATION HISTORY:
+{history}
+
+TASK: Analyze if the user is continuing the previous topic or starting fresh.
+
+DECISION RULES:
+- If user says "hello/hi/hey" after discussing a specific topic → TOPIC_CHANGE
+- If user asks completely different question → TOPIC_CHANGE  
+- If user asks follow-up about same topic → CONTINUATION
+- If no conversation history → NEW_CONVERSATION
+
+RESPONSE FORMAT:
+ANALYSIS: TOPIC_CHANGE / CONTINUATION / NEW_CONVERSATION
+PREVIOUS_TOPIC: [brief topic description or NONE]
+SUGGESTED_APPROACH: [how bot should handle this]
+
+Example: "Still working on Slack setup, or need help with something else?"
+
+Analysis:"""
+    )
+    
+    try:
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.2,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        result = llm.invoke(prompt.format(
+            current_message=current_message,
+            history=history_text if history_text else "No previous conversation",
+            company_name=company_name
+        ))
+        
+        response_text = result.content if hasattr(result, 'content') else str(result)
+        
+        # Parse LLM response
+        analysis = {}
+        lines = response_text.split('\n')
+        
+        for line in lines:
+            if line.startswith('ANALYSIS:'):
+                analysis['type'] = line.replace('ANALYSIS:', '').strip()
+            elif line.startswith('PREVIOUS_TOPIC:'):
+                analysis['previous_topic'] = line.replace('PREVIOUS_TOPIC:', '').strip()
+            elif line.startswith('SUGGESTED_APPROACH:'):
+                analysis['suggested_approach'] = line.replace('SUGGESTED_APPROACH:', '').strip()
+        
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Error in context analysis: {e}")
+        return {'type': 'CONTINUATION', 'previous_topic': 'Unknown', 'suggested_approach': 'Continue normally'}
+
+def handle_topic_change_response(current_message: str, previous_topic: str, 
+                               suggested_approach: str, company_name: str) -> str:
+    """Generate appropriate response for topic changes"""
+    greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon']
+    
+    if any(greeting in current_message.lower() for greeting in greetings):
+        if previous_topic and previous_topic != 'NONE':
+            return f"Hi there! I see we were discussing {previous_topic}. {suggested_approach}"
+        else:
+            return f"Hello! I'm {company_name}'s AI assistant. How can I help you today?"
+    
+    # For other topic changes
+    if previous_topic and previous_topic != 'NONE':
+        return f"I notice you're asking about something different now. {suggested_approach}"
+    
+    return None
+
+# ============================================================================
+# MAIN CHAT ENDPOINTS
+# ============================================================================
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
+    """Send a message to the chatbot and get a response"""
+    try:
+        logger.info(f"💬 Processing chat request with API key: {api_key[:10]}...")
+        logger.info(f"📝 Message: {request.message[:50]}...")
+        
+        # Get tenant and check conversation limits
+        logger.info("🔍 Getting tenant from API key...")
+        tenant = get_tenant_from_api_key(api_key, db)
+        logger.info(f"✅ Found tenant: {tenant.name} (ID: {tenant.id})")
+        
+        logger.info("🚦 Checking conversation limits...")
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        logger.info("✅ Conversation limit check passed")
+        
+        # Initialize chatbot engine
+        logger.info("🤖 Initializing chatbot engine...")
+        engine = ChatbotEngine(db)
+        
+        # Process message
+        logger.info("⚡ Processing message with chatbot engine...")
+        result = engine.process_message(api_key, request.message, request.user_identifier)
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Chatbot error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track conversation usage
+        logger.info("📊 Tracking conversation usage...")
+        track_success = track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=request.user_identifier,
+            platform="web", 
+            db=db
+        )
+        logger.info(f"📈 Conversation tracking result: {track_success}")
+        
+        logger.info(f"✅ Chat successful, response length: {len(result.get('response', ''))}")
+        
+        return result
+    except HTTPException:
+        logger.error("🚫 HTTP Exception occurred (conversation limit or other)")
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in chat endpoint: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, 
+            detail="An internal server error occurred. Please try again later."
+        )
+
+
+
+@router.post("/chat/smart")
+async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
-    enable_followups: bool = False,  # New parameter
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Enhanced smart feedback endpoint with optional follow-up streaming
-    
-    If enable_followups=True, redirects to streaming version with follow-ups
-    Otherwise, provides instant response as before
+    Smart chat with instant main response + streamed follow-up suggestions
+    NOW WITH: Intelligent topic change detection using LLM
     """
     
-    # If follow-ups requested, redirect to streaming endpoint
-    if enable_followups:
-        logger.info("🔄 Follow-ups requested, using streaming implementation")
-        # Note: In production, you might want to redirect or handle this differently
-        # For now, we'll process normally but log the request
+    async def stream_with_followups():
+        try:
+            logger.info(f"🚀 Smart chat with follow-up streaming + context analysis for: {request.user_identifier}")
+            
+            # Get tenant and check limits
+            tenant = get_tenant_from_api_key(api_key, db)
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+            # Auto-generate user ID if needed
+            user_id = request.user_identifier
+            auto_generated = False
+            
+            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+                user_id = f"auto_{str(uuid.uuid4())}"
+                auto_generated = True
+            
+            # Send initial metadata
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
+            
+            # Get conversation history for context analysis
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            memory = SimpleChatbotMemory(db, tenant.id)
+            conversation_history = memory.get_conversation_history(user_id, request.max_context)
+            
+            # Analyze conversation context with LLM
+            context_analysis = None
+            topic_change_response = None
+            
+            if conversation_history and len(conversation_history) > 1:
+                context_analysis = analyze_conversation_context_llm(
+                    request.message, 
+                    conversation_history, 
+                    tenant.name
+                )
+                
+                logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
+                
+                # Handle topic changes
+                if context_analysis.get('type') == 'TOPIC_CHANGE':
+                    topic_change_response = handle_topic_change_response(
+                        request.message,
+                        context_analysis.get('previous_topic'),
+                        context_analysis.get('suggested_approach'),
+                        tenant.name
+                    )
+            
+            # If topic change detected, send that response instead
+            if topic_change_response:
+                logger.info(f"🔄 Topic change detected, sending bridge response")
+                
+                # Send topic change response as main response
+                main_response = {
+                    'type': 'main_response',
+                    'content': topic_change_response,
+                    'session_id': f"topic_change_{uuid.uuid4()}",
+                    'answered_by': 'TOPIC_CHANGE_DETECTION',
+                    'context_analysis': context_analysis
+                }
+                yield f"{json.dumps(main_response)}\n"
+                
+                # Wait a moment, then ask clarifying follow-up
+                await asyncio.sleep(1.5)
+                
+                clarifying_followup = {
+                    'type': 'followup',
+                    'content': "What would you like help with?",
+                    'index': 0,
+                    'is_last': True
+                }
+                yield f"{json.dumps(clarifying_followup)}\n"
+                
+                # Send completion
+                yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'topic_change': True})}\n"
+                return
+            
+            # Continue with normal processing if no topic change
+            engine = ChatbotEngine(db)
+            result = engine.process_web_message_with_advanced_feedback_llm(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=user_id,
+                max_context=request.max_context,
+                use_smart_llm=True
+            )
+            
+            if not result.get("success"):
+                yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
     
+    return StreamingResponse(
+        stream_with_followups(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+@router.post("/chat/simple", response_model=ChatResponse)
+async def chat_with_simple_memory(
+    request: SimpleChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Simple chat endpoint with basic conversation memory"""
     try:
-        user_id = request.user_identifier
-        auto_generated = False
+        logger.info(f"🧠 Simple memory chat for: {request.user_identifier}")
         
-        # Auto-generate user ID if empty or temporary
-        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-            user_id = f"auto_{str(uuid.uuid4())}"
-            auto_generated = True
-            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-        
-        # Check tenant limits
+        # Pricing check
         tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
-        # Process message with advanced feedback
+        # Initialize chatbot engine
         engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback_llm(
+        
+        # Process with simple memory
+        result = engine.process_message_simple_memory(
             api_key=api_key,
             user_message=request.message,
-            user_identifier=user_id,
-            max_context=request.max_context,
-            use_smart_llm=True
+            user_identifier=request.user_identifier,
+            platform="web",
+            max_context=request.max_context
         )
         
         if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Simple memory chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
         
         # Track conversation usage
         track_conversation_started_with_super_tenant(
             tenant_id=tenant.id,
-            user_identifier=user_id,
+            user_identifier=request.user_identifier,
             platform="web",
             db=db
         )
         
-        # Add user ID to response for frontend persistence
-        result["user_id"] = user_id
-        result["auto_generated_user_id"] = auto_generated
+        logger.info(f"✅ Simple memory chat successful - used {result.get('context_messages', 0)} context messages")
         
-        # If follow-ups were requested, add suggestion
-        if enable_followups:
-            result["followups_available"] = True
-            result["followup_endpoint"] = "/chat/smart/with-followup"
-        
-        logger.info("✅ Smart feedback chat completed successfully")
         return result
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"💥 Error in smart feedback chat: {str(e)}")
+        logger.error(f"💥 Error in simple memory chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/chat/delayed")
+async def chat_with_simple_sentence_streaming(
+    request: ChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Simplified streaming - Send JSON messages with realistic typing delays"""
+    
+    async def stream_sentences():
+        try:
+            logger.info(f"🎬 Starting streaming chat for API key: {api_key[:10]}...")
+            
+            # Get tenant and check limits
+            logger.info("🔍 Getting tenant and checking limits for streaming...")
+            tenant = get_tenant_from_api_key(api_key, db)
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            logger.info(f"✅ Streaming limits OK for tenant: {tenant.name}")
+            
+            start_time = time.time()
+            
+            # Get response
+            logger.info("🤖 Getting response from chatbot engine...")
+            engine = ChatbotEngine(db)
+            result = engine.process_message(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=request.user_identifier
+            )
+            
+            if not result.get("success"):
+                logger.error(f"❌ Streaming chat failed: {result.get('error')}")
+                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+                return
+            
+            logger.info("✅ Chatbot response received successfully")
+            
+            # Track conversation usage
+            logger.info("📊 Tracking streaming conversation usage...")
+            track_success = track_conversation_started_with_super_tenant(
+                tenant_id=tenant.id,
+                user_identifier=request.user_identifier,
+                platform="web",
+                db=db
+            )
+            logger.info(f"📈 Streaming conversation tracking result: {track_success}")
+            
+        except HTTPException as e:
+            logger.error(f"🚫 HTTP error in streaming: {e.detail}")
+            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error in streaming: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+    return StreamingResponse(
+        stream_sentences(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+@router.post("/chat/with-handoff", response_model=ChatResponse)
+async def chat_with_handoff_detection(
+    request: ChatRequest, 
+    api_key: str = Header(..., alias="X-API-Key"), 
+    db: Session = Depends(get_db)
+):
+    """Enhanced chat endpoint that automatically detects handoff requests"""
+    try:
+        # Check pricing limits first
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Check for handoff triggers
+        if detect_handoff_triggers(request.message):
+            # Create live chat conversation
+            live_conversation = LiveChatConversation(
+                tenant_id=tenant.id,
+                customer_identifier=request.user_identifier,
+                handoff_reason="triggered",
+                handoff_trigger=request.message,
+                original_question=request.message,
+                status="queued"
+            )
+            
+            db.add(live_conversation)
+            db.commit()
+            db.refresh(live_conversation)
+            
+            # Add to queue
+            queue_service = LiveChatQueueService(db)
+            queue_result = queue_service.add_to_queue(
+                conversation_id=live_conversation.id,
+                priority=2,
+                assignment_criteria={"source": "chatbot_trigger", "trigger": request.message}
+            )
+            
+            # Return handoff response
+            return {
+                "session_id": f"handoff_{live_conversation.id}",
+                "response": "I understand you'd like to speak with a human agent. I'm connecting you to our support team now. Please wait a moment...",
+                "success": True,
+                "is_new_session": True,
+                "handoff_triggered": True,
+                "live_chat_conversation_id": live_conversation.id,
+                "queue_position": queue_result.get("position"),
+                "estimated_wait_time": queue_result.get("estimated_wait_time")
+            }
+        
+        # Normal chatbot processing if no handoff triggered
+        engine = ChatbotEngine(db)
+        result = engine.process_message(api_key, request.message, request.user_identifier)
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track message usage
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=request.user_identifier,
+            platform="web",
+            db=db
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in handoff-enabled chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ============================================================================
+# PLATFORM-SPECIFIC ENDPOINTS
+# ============================================================================
+
+@router.post("/chat/discord/simple", response_model=ChatResponse)
+async def discord_chat_simple(
+    request: SimpleDiscordRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Simplified Discord chat endpoint with basic memory"""
+    try:
+        logger.info(f"🎮 Simple Discord chat for user: {request.discord_user_id}")
+        
+        # Pricing check
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Initialize chatbot engine
+        engine = ChatbotEngine(db)
+        
+        # Process Discord message with simple memory
+        result = engine.process_discord_message_simple(
+            api_key=api_key,
+            user_message=request.message,
+            discord_user_id=request.discord_user_id,
+            channel_id=request.channel_id,
+            guild_id=request.guild_id,
+            max_context=request.max_context
+        )
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Simple Discord chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track conversation usage
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=f"discord:{request.discord_user_id}",
+            platform="discord",
+            db=db
+        )
+        
+        logger.info(f"✅ Simple Discord chat successful - remembered {result.get('context_messages', 0)} previous messages")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in simple Discord chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/chat/slack/simple", response_model=ChatResponse)
+async def slack_chat_simple(
+    request: SlackChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Slack chat endpoint similar to Discord simple"""
+    try:
+        logger.info(f"💬 Slack chat for user: {request.slack_user_id} in channel: {request.channel_id}")
+        
+        # Pricing check
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Initialize chatbot engine
+        engine = ChatbotEngine(db)
+        
+        # Process Slack message with simple memory
+        result = engine.process_slack_message_simple_with_delay(
+            api_key=api_key,
+            user_message=request.message,
+            slack_user_id=request.slack_user_id,
+            channel_id=request.channel_id,
+            team_id=request.team_id,
+            max_context=request.max_context
+        )
+        
+        if not result.get("success"):
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"❌ Slack chat error: {error_message}")
+            raise HTTPException(status_code=400, detail=error_message)
+        
+        # Track conversation usage
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=f"slack:{request.slack_user_id}",
+            platform="slack",
+            db=db
+        )
+        
+        logger.info(f"✅ Slack chat successful - channel: {request.channel_id}")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in Slack chat: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ============================================================================
+# UTILITY ENDPOINTS
+# ============================================================================
+
+@router.get("/ping")
+async def ping():
+    """Simple endpoint to test if the router is working"""
+    return {"message": "Chatbot router is working!"}
+
+@router.get("/history/{session_id}", response_model=ChatHistory)
+async def get_chat_history(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
+    """Get the chat history for a specific session"""
+    # Verify the API key and get tenant
+    engine = ChatbotEngine(db)
+    tenant = engine._get_tenant_by_api_key(api_key)
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    # Get session
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session or session.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get messages
+    messages = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at).all()
+    
+    return {
+        "session_id": session_id,
+        "messages": [
+            {
+                "content": msg.content,
+                "is_from_user": msg.is_from_user,
+                "created_at": msg.created_at.isoformat()
+            }
+            for msg in messages
+        ]
+    }
+
+@router.post("/end-session")
+async def end_chat_session(session_id: str, api_key: str = Header(..., alias="X-API-Key"), db: Session = Depends(get_db)):
+    """End a chat session"""
+    # Verify the API key and get tenant
+    engine = ChatbotEngine(db)
+    tenant = engine._get_tenant_by_api_key(api_key)
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    # Verify session belongs to tenant
+    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if not session or session.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # End session
+    success = engine.end_session(session_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to end session")
+    
+    return {"message": "Session ended successfully"}
+
+@router.get("/tenant-info")
+async def get_tenant_info_for_frontend(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get tenant information for frontend chatbot widget"""
+    try:
+        # Get tenant from API key
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Return essential info for frontend
+        return {
+            "success": True,
+            "business_name": tenant.business_name,
+            "tenant_name": tenant.name,
+            "display_name": tenant.business_name or tenant.name,
+            "branding": {
+                "primary_color": "#6d28d9",
+                "logo_text": (tenant.business_name or tenant.name)[:2].upper(),
+                "welcome_message": f"Hey there! I'm the AI assistant for {tenant.business_name or tenant.name}. How can I help you today?"
+            }
+        }
+        
+    except HTTPException as e:
+        # Return error for invalid API key
+        return {
+            "success": False,
+            "error": "Invalid API key",
+            "business_name": "Chatbot",
+            "display_name": "Chatbot",
+            "branding": {
+                "primary_color": "#6d28d9",
+                "logo_text": "AI",
+                "welcome_message": "Hello! How can I assist you today?"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting tenant info: {str(e)}")
+        return {
+            "success": False,
+            "error": "Server error",
+            "business_name": "Chatbot",
+            "display_name": "Chatbot", 
+            "branding": {
+                "primary_color": "#6d28d9",
+                "logo_text": "AI",
+                "welcome_message": "Hello! How can I assist you today?"
+            }
+        }
+
+# ============================================================================
+# MEMORY MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/memory/simple/stats/{user_identifier}")
+async def get_simple_memory_stats(
+    user_identifier: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get simple memory statistics for a user - useful for debugging"""
+    try:
+        engine = ChatbotEngine(db)
+        result = engine.get_user_memory_stats(api_key, user_identifier)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/memory/simple/cleanup")
+async def cleanup_simple_memory(
+    days_old: int = 90,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Clean up old conversation sessions - simplified version"""
+    from app.chatbot.simple_memory import SimpleChatbotMemory
+    
+    engine = ChatbotEngine(db)
+    tenant = engine._get_tenant_by_api_key(api_key)
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    memory = SimpleChatbotMemory(db, tenant.id)
+    cleaned_sessions = memory.cleanup_old_sessions(days_old)
+    
+    return {
+        "message": f"Cleaned up {cleaned_sessions} old sessions",
+        "days_old_threshold": days_old
+    }
+
+@router.post("/conversation/end")
+async def end_conversation(
+    user_identifier: str,
+    platform: str = "web",
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Manually end a conversation session"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        from app.pricing.integration_helpers import end_conversation_session
+        success = end_conversation_session(tenant.id, user_identifier, platform, db)
+        
+        return {
+            "success": success,
+            "message": "Conversation ended successfully" if success else "No active conversation found"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error ending conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ============================================================================
+# ANALYTICS ENDPOINTS
+# ============================================================================
+
+@router.get("/analytics/conversations")
+async def get_conversation_analytics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days: int = 30
+):
+    """Get conversation analytics for tenant (Advanced Analytics feature)"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Check if tenant has access to advanced analytics
+        from app.pricing.integration_helpers import check_feature_access_dependency
+        check_feature_access_dependency(tenant.id, "advanced_analytics", db)
+        
+        # Get conversation analytics
+        from app.pricing.integration_helpers import get_conversation_analytics
+        analytics = get_conversation_analytics(tenant.id, db, days)
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "analytics": analytics
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting conversation analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ============================================================================
+# FEEDBACK SYSTEM ENDPOINTS
+# ============================================================================
+
+@router.post("/webhook/email-reply")
+async def handle_email_reply_webhook(request: Request, db: Session = Depends(get_db)):
+    """Handle incoming events from Resend with Svix signature verification"""
+    headers = request.headers
+    try:
+        payload = await request.body()
+    except Exception as e:
+        logger.error(f"Could not read request body: {e}")
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    expected_secret = os.getenv("WEBHOOK_SECRET")
+    if not expected_secret:
+        logger.error("CRITICAL: WEBHOOK_SECRET environment variable not set.")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured on the server.")
+
+    try:
+        wh = Webhook(expected_secret)
+        webhook_data = wh.verify(payload, headers)
+        logger.info("✅ Webhook signature verified successfully.")
+    except WebhookVerificationError as e:
+        logger.warning(f"Webhook signature verification failed: {e}")
+        raise HTTPException(status_code=403, detail="Invalid signature.")
+
+    # Process only the inbound email event, ignore others like 'sent' or 'delivered'
+    if webhook_data.get("type") == "inbound.email.created":
+        try:
+            logger.info(f"📨 Received verified inbound email: {webhook_data.get('data', {}).get('subject')}")
+            return {"success": True, "message": "Inbound email processed."}
+        except Exception as e:
+            logger.error(f"💥 Error processing inbound email: {e}")
+            raise HTTPException(status_code=500, detail="Webhook processing failed")
+    else:
+        logger.info(f"Received and acknowledged non-critical webhook event: {webhook_data.get('type')}")
+        return {"success": True, "message": f"Event '{webhook_data.get('type')}' acknowledged."}
+
+@router.get("/feedback/analytics")
+async def get_advanced_feedback_analytics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days: int = 30
+):
+    """Get comprehensive feedback analytics with real-time data"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Initialize advanced feedback manager
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        
+        # Get comprehensive analytics
+        analytics = feedback_manager.get_feedback_analytics(days)
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "analytics": analytics
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting advanced feedback analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/feedback/pending/advanced")
+async def get_advanced_pending_feedback(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    limit: int = 20
+):
+    """Get enhanced list of pending feedback requests with tracking info"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        pending_requests = feedback_manager.get_pending_feedback_list(limit)
+        
+        return {
+            "success": True,
+            "pending_requests": pending_requests,
+            "total_count": len(pending_requests),
+            "tenant_id": tenant.id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting advanced pending feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/feedback/retry/{feedback_id}")
+async def retry_feedback_notification(
+    feedback_id: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Retry sending tenant notification for failed feedback"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        success = feedback_manager.retry_failed_notification(feedback_id)
+        
+        if success:
+            return {"success": True, "message": f"Notification retry successful for {feedback_id}"}
+        else:
+            return {"success": False, "message": f"Notification retry failed for {feedback_id}"}
+        
+    except Exception as e:
+        logger.error(f"Error retrying feedback notification: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/feedback/test-email")
+async def test_feedback_email(
+    test_email: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Test endpoint to send a sample feedback email (for debugging)"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+        
+        # Create test feedback request
+        test_feedback_id = str(uuid.uuid4())
+        test_context = [
+            {"role": "user", "content": "Hello, I need help with my account"},
+            {"role": "assistant", "content": "I'm sorry, I don't have information about account issues"}
+        ]
+        
+        # Mock tenant object for testing
+        class MockTenant:
+            def __init__(self, email, name):
+                self.email = email
+                self.name = name
+        
+        mock_tenant = MockTenant(test_email, tenant.name)
+        
+        # Send test notification
+        success, email_id = feedback_manager._send_tenant_notification_advanced(
+            feedback_id=test_feedback_id,
+            tenant=mock_tenant,
+            user_question="Test question: How do I reset my password?",
+            bot_response="I'm sorry, I don't have information about password reset procedures.",
+            conversation_context=test_context,
+            user_email="testuser@example.com"
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Test email sent successfully to {test_email}",
+                "email_id": email_id,
+                "feedback_id": test_feedback_id
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Failed to send test email to {test_email}"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error sending test email: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/feedback/form/{feedback_id}", response_class=HTMLResponse)
+async def get_feedback_form(request: Request, feedback_id: str, db: Session = Depends(get_db)):
+    """Serves the enhanced HTML form to the tenant with business info"""
+    logger.info(f"Serving enhanced feedback form for ID: {feedback_id}")
+    
+    # Get feedback record to check status and get business info
+    feedback_record = db.query(PendingFeedback).filter(
+        PendingFeedback.feedback_id == feedback_id
+    ).first()
+    
+    if not feedback_record:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>Form Not Found</h1>
+                <p>This feedback form does not exist or has been removed.</p>
+            </div>
+        """, status_code=404)
+    
+    # Check if form is already expired/submitted
+    if feedback_record.form_expired or feedback_record.user_notified:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>⏰ Form Expired</h1>
+                <p>This feedback form has already been used or has expired for security reasons.</p>
+                <p>If you need to provide additional feedback, please contact support.</p>
+            </div>
+        """, status_code=410)
+    
+    # Mark form as accessed
+    if not feedback_record.form_accessed:
+        feedback_record.form_accessed = True
+        feedback_record.form_accessed_at = datetime.utcnow()
+        db.commit()
+    
+    # Get business name
+    tenant = db.query(Tenant).filter(Tenant.id == feedback_record.tenant_id).first()
+    business_name = getattr(tenant, 'business_name', 'Your Business') if tenant else 'Your Business'
+    
+    # Read the enhanced template file
+    try:
+        with open("templates/enhanced_feedback_form.html", "r") as f:
+            template_content = f.read()
+        
+        # Replace template variables
+        template_content = template_content.replace("{{ feedback_id }}", feedback_id)
+        template_content = template_content.replace("{{ business_name | default('Your Business') }}", business_name)
+        template_content = template_content.replace("{{ user_question | default('') }}", feedback_record.user_question or "")
+        
+        return HTMLResponse(content=template_content)
+        
+    except FileNotFoundError:
+        # Fallback to inline template if file not found
+        logger.warning("Enhanced feedback form template file not found, using inline template")
+        return templates.TemplateResponse(
+            "feedback_form.html",
+            {
+                "request": request, 
+                "feedback_id": feedback_id,
+                "business_name": business_name,
+                "user_question": feedback_record.user_question
+            }
+        )
+
+@router.post("/feedback/submit")
+async def handle_enhanced_feedback_submission(
+    feedback_id: str = Form(...),
+    tenant_response: str = Form(...),
+    add_to_faq: bool = Form(False),
+    db: Session = Depends(get_db)
+):
+    """Enhanced feedback submission with simplified FAQ integration"""
+    logger.info(f"Received enhanced feedback submission for ID: {feedback_id}")
+    
+    feedback_record = db.query(PendingFeedback).filter(
+        PendingFeedback.feedback_id == feedback_id
+    ).first()
+    
+    if not feedback_record:
+        raise HTTPException(status_code=404, detail="Feedback ID not found.")
+    
+    # Check if already processed
+    if feedback_record.form_expired or feedback_record.user_notified:
+        return HTMLResponse(content="""
+            <div style='font-family: sans-serif; text-align: center; padding: 50px;'>
+                <h1>⏰ Form Already Processed</h1>
+                <p>This feedback form has already been submitted.</p>
+            </div>
+        """, status_code=410)
+    
+    try:
+        # Store the enhanced response data
+        feedback_record.add_to_faq = add_to_faq
+        
+        # If user wants to add to FAQ, use the original question and tenant response
+        if add_to_faq:
+            feedback_record.faq_question = feedback_record.user_question
+            feedback_record.faq_answer = tenant_response.strip()
+            
+            # Create FAQ entry automatically
+            try:
+                new_faq = FAQ(
+                    tenant_id=feedback_record.tenant_id,
+                    question=feedback_record.user_question,
+                    answer=tenant_response.strip()
+                )
+                db.add(new_faq)
+                feedback_record.faq_created = True
+                logger.info(f"✅ Created FAQ entry for feedback {feedback_id}")
+            except Exception as faq_error:
+                logger.error(f"❌ Failed to create FAQ: {faq_error}")
+        
+        # Mark form as expired to prevent reuse
+        feedback_record.form_expired = True
+        feedback_record.status = "responded"
+        
+        # Process the tenant response (send to customer)
+        feedback_manager = AdvancedSmartFeedbackManager(db, feedback_record.tenant_id)
+        success = feedback_manager.process_tenant_response(feedback_id, tenant_response)
+        
+        if success:
+            db.commit()
+            
+            success_message = "Thank you! Your response has been sent to the customer."
+            if feedback_record.faq_created:
+                success_message += " The question and answer have also been added to your FAQ section."
+            
+            return HTMLResponse(content=f"""
+                <div style='font-family: Inter, sans-serif; text-align: center; padding: 60px 40px; max-width: 600px; margin: 0 auto;'>
+                    <div style='background: linear-gradient(135deg, #6B46C1, #9333EA); color: white; padding: 30px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.1);'>
+                        <div style='font-size: 48px; margin-bottom: 20px;'>✅</div>
+                        <h1 style='margin: 0 0 15px 0; font-size: 24px;'>Response Sent Successfully!</h1>
+                        <p style='margin: 0; font-size: 16px; opacity: 0.9;'>{success_message}</p>
+                        <div style='margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 14px; opacity: 0.8;'>
+                            This form has been securely closed and cannot be used again.
+                        </div>
+                    </div>
+                </div>
+            """, status_code=200)
+        else:
+            raise HTTPException(status_code=500, detail="Failed to process feedback.")
+            
+    except Exception as e:
+        logger.error(f"Error processing enhanced feedback: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to process feedback.")
+
+# ============================================================================
+# SECURITY ENDPOINTS
+# ============================================================================
+
+@router.get("/security/analytics")
+async def get_security_analytics(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days: int = 30
+):
+    """Get comprehensive security analytics for the tenant"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = SecurityPromptManager(db, tenant.id)
+        analytics = security_manager.get_security_analytics(days)
+        
+        return analytics
+        
+    except Exception as e:
+        logger.error(f"Error getting security analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/security/incidents")
+async def get_security_incidents(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    reviewed: Optional[bool] = None
+):
+    """Get list of security incidents for the tenant"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        query = db.query(SecurityIncident).filter(
+            SecurityIncident.tenant_id == tenant.id
+        )
+        
+        if reviewed is not None:
+            query = query.filter(SecurityIncident.reviewed == reviewed)
+        
+        incidents = query.order_by(
+            SecurityIncident.detected_at.desc()
+        ).limit(limit).all()
+        
+        incidents_data = []
+        for incident in incidents:
+            incidents_data.append({
+                "id": incident.id,
+                "user_identifier": incident.user_identifier,
+                "platform": incident.platform,
+                "risk_type": incident.risk_type,
+                "severity_score": incident.severity_score,
+                "detected_at": incident.detected_at.isoformat(),
+                "reviewed": incident.reviewed,
+                "user_message_preview": incident.user_message[:100] + "..." if len(incident.user_message) > 100 else incident.user_message
+            })
+        
+        return {
+            "success": True,
+            "incidents": incidents_data,
+            "total_count": len(incidents_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting security incidents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/security/incidents/{incident_id}")
+async def get_security_incident_details(
+    incident_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get detailed information about a specific security incident"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = SecurityPromptManager(db, tenant.id)
+        incident_details = security_manager.get_incident_details(incident_id)
+        
+        if not incident_details:
+            raise HTTPException(status_code=404, detail="Security incident not found")
+        
+        return {
+            "success": True,
+            "incident": incident_details
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting incident details: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/security/incidents/{incident_id}/review")
+async def mark_incident_reviewed(
+    incident_id: int,
+    request: IncidentReviewRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Mark a security incident as reviewed"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = SecurityPromptManager(db, tenant.id)
+        success = security_manager.mark_incident_reviewed(
+            incident_id, 
+            request.reviewer_notes
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Security incident not found")
+        
+        return {
+            "success": True,
+            "message": f"Incident {incident_id} marked as reviewed"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking incident as reviewed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/security/cleanup")
+async def cleanup_old_security_incidents(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+    days_old: int = 90
+):
+    """Clean up old reviewed security incidents"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        security_manager = SecurityPromptManager(db, tenant.id)
+        cleaned_count = security_manager.cleanup_old_incidents(days_old)
+        
+        return {
+            "success": True,
+            "message": f"Cleaned up {cleaned_count} old security incidents",
+            "days_threshold": days_old
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up security incidents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/security/settings")
+async def update_security_settings(
+    request: SecuritySettingsRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update tenant security settings"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Validate security level
+        valid_levels = ["standard", "strict", "custom"]
+        if request.security_level not in valid_levels:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid security level. Must be one of: {valid_levels}"
+            )
+        
+        # Update tenant security settings
+        tenant.security_level = request.security_level
+        tenant.allow_custom_prompts = request.allow_custom_prompts
+        tenant.security_notifications_enabled = request.security_notifications_enabled
+        
+        db.commit()
+        
+        logger.info(f"Updated security settings for tenant {tenant.id}")
+        
+        return {
+            "success": True,
+            "message": "Security settings updated successfully",
+            "settings": {
+                "security_level": tenant.security_level,
+                "allow_custom_prompts": tenant.allow_custom_prompts,
+                "security_notifications_enabled": tenant.security_notifications_enabled
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating security settings: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
