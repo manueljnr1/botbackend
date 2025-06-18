@@ -509,7 +509,7 @@ Context: {{context}}
 
 User Question: {{question}}
 
-Your detailed, step-by-step response:""""
+Your detailed, step-by-step response:"""
                         
                         qa_prompt = PromptTemplate(
                             template=qa_prompt_template,
