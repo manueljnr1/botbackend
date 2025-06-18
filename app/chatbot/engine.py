@@ -1160,6 +1160,84 @@ class ChatbotEngine:
         return None
 
 
+    def _make_faq_conversational_with_llm(self, faq_answer: str, tenant_name: str) -> str:
+        """
+        Use LLM to make FAQ answer more conversational while keeping the facts
+        """
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+        
+        prompt = PromptTemplate(
+            input_variables=["faq_answer", "company_name"],
+            template="""
+            Rewrite this FAQ answer to be more conversational and friendly while keeping ALL the factual information:
+            
+            Original FAQ Answer: {faq_answer}
+            Company: {company_name}
+            
+            Make it sound like a helpful customer service representative talking to a friend. Keep all specific details, URLs, and instructions exactly the same. Just make the tone warmer and more natural.
+            
+            Conversational Answer:"""
+        )
+        
+        try:
+            result = llm(prompt.format(faq_answer=faq_answer, company_name=tenant_name))
+            return result.strip()
+        except Exception as e:
+            logger.error(f"Error making FAQ conversational: {e}")
+            # Fallback to original if LLM fails
+            return faq_answer
+
+
+
+
+
+    def _get_harmonized_answer(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
+        """
+        Get harmonized answer using hierarchical approach:
+        1. FAQ (authoritative, current)
+        2. KB (detailed context)
+        3. Combined (if needed)
+        """
+        faqs = self._get_faqs(tenant_id)
+        
+        # Step 1: Check FAQ first
+        faq_answer = self._check_faq_first(user_message, faqs)
+        
+        # Step 2: Get KB context regardless
+        kb_answer = self._get_kb_answer(user_message, tenant_id)
+        
+        # Step 3: Decide how to combine
+        if faq_answer and kb_answer:
+            # Both exist - check for harmony
+            if self._answers_are_compatible(faq_answer, kb_answer):
+                # Combine: FAQ as primary, KB as additional detail
+                final_answer = f"{faq_answer}\n\n💡 Additional information: {kb_answer}"
+                source = "FAQ+KB"
+            else:
+                # Conflict detected - FAQ wins, log the issue
+                logger.warning(f"⚠️ FAQ/KB conflict detected for: {user_message}")
+                final_answer = faq_answer + "\n\n(Note: Please contact support if you need more specific details)"
+                source = "FAQ_OVERRIDE"
+        elif faq_answer:
+            final_answer = faq_answer
+            source = "FAQ"
+        elif kb_answer:
+            final_answer = kb_answer
+            source = "KB"
+        else:
+            final_answer = None
+            source = "NONE"
+        
+        return {
+            "answer": final_answer,
+            "source": source,
+            "faq_content": faq_answer,
+            "kb_content": kb_answer
+        }
+
 
 
     def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
