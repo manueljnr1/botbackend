@@ -1893,7 +1893,15 @@ async def smart_chat_with_followup_streaming(
             await asyncio.sleep(1.5)
             
             # Generate and stream follow-up suggestions
-            followups = generate_smart_followups(request.message, result["response"], tenant.name)
+            should_generate, followups = should_generate_followups_llm(
+                request.message, 
+                result["response"], 
+                tenant.name
+            )
+
+            if not should_generate:
+                logger.info(f"🚫 No follow-ups needed for this interaction")
+                followups = []
             
             if followups:
                 for i, followup in enumerate(followups):
@@ -1931,68 +1939,121 @@ async def smart_chat_with_followup_streaming(
         }
     )
 
-def generate_smart_followups(user_question: str, bot_response: str, company_name: str) -> List[str]:
+def should_generate_followups_llm(user_question: str, bot_response: str, company_name: str) -> tuple[bool, List[str]]:
     """
-    Generate intelligent follow-up questions based on user's question and bot's response
+    Use LLM to intelligently decide if follow-ups are needed and generate them
+    Returns: (should_generate, followup_list)
     """
-    import re
+    from langchain_openai import ChatOpenAI
+    from langchain.prompts import PromptTemplate
     
-    user_q_lower = user_question.lower()
+    prompt = PromptTemplate(
+        input_variables=["user_question", "bot_response", "company_name"],
+        template="""You are an expert conversation analyst. Analyze this customer service interaction and decide if follow-up questions would be helpful.
+
+USER QUESTION: "{user_question}"
+
+BOT RESPONSE: "{bot_response}"
+
+COMPANY: {company_name}
+
+INSTRUCTIONS:
+1. Determine if follow-up questions would genuinely help the user
+2. If YES, suggest 1-3 relevant follow-up questions
+3. If NO, respond with "NO_FOLLOWUPS"
+
+DON'T generate follow-ups for:
+- Simple greetings or thank you messages
+- Basic contact information requests  
+- Very short/complete answers
+- Questions already fully answered
+
+DO generate follow-ups for:
+- Setup/configuration instructions
+- Complex procedures with multiple steps
+- Feature explanations that might need clarification
+- When user might need deeper help
+
+Format response as:
+DECISION: YES/NO
+FOLLOWUPS:
+1. First follow-up question (if any)
+2. Second follow-up question (if any)  
+3. Third follow-up question (if any)
+
+Response:"""
+    )
+    
+    try:
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo", 
+            temperature=0.3,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        result = llm.invoke(prompt.format(
+            user_question=user_question,
+            bot_response=bot_response,
+            company_name=company_name
+        ))
+        
+        response_text = result.content if hasattr(result, 'content') else str(result)
+        
+        # Parse LLM response
+        if "DECISION: NO" in response_text or "NO_FOLLOWUPS" in response_text:
+            logger.info(f"🤖 LLM decided NO follow-ups needed for: {user_question[:50]}...")
+            return False, []
+        
+        # Extract follow-up questions
+        followups = []
+        lines = response_text.split('\n')
+        for line in lines:
+            if re.match(r'^\d+\.', line.strip()):
+                followup = re.sub(r'^\d+\.\s*', '', line.strip())
+                if followup:
+                    followups.append(followup)
+        
+        if followups:
+            logger.info(f"🤖 LLM generated {len(followups)} follow-ups for: {user_question[:50]}...")
+            return True, followups[:3]  # Max 3
+        else:
+            logger.info(f"🤖 LLM decided NO follow-ups needed")
+            return False, []
+            
+    except Exception as e:
+        logger.error(f"Error in LLM follow-up generation: {e}")
+        # Fallback to simple rules
+        return should_generate_followups_simple(user_question, bot_response)
+
+def should_generate_followups_simple(user_question: str, bot_response: str) -> tuple[bool, List[str]]:
+    """Fallback simple rules if LLM fails"""
+    
+    # Skip follow-ups for simple cases
+    user_lower = user_question.lower()
     response_lower = bot_response.lower()
-    followups = []
     
-    # Discord/Integration Setup Follow-ups
-    if any(term in user_q_lower for term in ['discord', 'slack', 'integration', 'setup', 'configure']):
-        followups.extend([
-            "Would you like me to walk you through any specific step in detail?",
-            "Need help with troubleshooting common setup issues?",
-            "Should I explain how to test if the integration is working?"
-        ])
+    # Don't generate for simple requests
+    skip_patterns = [
+        'hello', 'hi', 'hey', 'thanks', 'thank you',
+        'what is your email', 'contact', 'phone number',
+        'business hours', 'when are you open'
+    ]
     
-    # Features/Pricing Follow-ups
-    elif any(term in user_q_lower for term in ['features', 'pricing', 'plans', 'what do you offer']):
-        followups.extend([
-            "Would you like to know more about any specific feature?",
-            "Interested in seeing how this compares to other solutions?",
-            "Should I help you choose the right plan for your needs?"
-        ])
+    if any(pattern in user_lower for pattern in skip_patterns):
+        return False, []
     
-    # Support/Help Follow-ups  
-    elif any(term in user_q_lower for term in ['support', 'help', 'contact', 'problem', 'issue']):
-        followups.extend([
-            "Is there a specific issue you're facing that I can help with?",
-            "Would you like me to connect you with our technical support team?",
-            "Need immediate assistance with something urgent?"
-        ])
+    # Don't generate for very short responses
+    if len(bot_response) < 100:
+        return False, []
     
-    # API/Technical Follow-ups
-    elif any(term in user_q_lower for term in ['api', 'documentation', 'technical', 'code', 'developer']):
-        followups.extend([
-            "Would you like examples of how to implement this?",
-            "Need help with authentication or API keys?",
-            "Should I show you some common code snippets?"
-        ])
+    # Generate for complex responses
+    if len(bot_response) > 300 or 'step' in response_lower:
+        return True, [
+            "Would you like me to explain any part in more detail?",
+            f"Any other questions about this process?"
+        ]
     
-    # General/Broad Question Follow-ups
-    else:
-        # Analyze bot response to suggest relevant follow-ups
-        if 'step' in response_lower or 'process' in response_lower:
-            followups.append("Would you like me to explain any of these steps in more detail?")
-        
-        if 'plan' in response_lower or 'option' in response_lower:
-            followups.append("Need help choosing between these options?")
-        
-        if 'contact' in response_lower or 'support' in response_lower:
-            followups.append("Should I help you get in touch with our team?")
-        
-        # Always add these generic helpful follow-ups
-        followups.extend([
-            "Is there anything specific about this you'd like me to clarify?",
-            f"Any other questions about {company_name}?"
-        ])
-    
-    # Limit to 3 follow-ups max (not overwhelming)
-    return followups[:3]
+    return False, []
 
 def calculate_followup_delay(followup: str) -> float:
     """
