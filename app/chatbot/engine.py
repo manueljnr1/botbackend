@@ -527,15 +527,9 @@ class ChatbotEngine:
                         
                         qa_prompt_template = f"""{secure_prompt_content}
             
-Always format your response clearly. For example:
+CRITICAL: You have access to detailed documentation. You MUST use the provided context to give specific, step-by-step instructions. Do NOT refer users to external guides or say "refer to the guide" - you ARE the guide.
 
-**Step 1: Do the First Thing**
-1.  Go to the settings page.
-2.  Click on the 'Profile' tab.
-
-**Step 2: Do the Second Thing**
-- Make sure your email is correct.
-- Upload a profile picture.
+If the context contains setup instructions, provide them directly with numbered steps. Be helpful and detailed.
 
 Context: {{context}}
 
