@@ -1613,7 +1613,7 @@ Your detailed, step-by-step response:"""
     
 
     def analyze_conversation_context_llm(self, current_message: str, conversation_history: List[Dict], 
-                                    company_name: str) -> Dict[str, Any]:
+                                   company_name: str) -> Dict[str, Any]:
         """Smart context analysis that actually remembers what was discussed"""
         
         user_msg_lower = current_message.lower().strip()
@@ -1624,7 +1624,7 @@ Your detailed, step-by-step response:"""
         has_previous_conversation = len(conversation_history) > 2
         
         if not (is_greeting and has_previous_conversation):
-            return {'type': 'CONTINUATION'}
+            return {'type': 'CONTINUATION', 'reasoning': 'Not a greeting or no previous conversation'}
         
         # Step 2: Actually analyze what they were discussing
         try:
@@ -1668,6 +1668,7 @@ Your detailed, step-by-step response:"""
             llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2, openai_api_key=settings.OPENAI_API_KEY)
             result = llm.invoke(prompt.format(conversation=conversation_context, greeting=current_message))
             
+            # FIX: Properly handle the response object
             response_text = result.content if hasattr(result, 'content') else str(result)
             
             # Parse the response
@@ -1676,6 +1677,7 @@ Your detailed, step-by-step response:"""
             
             lines = response_text.split('\n')
             for line in lines:
+                line = line.strip()
                 if line.startswith('TOPIC:'):
                     topic = line.replace('TOPIC:', '').strip()
                 elif line.startswith('RESPONSE:'):
@@ -1693,11 +1695,13 @@ Your detailed, step-by-step response:"""
         except Exception as e:
             logger.error(f"Error in smart context analysis: {e}")
             # Better fallback - just continue normally instead of confusing the user
-            return {'type': 'CONTINUATION'}
-
+            return {
+                'type': 'CONTINUATION',
+                'reasoning': f'Error fallback: {str(e)}'
+            }
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
-                                suggested_approach: str, company_name: str) -> str:
+                               suggested_approach: str, company_name: str) -> Optional[str]:
         """Generate natural topic change responses"""
         
         # Use the LLM-generated bridge response directly
