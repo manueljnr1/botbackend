@@ -1670,7 +1670,7 @@ async def smart_chat_with_followup_streaming(
             # NEW: Analyze conversation context with LLM - USE ENGINE METHOD
             context_analysis = None
             topic_change_response = None
-            
+
             if conversation_history and len(conversation_history) > 1:
                 # Call the method from the engine instance
                 context_analysis = engine.analyze_conversation_context_llm(
@@ -1681,13 +1681,13 @@ async def smart_chat_with_followup_streaming(
                 
                 logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
                 
-                # Handle ONLY greeting types - let normal processing handle everything else
-                greeting_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING']
+                # Handle greeting types AND conversation questions
+                special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
                 
-                if context_analysis and context_analysis.get('type') in greeting_types:
-                    logger.info(f"🔄 Detected greeting type: {context_analysis.get('type')}")
+                if context_analysis and context_analysis.get('type') in special_handling_types:
+                    logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
                     
-                    # Generate greeting response
+                    # Generate appropriate response
                     topic_change_response = engine.handle_topic_change_response(
                         request.message,
                         context_analysis.get('previous_topic', ''),
@@ -1697,12 +1697,12 @@ async def smart_chat_with_followup_streaming(
                     )
                     
                     if topic_change_response and len(topic_change_response.strip()) > 0:
-                        logger.info(f"🔄 Generated greeting response: {topic_change_response[:50]}...")
+                        logger.info(f"🔄 Generated response: {topic_change_response[:50]}...")
                     else:
-                        logger.info(f"🔄 No greeting response generated, proceeding normally")
+                        logger.info(f"🔄 No response generated, proceeding normally")
                         topic_change_response = None
                 else:
-                    logger.info(f"🔄 Not a greeting, proceeding with normal processing")
+                    logger.info(f"🔄 Normal processing for type: {context_analysis.get('type', 'UNKNOWN')}")
             
             # If greeting detected, send that response instead
             if topic_change_response:
@@ -1830,6 +1830,7 @@ async def smart_chat_with_followup_streaming(
             "X-Accel-Buffering": "no"
         }
     )
+
 
 
 def should_generate_followups_llm(user_question: str, bot_response: str, company_name: str) -> tuple[bool, List[str]]:

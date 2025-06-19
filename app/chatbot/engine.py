@@ -1613,20 +1613,37 @@ Your detailed, step-by-step response:"""
     
 
     def analyze_conversation_context_llm(self, current_message: str, conversation_history: List[Dict], 
-                                   company_name: str) -> Dict[str, Any]:
-        """Smart context analysis with time-aware greeting detection"""
+                                    company_name: str) -> Dict[str, Any]:
+        """Smart context analysis with time-aware greeting detection AND conversation questions"""
         
         user_msg_lower = current_message.lower().strip()
         greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'what\'s up']
         
+        # NEW: Check for conversation history questions
+        conversation_questions = [
+            'what was our last conversation', 'what were we discussing', 'what did we talk about',
+            'previous conversation', 'last discussion', 'what was the topic', 'earlier conversation',
+            'before', 'what was our conversation about', 'remind me what we discussed'
+        ]
+        
         # Step 1: Check if it's a greeting
         is_greeting = any(greeting in user_msg_lower for greeting in greetings)
+        
+        # NEW: Check if it's asking about previous conversation
+        is_conversation_question = any(phrase in user_msg_lower for phrase in conversation_questions)
+        
         has_previous_conversation = len(conversation_history) > 2
         
+        # Handle conversation questions
+        if is_conversation_question and has_previous_conversation:
+            logger.info(f"🔍 User asking about previous conversation: {current_message}")
+            return self._analyze_previous_conversation_topic(conversation_history, current_message)
+        
+        # Handle greetings (existing logic)
         if not (is_greeting and has_previous_conversation):
             return {'type': 'CONTINUATION', 'reasoning': 'Not a greeting or no previous conversation'}
         
-        # Step 2: Check time since last conversation
+        # Step 2: Check time since last conversation (existing logic for greetings)
         try:
             # Get the last message timestamp
             last_message = conversation_history[-1] if conversation_history else None
@@ -1678,11 +1695,9 @@ Your detailed, step-by-step response:"""
             logger.error(traceback.format_exc())
             
             # Fall back to simple topic analysis without time checking
-            logger.info("Falling back to topic analysis without time checking")
+            logger.info("Falling back to simple greeting without time checking")
         
         # Step 3: If we can't determine time, just do a simple greeting
-        # Don't analyze topic for simple greetings - that's causing the wrong response
-        
         logger.info(f"🧠 Simple greeting detected without time context")
         
         return {
@@ -1690,11 +1705,68 @@ Your detailed, step-by-step response:"""
             'reasoning': 'Simple greeting without time context'
         }
 
+    def _analyze_previous_conversation_topic(self, conversation_history: List[Dict], current_message: str) -> Dict[str, Any]:
+        """Analyze what the previous conversation was about"""
+        
+        try:
+            # Get last few messages to understand context
+            recent_messages = []
+            for msg in conversation_history[-10:]:  # More messages for better context
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                content = msg.get("content", "")[:200]  # Limit length
+                recent_messages.append(f"{role}: {content}")
+            
+            conversation_context = "\n".join(recent_messages)
+            
+            from langchain_openai import ChatOpenAI
+            from langchain.prompts import PromptTemplate
+            
+            prompt = PromptTemplate(
+                input_variables=["conversation", "question"],
+                template="""Analyze this conversation history and provide a helpful summary of what was discussed.
+
+    RECENT CONVERSATION:
+    {conversation}
+
+    USER QUESTION: "{question}"
+
+    TASK: Provide a brief, helpful summary of what was mainly discussed in this conversation.
+
+    Be specific and mention:
+    1. The main topic(s) that were discussed
+    2. Any specific issues or questions that came up
+    3. What stage the conversation was at
+
+    Keep it conversational and helpful, like: "We were discussing your Slack integration setup. You were working on configuring the bot token and we covered the OAuth permissions."
+
+    Your helpful summary:"""
+            )
+            
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2, openai_api_key=settings.OPENAI_API_KEY)
+            result = llm.invoke(prompt.format(conversation=conversation_context, question=current_message))
+            
+            response_text = result.content if hasattr(result, 'content') else str(result)
+            
+            logger.info(f"📝 Generated conversation summary: {response_text[:100]}...")
+            
+            return {
+                'type': 'CONVERSATION_SUMMARY',
+                'conversation_summary': response_text.strip(),
+                'reasoning': 'User asked about previous conversation'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing previous conversation: {e}")
+            return {
+                'type': 'CONVERSATION_SUMMARY_FALLBACK',
+                'conversation_summary': "We were discussing various topics. Is there something specific you'd like to continue with?",
+                'reasoning': f'Fallback due to error: {str(e)}'
+            }
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
-                                suggested_approach: str, company_name: str, 
+                               suggested_approach: str, company_name: str, 
                                 context_analysis: Dict = None) -> Optional[str]:
-        """Generate time-aware and context-aware greeting responses"""
+        """Generate responses for greetings AND conversation history questions"""
         
         # Add debug logging
         logger.info(f"🔍 handle_topic_change_response called:")
@@ -1706,10 +1778,16 @@ Your detailed, step-by-step response:"""
             return None
         
         greeting_type = context_analysis.get('type', 'UNKNOWN')
-        logger.info(f"🎯 Processing greeting type: {greeting_type}")
+        logger.info(f"🎯 Processing type: {greeting_type}")
+        
+        # NEW: Handle conversation summary requests
+        if greeting_type in ['CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']:
+            conversation_summary = context_analysis.get('conversation_summary', 'We discussed various topics.')
+            logger.info(f"📝 Returning conversation summary: {conversation_summary[:50]}...")
+            return conversation_summary
         
         # For simple greetings, just return a basic greeting - NO LLM NEEDED
-        if greeting_type == 'SIMPLE_GREETING':
+        elif greeting_type == 'SIMPLE_GREETING':
             simple_response = f"Hello! How can I help you today?"
             logger.info(f"✅ Generated simple greeting: {simple_response}")
             return simple_response
@@ -1728,7 +1806,7 @@ Your detailed, step-by-step response:"""
         
         # For anything else, use LLM
         else:
-            logger.info(f"🤖 Using LLM for greeting type: {greeting_type}")
+            logger.info(f"🤖 Using LLM for type: {greeting_type}")
             return self._generate_llm_greeting_response(current_message, previous_topic, suggested_approach, company_name, context_analysis)
 
 
