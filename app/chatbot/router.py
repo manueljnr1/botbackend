@@ -1672,7 +1672,7 @@ async def smart_chat_with_followup_streaming(
             topic_change_response = None
             
             if conversation_history and len(conversation_history) > 1:
-                # FIX: Call the method from the engine instance
+                # Call the method from the engine instance
                 context_analysis = engine.analyze_conversation_context_llm(
                     request.message, 
                     conversation_history, 
@@ -1681,36 +1681,44 @@ async def smart_chat_with_followup_streaming(
                 
                 logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
                 
-                # Handle topic changes - USE ENGINE METHOD
-                if context_analysis and context_analysis.get('type') == 'TOPIC_CHANGE':
+                # Handle ONLY greeting types - let normal processing handle everything else
+                greeting_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING']
+                
+                if context_analysis and context_analysis.get('type') in greeting_types:
+                    logger.info(f"🔄 Detected greeting type: {context_analysis.get('type')}")
+                    
+                    # Generate greeting response
                     topic_change_response = engine.handle_topic_change_response(
                         request.message,
-                        context_analysis.get('previous_topic'),
-                        context_analysis.get('suggested_approach'),
-                        tenant.name
+                        context_analysis.get('previous_topic', ''),
+                        context_analysis.get('suggested_approach', ''),
+                        tenant.name,
+                        context_analysis  # Pass the full analysis
                     )
                     
                     if topic_change_response and len(topic_change_response.strip()) > 0:
-                        logger.info(f"🔄 Topic change detected, sending bridge response: {topic_change_response[:50]}...")
+                        logger.info(f"🔄 Generated greeting response: {topic_change_response[:50]}...")
                     else:
-                        logger.info(f"🔄 Topic change detected but no bridge response generated, proceeding normally")
+                        logger.info(f"🔄 No greeting response generated, proceeding normally")
                         topic_change_response = None
+                else:
+                    logger.info(f"🔄 Not a greeting, proceeding with normal processing")
             
-            # If topic change detected, send that response instead
+            # If greeting detected, send that response instead
             if topic_change_response:
-                logger.info(f"🔄 Sending topic change bridge response")
+                logger.info(f"🔄 Sending greeting response")
                 
                 # Store the conversation in memory
                 session_id, _ = memory.get_or_create_session(user_id, "web")
                 memory.store_message(session_id, request.message, True)
                 memory.store_message(session_id, topic_change_response, False)
                 
-                # Send topic change response as main response
+                # Send greeting response as main response
                 main_response = {
                     'type': 'main_response',
                     'content': topic_change_response,
                     'session_id': session_id,
-                    'answered_by': 'TOPIC_CHANGE_DETECTION',
+                    'answered_by': 'GREETING_DETECTION',
                     'context_analysis': context_analysis
                 }
                 yield f"{json.dumps(main_response)}\n"
@@ -1727,7 +1735,7 @@ async def smart_chat_with_followup_streaming(
                 yield f"{json.dumps(clarifying_followup)}\n"
                 
                 # Send completion
-                yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'topic_change': True})}\n"
+                yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'greeting_handled': True})}\n"
                 
                 # Track conversation
                 track_conversation_started_with_super_tenant(
@@ -1739,7 +1747,7 @@ async def smart_chat_with_followup_streaming(
                 
                 return
             
-            # Continue with normal processing if no topic change
+            # Continue with normal processing if no greeting
             result = engine.process_web_message_with_advanced_feedback_llm(
                 api_key=api_key,
                 user_message=request.message,
