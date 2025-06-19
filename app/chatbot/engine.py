@@ -1614,93 +1614,80 @@ Your detailed, step-by-step response:"""
 
     def analyze_conversation_context_llm(self, current_message: str, conversation_history: List[Dict], 
                                    company_name: str) -> Dict[str, Any]:
-        """
-        Use LLM to analyze if user is continuing previous topic or starting new conversation
-        Returns context analysis and suggested response approach
-        """
-        from langchain_openai import ChatOpenAI
-        from langchain.prompts import PromptTemplate
+        """Hybrid approach: Simple greeting detection + LLM topic extraction"""
         
-        # Format recent conversation history
-        history_text = ""
-        if conversation_history and len(conversation_history) > 1:
-            # Get last few exchanges (user + bot pairs)
-            recent_history = conversation_history[-6:]  # Last 3 exchanges
-            for msg in recent_history:
-                role = "User" if msg["role"] == "user" else "Assistant"
-                history_text += f"{role}: {msg['content']}\n"
+        user_msg_lower = current_message.lower().strip()
+        greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'what\'s up']
         
-        prompt = PromptTemplate(
-            input_variables=["current_message", "history", "company_name"],
-            template="""You are a conversation context analyzer for {company_name}'s customer service chatbot.
-
-    CURRENT USER MESSAGE: "{current_message}"
-
-    RECENT CONVERSATION HISTORY:
-    {history}
-
-    TASK: Analyze if the user is continuing the previous topic or starting fresh.
-
-    CONTEXT ANALYSIS:
-    1. Is this a greeting/topic change (hello, hi, new question) despite previous conversation?
-    2. Is this a continuation of the previous topic?
-    3. What should the bot's approach be?
-
-    DECISION RULES:
-    - If user says "hello/hi/hey" after discussing a specific topic → TOPIC_CHANGE
-    - If user asks completely different question → TOPIC_CHANGE  
-    - If user asks follow-up about same topic → CONTINUATION
-    - If no conversation history → NEW_CONVERSATION
-
-    RESPONSE FORMAT:
-    ANALYSIS: TOPIC_CHANGE / CONTINUATION / NEW_CONVERSATION
-    PREVIOUS_TOPIC: [brief description of previous topic, or NONE]
-    SUGGESTED_APPROACH: [how bot should respond]
-    REASONING: [brief explanation]
-
-    Analysis:"""
-        )
+        # Step 1: Simple greeting detection (reliable)
+        is_greeting = any(greeting in user_msg_lower for greeting in greetings)
+        has_previous_conversation = len(conversation_history) > 2
         
-        try:
-            llm = ChatOpenAI(
-                model_name="gpt-3.5-turbo",
-                temperature=0.2,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
-            
-            result = llm.invoke(prompt.format(
-                current_message=current_message,
-                history=history_text if history_text else "No previous conversation",
-                company_name=company_name
-            ))
-            
-            response_text = result.content if hasattr(result, 'content') else str(result)
-            
-            # Parse LLM response
-            analysis = {}
-            lines = response_text.split('\n')
-            
-            for line in lines:
-                if line.startswith('ANALYSIS:'):
-                    analysis['type'] = line.replace('ANALYSIS:', '').strip()
-                elif line.startswith('PREVIOUS_TOPIC:'):
-                    analysis['previous_topic'] = line.replace('PREVIOUS_TOPIC:', '').strip()
-                elif line.startswith('SUGGESTED_APPROACH:'):
-                    analysis['suggested_approach'] = line.replace('SUGGESTED_APPROACH:', '').strip()
-                elif line.startswith('REASONING:'):
-                    analysis['reasoning'] = line.replace('REASONING:', '').strip()
-            
-            logger.info(f"🧠 Context analysis: {analysis.get('type')} - {analysis.get('reasoning', 'N/A')}")
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"Error in context analysis: {e}")
+        if not (is_greeting and has_previous_conversation):
             return {
                 'type': 'CONTINUATION',
-                'previous_topic': 'Unknown',
-                'suggested_approach': 'Continue with normal processing',
-                'reasoning': 'Fallback due to LLM error'
+                'previous_topic': 'none',
+                'suggested_approach': 'Continue normally',
+                'reasoning': 'Not a greeting or no previous conversation'
             }
+        
+        # Step 2: Use LLM to extract the previous topic (flexible)
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain.prompts import PromptTemplate
+            
+            # Get recent bot messages to understand what was being discussed
+            recent_bot_messages = []
+            for msg in conversation_history[-6:]:
+                if not msg.get("is_from_user", True):  # Bot messages
+                    recent_bot_messages.append(msg.get("content", ""))
+            
+            if not recent_bot_messages:
+                previous_topic = "our previous conversation"
+            else:
+                # Use LLM to summarize what was being discussed
+                context_text = "\n".join(recent_bot_messages[-2:])  # Last 2 bot responses
+                
+                prompt = PromptTemplate(
+                    input_variables=["context"],
+                    template="""Based on these recent bot responses, what topic was being discussed? 
+                    Give a brief 2-4 word description.
+
+    Recent responses:
+    {context}
+
+    Topic (2-4 words):"""
+                )
+                
+                llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
+                result = llm.invoke(prompt.format(context=context_text))
+                
+                topic_response = result.content if hasattr(result, 'content') else str(result)
+                previous_topic = topic_response.strip().lower()
+                
+                # Clean up the response
+                if len(previous_topic) > 50:
+                    previous_topic = previous_topic[:50] + "..."
+            
+            logger.info(f"🧠 TOPIC CHANGE DETECTED: greeting '{current_message}' after discussing {previous_topic}")
+            
+            return {
+                'type': 'TOPIC_CHANGE',
+                'previous_topic': previous_topic,
+                'suggested_approach': f"Still working on {previous_topic}, or need help with something else?",
+                'reasoning': f"User said '{current_message}' after discussing {previous_topic}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error extracting topic with LLM: {e}")
+            # Fallback to generic topic detection
+            return {
+                'type': 'TOPIC_CHANGE',
+                'previous_topic': 'our previous conversation',
+                'suggested_approach': "Still working on that, or need help with something else?",
+                'reasoning': f"User said '{current_message}' after previous conversation (LLM fallback)"
+            }
+
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
                                 suggested_approach: str, company_name: str) -> str:
