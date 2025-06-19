@@ -1764,9 +1764,9 @@ Your detailed, step-by-step response:"""
             }
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
-                               suggested_approach: str, company_name: str, 
+                                suggested_approach: str, company_name: str, 
                                 context_analysis: Dict = None) -> Optional[str]:
-        """Generate responses for greetings AND conversation history questions"""
+        """Generate responses for greetings AND conversation history questions - HYBRID VERSION"""
         
         # Add debug logging
         logger.info(f"🔍 handle_topic_change_response called:")
@@ -1780,40 +1780,27 @@ Your detailed, step-by-step response:"""
         greeting_type = context_analysis.get('type', 'UNKNOWN')
         logger.info(f"🎯 Processing type: {greeting_type}")
         
-        # NEW: Handle conversation summary requests
+        # Handle conversation summary requests with enhanced LLM
         if greeting_type in ['CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']:
             conversation_summary = context_analysis.get('conversation_summary', 'We discussed various topics.')
-            logger.info(f"📝 Returning conversation summary: {conversation_summary[:50]}...")
-            return conversation_summary
+            
+            # Use LLM to make the conversation summary more natural
+            return self._enhance_conversation_summary_with_llm(
+                current_message, conversation_summary, company_name
+            )
         
-        # For simple greetings, just return a basic greeting - NO LLM NEEDED
-        elif greeting_type == 'SIMPLE_GREETING':
-            simple_response = f"Hello! How can I help you today?"
-            logger.info(f"✅ Generated simple greeting: {simple_response}")
-            return simple_response
-        
-        # For fresh greetings (12+ hours)
-        elif greeting_type == 'FRESH_GREETING':
-            fresh_response = "Hello! How can I help you today?"
-            logger.info(f"✅ Generated fresh greeting: {fresh_response}")
-            return fresh_response
-        
-        # For recent greetings (under 12 hours)
-        elif greeting_type == 'RECENT_GREETING':
-            recent_response = "Hello! I'm still here and ready to help. What can I assist you with today?"
-            logger.info(f"✅ Generated recent greeting: {recent_response}")
-            return recent_response
-        
-        # For anything else, use LLM
+        # For ALL OTHER types, use your existing LLM function with higher temperature for variety
         else:
-            logger.info(f"🤖 Using LLM for type: {greeting_type}")
-            return self._generate_llm_greeting_response(current_message, previous_topic, suggested_approach, company_name, context_analysis)
+            logger.info(f"🤖 Using your existing LLM function for type: {greeting_type}")
+            return self._generate_llm_greeting_response_enhanced(
+                current_message, previous_topic, suggested_approach, company_name, context_analysis
+            )
 
 
-    def _generate_llm_greeting_response(self, current_message: str, previous_topic: str, 
-                                  suggested_approach: str, company_name: str, 
-                                    context_analysis: Dict) -> Optional[str]:
-        """Generate LLM-based greeting responses for complex cases"""
+    def _generate_llm_greeting_response_enhanced(self, current_message: str, previous_topic: str, 
+                                            suggested_approach: str, company_name: str, 
+                                            context_analysis: Dict) -> Optional[str]:
+        """Enhanced version of your existing function with more variety"""
         
         try:
             from langchain_openai import ChatOpenAI
@@ -1822,28 +1809,38 @@ Your detailed, step-by-step response:"""
             greeting_type = context_analysis.get('type', 'UNKNOWN')
             hours_since_last = context_analysis.get('hours_since_last', 0)
             
+            # Enhanced prompt with more variety instructions
             prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you.
 
     CUSTOMER'S MESSAGE: "{current_message}"
     GREETING TYPE: {greeting_type}
     PREVIOUS TOPIC: {previous_topic}
+    TIME SINCE LAST CHAT: {hours_since_last:.1f} hours ago
 
     TASK: Generate a friendly greeting that:
-    1. Responds to their greeting warmly
-    2. Asks how you can help them today
-    3. Keep it brief and welcoming (under 25 words)
-    4. DON'T mention previous topics unless specifically relevant
+    1. Responds to their greeting warmly and naturally
+    2. Varies your response style (don't always say the same thing)
+    3. Asks how you can help them today
+    4. Keep it brief and welcoming (under 30 words)
+    5. For recent conversations, acknowledge continuity
+    6. For fresh conversations, be welcoming but fresh
 
-    Your friendly greeting response:"""
+    EXAMPLES OF VARIETY:
+    - "Hey! How can I help you today?"
+    - "Hello there! What brings you here?"
+    - "Hi! Great to see you. How can I assist?"
+    - "Hey there! I'm here to help. What's up?"
+
+    Your friendly, varied greeting response:"""
 
             prompt = PromptTemplate(
-                input_variables=["current_message", "company_name", "greeting_type", "previous_topic"],
+                input_variables=["current_message", "company_name", "greeting_type", "previous_topic", "hours_since_last"],
                 template=prompt_template
             )
             
             llm = ChatOpenAI(
                 model_name="gpt-3.5-turbo", 
-                temperature=0.3,
+                temperature=0.6,  # Increased for more variety
                 openai_api_key=settings.OPENAI_API_KEY
             )
             
@@ -1851,7 +1848,8 @@ Your detailed, step-by-step response:"""
                 current_message=current_message,
                 company_name=company_name,
                 greeting_type=greeting_type,
-                previous_topic=previous_topic or "none"
+                previous_topic=previous_topic or "none",
+                hours_since_last=hours_since_last
             ))
             
             response_text = result.content if hasattr(result, 'content') else str(result)
@@ -1864,12 +1862,63 @@ Your detailed, step-by-step response:"""
             if len(response_text) < 5:
                 return f"Hello! How can I help you today?"
             
-            logger.info(f"🤖 Generated LLM greeting: {response_text[:40]}...")
+            logger.info(f"🤖 Generated enhanced LLM greeting: {response_text[:40]}...")
             return response_text
             
         except Exception as e:
-            logger.error(f"Error generating LLM greeting response: {e}")
+            logger.error(f"Error generating enhanced LLM greeting response: {e}")
             return f"Hello! How can I help you today?"
+
+
+
+    def _enhance_conversation_summary_with_llm(self, current_message: str, conversation_summary: str, company_name: str) -> str:
+        """Make conversation summaries more natural and engaging"""
+        
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain.prompts import PromptTemplate
+            
+            prompt = PromptTemplate(
+                input_variables=["current_message", "conversation_summary", "company_name"],
+                template="""You are a helpful AI assistant for {company_name}. A customer is asking about your previous conversation.
+
+    CUSTOMER ASKED: "{current_message}"
+    WHAT YOU DISCUSSED: {conversation_summary}
+
+    TASK: Create a natural, engaging response that:
+    1. Summarizes what you discussed in a conversational way
+    2. Offers to continue or help with something new
+    3. Feels helpful and remembers the context
+    4. Sounds natural, not robotic
+
+    EXAMPLES:
+    - "We were chatting about your Slack setup! You were working on the bot token. Want to continue with that, or need help with something else?"
+    - "Earlier we discussed your billing questions. I remember you were asking about the pricing plans. How's that going?"
+
+    Your natural conversation recap:"""
+            )
+            
+            llm = ChatOpenAI(
+                model_name="gpt-3.5-turbo", 
+                temperature=0.5,
+                openai_api_key=settings.OPENAI_API_KEY
+            )
+            
+            result = llm.invoke(prompt.format(
+                current_message=current_message,
+                conversation_summary=conversation_summary,
+                company_name=company_name
+            ))
+            
+            response_text = result.content if hasattr(result, 'content') else str(result)
+            return response_text.strip()
+            
+        except Exception as e:
+            logger.error(f"Error enhancing conversation summary: {e}")
+            return conversation_summary  # Fallback to original summary
+
+
+
 
     def _fallback_greeting_response(self, current_message: str, company_name: str, greeting_type: str = None) -> str:
         """Simple fallback greeting responses"""
