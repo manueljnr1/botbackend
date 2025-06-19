@@ -1614,7 +1614,7 @@ Your detailed, step-by-step response:"""
 
     def analyze_conversation_context_llm(self, current_message: str, conversation_history: List[Dict], 
                                    company_name: str) -> Dict[str, Any]:
-        """Smart context analysis that actually remembers what was discussed"""
+        """Smart context analysis with time-aware greeting detection"""
         
         user_msg_lower = current_message.lower().strip()
         greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'what\'s up']
@@ -1626,13 +1626,46 @@ Your detailed, step-by-step response:"""
         if not (is_greeting and has_previous_conversation):
             return {'type': 'CONTINUATION', 'reasoning': 'Not a greeting or no previous conversation'}
         
-        # Step 2: Actually analyze what they were discussing
+        # Step 2: Check time since last conversation
+        try:
+            # Get the last message timestamp
+            last_message = conversation_history[-1] if conversation_history else None
+            if last_message and 'timestamp' in last_message:
+                from datetime import datetime, timedelta
+                
+                last_timestamp = datetime.fromisoformat(last_message['timestamp'].replace('Z', '+00:00'))
+                current_time = datetime.utcnow()
+                time_since_last = current_time - last_timestamp
+                
+                hours_since_last = time_since_last.total_seconds() / 3600
+                
+                logger.info(f"⏰ Time since last conversation: {hours_since_last:.1f} hours")
+                
+                # If less than 12 hours, treat as continuation with warm greeting
+                if hours_since_last < 12:
+                    return {
+                        'type': 'RECENT_GREETING',
+                        'hours_since_last': hours_since_last,
+                        'reasoning': f'Recent greeting ({hours_since_last:.1f}h ago) - warm acknowledgment'
+                    }
+                # If 12+ hours, treat as fresh start
+                else:
+                    return {
+                        'type': 'FRESH_GREETING', 
+                        'hours_since_last': hours_since_last,
+                        'reasoning': f'Old conversation ({hours_since_last:.1f}h ago) - fresh start'
+                    }
+            
+        except Exception as e:
+            logger.error(f"Error checking conversation time: {e}")
+        
+        # Step 3: If we can't determine time, analyze topic for context
         try:
             # Get last few messages to understand context
             recent_messages = []
-            for msg in conversation_history[-8:]:
+            for msg in conversation_history[-6:]:
                 role = "User" if msg.get("role") == "user" else "Assistant"
-                content = msg.get("content", "")[:200]  # Limit length
+                content = msg.get("content", "")[:150]  # Shorter for quicker analysis
                 recent_messages.append(f"{role}: {content}")
             
             conversation_context = "\n".join(recent_messages)
@@ -1642,147 +1675,172 @@ Your detailed, step-by-step response:"""
             
             prompt = PromptTemplate(
                 input_variables=["conversation", "greeting"],
-                template="""Analyze this conversation and determine what the main topic was.
+                template="""Analyze this recent conversation to determine the main topic discussed.
 
     RECENT CONVERSATION:
     {conversation}
 
     USER JUST SAID: "{greeting}"
 
-    TASK: Since the user is greeting again, what should I say about our previous discussion?
+    TASK: What was the main topic being discussed?
 
-    PROVIDE:
-    1. TOPIC: What were we mainly discussing? (be specific)
-    2. RESPONSE: What should I say to bridge the conversation?
-
-    Be specific about the topic (e.g., "Slack integration setup" not just "integration").
-    Make the response natural and helpful.
-
-    FORMAT:
-    TOPIC: [specific topic discussed]
-    RESPONSE: [natural bridge response]
+    PROVIDE ONLY:
+    TOPIC: [specific topic in 2-4 words, e.g., "Slack integration", "billing questions", "account setup"]
 
     Analysis:"""
             )
             
-            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2, openai_api_key=settings.OPENAI_API_KEY)
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
             result = llm.invoke(prompt.format(conversation=conversation_context, greeting=current_message))
             
-            # FIX: Properly handle the response object
             response_text = result.content if hasattr(result, 'content') else str(result)
             
-            # Parse the response
-            topic = "our previous discussion"
-            bridge_response = "Still working on that, or need help with something else?"
-            
-            lines = response_text.split('\n')
-            for line in lines:
-                line = line.strip()
-                if line.startswith('TOPIC:'):
+            # Extract topic
+            topic = "previous discussion"
+            for line in response_text.split('\n'):
+                if line.strip().startswith('TOPIC:'):
                     topic = line.replace('TOPIC:', '').strip()
-                elif line.startswith('RESPONSE:'):
-                    bridge_response = line.replace('RESPONSE:', '').strip()
+                    break
             
-            logger.info(f"🧠 TOPIC CHANGE: greeting after discussing '{topic}'")
+            logger.info(f"🧠 GREETING with previous topic: '{topic}'")
             
             return {
-                'type': 'TOPIC_CHANGE',
+                'type': 'TOPIC_AWARE_GREETING',
                 'previous_topic': topic,
-                'suggested_approach': bridge_response,
-                'reasoning': f"Greeting after discussing {topic}"
+                'reasoning': f"Greeting with previous topic context: {topic}"
             }
             
         except Exception as e:
-            logger.error(f"Error in smart context analysis: {e}")
-            # Better fallback - just continue normally instead of confusing the user
+            logger.error(f"Error in topic analysis: {e}")
             return {
-                'type': 'CONTINUATION',
-                'reasoning': f'Error fallback: {str(e)}'
+                'type': 'SIMPLE_GREETING',
+                'reasoning': f'Fallback to simple greeting: {str(e)}'
             }
 
+
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
-                                suggested_approach: str, company_name: str) -> Optional[str]:
-        """Generate natural topic change responses using LLM"""
+                                suggested_approach: str, company_name: str, 
+                                context_analysis: Dict = None) -> Optional[str]:
+        """Generate time-aware and context-aware greeting responses"""
         
         try:
             from langchain_openai import ChatOpenAI
             from langchain.prompts import PromptTemplate
             
-            prompt = PromptTemplate(
-                input_variables=["current_message", "previous_topic", "suggested_approach", "company_name"],
-                template="""You are a helpful AI assistant for {company_name}. A returning customer just sent a message, and you need to acknowledge their previous conversation naturally.
+            # Determine the type of greeting response needed
+            greeting_type = context_analysis.get('type') if context_analysis else 'SIMPLE_GREETING'
+            hours_since_last = context_analysis.get('hours_since_last', 0) if context_analysis else 0
+            
+            if greeting_type == 'RECENT_GREETING':
+                # Less than 12 hours - warm continuation
+                prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you, and you spoke with them recently ({hours_since_last:.1f} hours ago).
 
-    CUSTOMER'S NEW MESSAGE: "{current_message}"
-    PREVIOUS TOPIC WE DISCUSSED: "{previous_topic}"
-    SUGGESTED APPROACH: "{suggested_approach}"
+    CUSTOMER'S MESSAGE: "{current_message}"
+    TIME SINCE LAST CONVERSATION: {hours_since_last:.1f} hours ago
 
-    TASK: Generate a warm, natural response that:
-    1. Acknowledges their greeting/new message
-    2. References what we discussed before (if relevant)
-    3. Offers to continue that topic OR help with something new
-    4. Sounds conversational and helpful, not robotic
-
-    GUIDELINES:
-    - Keep it friendly and professional
-    - Don't be overly formal
-    - Make it feel like a natural continuation
-    - Give them an easy way to either continue the previous topic or start fresh
-    - Keep response under 50 words
+    TASK: Generate a warm, welcoming response that:
+    1. Acknowledges their greeting warmly (like you remember them)
+    2. Shows you're still available to help
+    3. Asks how you can assist them today
+    4. Keep it friendly and brief (under 30 words)
 
     EXAMPLES:
-    - "Hi there! We were just discussing Slack integration setup. Would you like to continue with that, or is there something else I can help you with?"
-    - "Hello! I see we were working on your API configuration earlier. Want to pick up where we left off, or do you have a new question?"
-    - "Hey! We were talking about your billing questions before. Still need help with that, or something new today?"
+    - "Hello! I'm still here and ready to help. What can I assist you with today?"
+    - "Hi there! Good to see you back. How can I help you today?"
+    - "Hey! I'm still with you. What would you like to work on?"
 
-    Your natural response:"""
+    Your warm greeting response:"""
+
+            elif greeting_type == 'FRESH_GREETING':
+                # 12+ hours - fresh start
+                prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you after a longer break ({hours_since_last:.1f} hours ago).
+
+    CUSTOMER'S MESSAGE: "{current_message}"
+    TIME SINCE LAST CONVERSATION: {hours_since_last:.1f} hours ago
+
+    TASK: Generate a friendly, fresh greeting that:
+    1. Responds to their greeting warmly
+    2. Asks how you can help them today
+    3. Don't reference previous conversations unless they ask
+    4. Keep it welcoming and brief (under 25 words)
+
+    EXAMPLES:
+    - "Hello! How can I help you today?"
+    - "Hi there! I'm {company_name}'s AI assistant. What can I assist you with?"
+    - "Hey! Great to see you. How can I help you today?"
+
+    Your fresh greeting response:"""
+
+            elif greeting_type == 'TOPIC_AWARE_GREETING':
+                # Unknown time but we know the topic - store it for later
+                prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you.
+
+    CUSTOMER'S MESSAGE: "{current_message}"
+
+    TASK: Generate a friendly greeting that:
+    1. Responds to their greeting warmly
+    2. Asks how you can help them today
+    3. Keep it brief and welcoming (under 25 words)
+    4. DON'T mention previous topics unless they specifically ask
+
+    EXAMPLES:
+    - "Hello! How can I help you today?"
+    - "Hi there! What can I assist you with?"
+    - "Hey! Great to see you. How can I help?"
+
+    Your friendly greeting response:"""
+
+            else:
+                # Simple greeting fallback
+                prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you.
+
+    CUSTOMER'S MESSAGE: "{current_message}"
+
+    TASK: Generate a friendly, professional greeting that asks how you can help.
+    Keep it brief and welcoming (under 25 words).
+
+    Your greeting response:"""
+
+            prompt = PromptTemplate(
+                input_variables=["current_message", "company_name", "hours_since_last"],
+                template=prompt_template
             )
             
             llm = ChatOpenAI(
                 model_name="gpt-3.5-turbo", 
-                temperature=0.3,  # Slightly more creative for natural responses
+                temperature=0.3,
                 openai_api_key=settings.OPENAI_API_KEY
             )
             
             result = llm.invoke(prompt.format(
                 current_message=current_message,
-                previous_topic=previous_topic,
-                suggested_approach=suggested_approach,
-                company_name=company_name
+                company_name=company_name,
+                hours_since_last=hours_since_last
             ))
             
-            # Handle the response properly
             response_text = result.content if hasattr(result, 'content') else str(result)
             response_text = response_text.strip()
             
-            # Basic validation - ensure response isn't too long or empty
-            if len(response_text) > 200:
-                response_text = response_text[:200] + "..."
+            # Validation
+            if len(response_text) > 150:
+                response_text = response_text[:150] + "..."
             
-            if len(response_text) < 10:
-                # Fallback if LLM response is too short
-                logger.warning("LLM topic change response too short, using fallback")
-                return self._fallback_topic_change_response(current_message, previous_topic, company_name)
+            if len(response_text) < 5:
+                return self._fallback_greeting_response(current_message, company_name, greeting_type)
             
-            logger.info(f"🤖 Generated topic change response: {response_text[:50]}...")
+            logger.info(f"🤖 Generated {greeting_type} response: {response_text[:40]}...")
             return response_text
             
         except Exception as e:
-            logger.error(f"Error generating LLM topic change response: {e}")
-            # Use fallback method
-            return self._fallback_topic_change_response(current_message, previous_topic, company_name)
+            logger.error(f"Error generating greeting response: {e}")
+            return self._fallback_greeting_response(current_message, company_name, greeting_type)
 
-    def _fallback_topic_change_response(self, current_message: str, previous_topic: str, company_name: str) -> str:
-        """Fallback method if LLM fails"""
-        greetings = ['hello', 'hi', 'hey']
+    def _fallback_greeting_response(self, current_message: str, company_name: str, greeting_type: str = None) -> str:
+        """Simple fallback greeting responses"""
         
-        if any(greeting in current_message.lower() for greeting in greetings):
-            if previous_topic and previous_topic not in ['our previous conversation', 'NONE', 'None']:
-                return f"Hi! We were discussing {previous_topic} earlier. Would you like to continue with that, or is there something else I can help you with?"
-            else:
-                return f"Hello! I'm {company_name}'s AI assistant. How can I help you today?"
-        
-        # For non-greeting topic changes
-        if previous_topic and previous_topic not in ['our previous conversation', 'NONE', 'None']:
-            return f"I see you're asking about something different from our {previous_topic} discussion. How can I help you today?"
-        
-        return "How can I help you today?"
+        if greeting_type == 'RECENT_GREETING':
+            return "Hello! I'm still here and ready to help. What can I assist you with today?"
+        elif greeting_type == 'FRESH_GREETING':
+            return f"Hello! How can I help you today?"
+        else:
+            return f"Hi there! I'm {company_name}'s AI assistant. How can I help you today?"
