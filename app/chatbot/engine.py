@@ -1613,97 +1613,103 @@ Your detailed, step-by-step response:"""
     
 
     def analyze_conversation_context_llm(self, current_message: str, conversation_history: List[Dict], 
-                                   company_name: str) -> Dict[str, Any]:
-        """Hybrid approach: Simple greeting detection + LLM topic extraction"""
+                                    company_name: str) -> Dict[str, Any]:
+        """Smart context analysis that actually remembers what was discussed"""
         
         user_msg_lower = current_message.lower().strip()
         greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'what\'s up']
         
-        # Step 1: Simple greeting detection (reliable)
+        # Step 1: Check if it's a greeting
         is_greeting = any(greeting in user_msg_lower for greeting in greetings)
         has_previous_conversation = len(conversation_history) > 2
         
         if not (is_greeting and has_previous_conversation):
-            return {
-                'type': 'CONTINUATION',
-                'previous_topic': 'none',
-                'suggested_approach': 'Continue normally',
-                'reasoning': 'Not a greeting or no previous conversation'
-            }
+            return {'type': 'CONTINUATION'}
         
-        # Step 2: Use LLM to extract the previous topic (flexible)
+        # Step 2: Actually analyze what they were discussing
         try:
+            # Get last few messages to understand context
+            recent_messages = []
+            for msg in conversation_history[-8:]:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                content = msg.get("content", "")[:200]  # Limit length
+                recent_messages.append(f"{role}: {content}")
+            
+            conversation_context = "\n".join(recent_messages)
+            
             from langchain_openai import ChatOpenAI
             from langchain.prompts import PromptTemplate
             
-            # Get recent bot messages to understand what was being discussed
-            recent_bot_messages = []
-            for msg in conversation_history[-6:]:
-                if not msg.get("is_from_user", True):  # Bot messages
-                    recent_bot_messages.append(msg.get("content", ""))
-            
-            if not recent_bot_messages:
-                previous_topic = "our previous conversation"
-            else:
-                # Use LLM to summarize what was being discussed
-                context_text = "\n".join(recent_bot_messages[-2:])  # Last 2 bot responses
-                
-                prompt = PromptTemplate(
-                    input_variables=["context"],
-                    template="""Based on these recent bot responses, what topic was being discussed? 
-                    Give a brief 2-4 word description.
+            prompt = PromptTemplate(
+                input_variables=["conversation", "greeting"],
+                template="""Analyze this conversation and determine what the main topic was.
 
-    Recent responses:
-    {context}
+    RECENT CONVERSATION:
+    {conversation}
 
-    Topic (2-4 words):"""
-                )
-                
-                llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.1, openai_api_key=settings.OPENAI_API_KEY)
-                result = llm.invoke(prompt.format(context=context_text))
-                
-                topic_response = result.content if hasattr(result, 'content') else str(result)
-                previous_topic = topic_response.strip().lower()
-                
-                # Clean up the response
-                if len(previous_topic) > 50:
-                    previous_topic = previous_topic[:50] + "..."
+    USER JUST SAID: "{greeting}"
+
+    TASK: Since the user is greeting again, what should I say about our previous discussion?
+
+    PROVIDE:
+    1. TOPIC: What were we mainly discussing? (be specific)
+    2. RESPONSE: What should I say to bridge the conversation?
+
+    Be specific about the topic (e.g., "Slack integration setup" not just "integration").
+    Make the response natural and helpful.
+
+    FORMAT:
+    TOPIC: [specific topic discussed]
+    RESPONSE: [natural bridge response]
+
+    Analysis:"""
+            )
             
-            logger.info(f"🧠 TOPIC CHANGE DETECTED: greeting '{current_message}' after discussing {previous_topic}")
+            llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2, openai_api_key=settings.OPENAI_API_KEY)
+            result = llm.invoke(prompt.format(conversation=conversation_context, greeting=current_message))
+            
+            response_text = result.content if hasattr(result, 'content') else str(result)
+            
+            # Parse the response
+            topic = "our previous discussion"
+            bridge_response = "Still working on that, or need help with something else?"
+            
+            lines = response_text.split('\n')
+            for line in lines:
+                if line.startswith('TOPIC:'):
+                    topic = line.replace('TOPIC:', '').strip()
+                elif line.startswith('RESPONSE:'):
+                    bridge_response = line.replace('RESPONSE:', '').strip()
+            
+            logger.info(f"🧠 TOPIC CHANGE: greeting after discussing '{topic}'")
             
             return {
                 'type': 'TOPIC_CHANGE',
-                'previous_topic': previous_topic,
-                'suggested_approach': f"Still working on {previous_topic}, or need help with something else?",
-                'reasoning': f"User said '{current_message}' after discussing {previous_topic}"
+                'previous_topic': topic,
+                'suggested_approach': bridge_response,
+                'reasoning': f"Greeting after discussing {topic}"
             }
             
         except Exception as e:
-            logger.error(f"Error extracting topic with LLM: {e}")
-            # Fallback to generic topic detection
-            return {
-                'type': 'TOPIC_CHANGE',
-                'previous_topic': 'our previous conversation',
-                'suggested_approach': "Still working on that, or need help with something else?",
-                'reasoning': f"User said '{current_message}' after previous conversation (LLM fallback)"
-            }
+            logger.error(f"Error in smart context analysis: {e}")
+            # Better fallback - just continue normally instead of confusing the user
+            return {'type': 'CONTINUATION'}
 
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
                                 suggested_approach: str, company_name: str) -> str:
-        """
-        Generate appropriate response for topic changes
-        """
-        greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon']
+        """Generate natural topic change responses"""
         
+        # Use the LLM-generated bridge response directly
+        if suggested_approach and "Still working on" not in suggested_approach:
+            return suggested_approach
+        
+        # Fallback to natural responses
+        greetings = ['hello', 'hi', 'hey']
         if any(greeting in current_message.lower() for greeting in greetings):
-            if previous_topic and previous_topic != 'NONE':
-                return f"Hi there! I see we were discussing {previous_topic}. {suggested_approach}"
+            if previous_topic and previous_topic != 'our previous conversation':
+                return f"Hi! We were just discussing {previous_topic}. Would you like to continue with that, or is there something else I can help you with?"
             else:
-                return f"Hello! I'm {company_name}'s AI assistant. How can I help you today?"
-        
-        # For other topic changes
-        if previous_topic and previous_topic != 'NONE':
-            return f"I notice you're asking about something different now. {suggested_approach}"
+                return f"Hello! How can I help you today?"
         
         return None
