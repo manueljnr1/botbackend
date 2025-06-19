@@ -1386,7 +1386,7 @@ Your detailed, step-by-step response:"""
     def process_web_message_with_advanced_feedback_llm(self, api_key: str, user_message: str, user_identifier: str, 
                                                     max_context: int = 20, use_smart_llm: bool = False) -> Dict[str, Any]:
         """
-        Enhanced with LLM-based FAQ matching and smart answer generation
+        Enhanced with LLM-based FAQ matching and smart answer generation + context analysis
         """
         from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
         
@@ -1402,6 +1402,41 @@ Your detailed, step-by-step response:"""
         
         # Get or create session
         session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
+        
+        # NEW: Context analysis for topic changes
+        if not is_new_session:
+            conversation_history = memory.get_conversation_history(user_identifier, max_context)
+            
+            if conversation_history and len(conversation_history) > 1:
+                context_analysis = self.analyze_conversation_context_llm(
+                    user_message, 
+                    conversation_history, 
+                    tenant.name
+                )
+                
+                # Handle topic changes
+                if context_analysis.get('type') == 'TOPIC_CHANGE':
+                    topic_response = self.handle_topic_change_response(
+                        user_message,
+                        context_analysis.get('previous_topic'),
+                        context_analysis.get('suggested_approach'),
+                        tenant.name
+                    )
+                    
+                    if topic_response:
+                        # Store the topic change response
+                        memory.store_message(session_id, user_message, True)
+                        memory.store_message(session_id, topic_response, False)
+                        
+                        return {
+                            "session_id": session_id,
+                            "response": topic_response,
+                            "success": True,
+                            "is_new_session": False,
+                            "answered_by": "TOPIC_CHANGE_DETECTION",
+                            "context_analysis": context_analysis,
+                            "platform": "web"
+                        }
         
         # Email handling (same as before)
         extracted_email = feedback_manager.extract_email_from_message(user_message)

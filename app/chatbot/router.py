@@ -820,64 +820,7 @@ async def smart_chat_streaming_dedicated(
 
 
 
-@router.post("/chat/smart/old", response_model=ChatResponse)
-async def chat_with_advanced_smart_feedback(
-    request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Advanced web chat endpoint with enhanced smart feedback system."""
-    try:
-        logger.info(f"🧠📧 Advanced smart feedback chat for: {request.user_identifier}")
-        
-        # 🆕 NEW: Auto-generate UUID if user_identifier is missing or looks temporary
-        user_id = request.user_identifier
-        auto_generated = False
-        
-        if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-            user_id = f"auto_{str(uuid.uuid4())}"
-            auto_generated = True
-            logger.info(f"🔄 Auto-generated UUID for user: {user_id}")
-        else:
-            logger.info(f"👤 Using provided user_identifier: {user_id}")
-        
-        tenant = get_tenant_from_api_key(api_key, db)
-        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-        
-        engine = ChatbotEngine(db)
-        result = engine.process_web_message_with_advanced_feedback_llm(
-            api_key=api_key,
-            user_message=request.message,
-            user_identifier=user_id,  # 🆕 Use the processed user_id
-            max_context=request.max_context,
-            use_smart_llm=True
-        )
-        
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
-        
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=user_id,  # 🆕 Use the processed user_id
-            platform="web",
-            db=db
-        )
-        
-        logger.info("✅ Advanced smart feedback chat successful")
-        
-        # 🆕 NEW: Add the user_id to response so frontend can store it
-        result["user_id"] = user_id
-        result["auto_generated_user_id"] = auto_generated
-        
-        return result
-        
-    except HTTPException as e:
-        logger.error(f"HTTP exception in smart chat: {e.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"💥 Error in advanced smart feedback chat: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
+
 
 # Add webhook endpoint for processing email replies
 @router.post("/webhook/email-reply")
