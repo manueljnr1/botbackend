@@ -1701,19 +1701,88 @@ Your detailed, step-by-step response:"""
             }
 
     def handle_topic_change_response(self, current_message: str, previous_topic: str, 
-                               suggested_approach: str, company_name: str) -> Optional[str]:
-        """Generate natural topic change responses"""
+                                suggested_approach: str, company_name: str) -> Optional[str]:
+        """Generate natural topic change responses using LLM"""
         
-        # Use the LLM-generated bridge response directly
-        if suggested_approach and "Still working on" not in suggested_approach:
-            return suggested_approach
-        
-        # Fallback to natural responses
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain.prompts import PromptTemplate
+            
+            prompt = PromptTemplate(
+                input_variables=["current_message", "previous_topic", "suggested_approach", "company_name"],
+                template="""You are a helpful AI assistant for {company_name}. A returning customer just sent a message, and you need to acknowledge their previous conversation naturally.
+
+    CUSTOMER'S NEW MESSAGE: "{current_message}"
+    PREVIOUS TOPIC WE DISCUSSED: "{previous_topic}"
+    SUGGESTED APPROACH: "{suggested_approach}"
+
+    TASK: Generate a warm, natural response that:
+    1. Acknowledges their greeting/new message
+    2. References what we discussed before (if relevant)
+    3. Offers to continue that topic OR help with something new
+    4. Sounds conversational and helpful, not robotic
+
+    GUIDELINES:
+    - Keep it friendly and professional
+    - Don't be overly formal
+    - Make it feel like a natural continuation
+    - Give them an easy way to either continue the previous topic or start fresh
+    - Keep response under 50 words
+
+    EXAMPLES:
+    - "Hi there! We were just discussing Slack integration setup. Would you like to continue with that, or is there something else I can help you with?"
+    - "Hello! I see we were working on your API configuration earlier. Want to pick up where we left off, or do you have a new question?"
+    - "Hey! We were talking about your billing questions before. Still need help with that, or something new today?"
+
+    Your natural response:"""
+            )
+            
+            llm = ChatOpenAI(
+                model_name="gpt-3.5-turbo", 
+                temperature=0.3,  # Slightly more creative for natural responses
+                openai_api_key=settings.OPENAI_API_KEY
+            )
+            
+            result = llm.invoke(prompt.format(
+                current_message=current_message,
+                previous_topic=previous_topic,
+                suggested_approach=suggested_approach,
+                company_name=company_name
+            ))
+            
+            # Handle the response properly
+            response_text = result.content if hasattr(result, 'content') else str(result)
+            response_text = response_text.strip()
+            
+            # Basic validation - ensure response isn't too long or empty
+            if len(response_text) > 200:
+                response_text = response_text[:200] + "..."
+            
+            if len(response_text) < 10:
+                # Fallback if LLM response is too short
+                logger.warning("LLM topic change response too short, using fallback")
+                return self._fallback_topic_change_response(current_message, previous_topic, company_name)
+            
+            logger.info(f"🤖 Generated topic change response: {response_text[:50]}...")
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"Error generating LLM topic change response: {e}")
+            # Use fallback method
+            return self._fallback_topic_change_response(current_message, previous_topic, company_name)
+
+    def _fallback_topic_change_response(self, current_message: str, previous_topic: str, company_name: str) -> str:
+        """Fallback method if LLM fails"""
         greetings = ['hello', 'hi', 'hey']
-        if any(greeting in current_message.lower() for greeting in greetings):
-            if previous_topic and previous_topic != 'our previous conversation':
-                return f"Hi! We were just discussing {previous_topic}. Would you like to continue with that, or is there something else I can help you with?"
-            else:
-                return f"Hello! How can I help you today?"
         
-        return None
+        if any(greeting in current_message.lower() for greeting in greetings):
+            if previous_topic and previous_topic not in ['our previous conversation', 'NONE', 'None']:
+                return f"Hi! We were discussing {previous_topic} earlier. Would you like to continue with that, or is there something else I can help you with?"
+            else:
+                return f"Hello! I'm {company_name}'s AI assistant. How can I help you today?"
+        
+        # For non-greeting topic changes
+        if previous_topic and previous_topic not in ['our previous conversation', 'NONE', 'None']:
+            return f"I see you're asking about something different from our {previous_topic} discussion. How can I help you today?"
+        
+        return "How can I help you today?"

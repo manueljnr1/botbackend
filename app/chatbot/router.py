@@ -1627,6 +1627,8 @@ def calculate_formatting_aware_delay(chunk: str) -> float:
 
 
 
+# In your router.py, replace the smart chat endpoint with this:
+
 @router.post("/chat/smart")
 async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
@@ -1646,6 +1648,9 @@ async def smart_chat_with_followup_streaming(
             tenant = get_tenant_from_api_key(api_key, db)
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
+            # Initialize chatbot engine FIRST
+            engine = ChatbotEngine(db)
+            
             # Auto-generate user ID if needed
             user_id = request.user_identifier
             auto_generated = False
@@ -1662,12 +1667,13 @@ async def smart_chat_with_followup_streaming(
             memory = SimpleChatbotMemory(db, tenant.id)
             conversation_history = memory.get_conversation_history(user_id, request.max_context)
             
-            # NEW: Analyze conversation context with LLM
+            # NEW: Analyze conversation context with LLM - USE ENGINE METHOD
             context_analysis = None
             topic_change_response = None
             
             if conversation_history and len(conversation_history) > 1:
-                context_analysis = analyze_conversation_context_llm(
+                # FIX: Call the method from the engine instance
+                context_analysis = engine.analyze_conversation_context_llm(
                     request.message, 
                     conversation_history, 
                     tenant.name
@@ -1675,24 +1681,35 @@ async def smart_chat_with_followup_streaming(
                 
                 logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
                 
-                # Handle topic changes
-                if context_analysis.get('type') == 'TOPIC_CHANGE':
-                    topic_change_response = handle_topic_change_response(
+                # Handle topic changes - USE ENGINE METHOD
+                if context_analysis and context_analysis.get('type') == 'TOPIC_CHANGE':
+                    topic_change_response = engine.handle_topic_change_response(
                         request.message,
                         context_analysis.get('previous_topic'),
                         context_analysis.get('suggested_approach'),
                         tenant.name
                     )
+                    
+                    if topic_change_response and len(topic_change_response.strip()) > 0:
+                        logger.info(f"🔄 Topic change detected, sending bridge response: {topic_change_response[:50]}...")
+                    else:
+                        logger.info(f"🔄 Topic change detected but no bridge response generated, proceeding normally")
+                        topic_change_response = None
             
             # If topic change detected, send that response instead
             if topic_change_response:
-                logger.info(f"🔄 Topic change detected, sending bridge response")
+                logger.info(f"🔄 Sending topic change bridge response")
+                
+                # Store the conversation in memory
+                session_id, _ = memory.get_or_create_session(user_id, "web")
+                memory.store_message(session_id, request.message, True)
+                memory.store_message(session_id, topic_change_response, False)
                 
                 # Send topic change response as main response
                 main_response = {
                     'type': 'main_response',
                     'content': topic_change_response,
-                    'session_id': f"topic_change_{uuid.uuid4()}",
+                    'session_id': session_id,
                     'answered_by': 'TOPIC_CHANGE_DETECTION',
                     'context_analysis': context_analysis
                 }
@@ -1711,10 +1728,18 @@ async def smart_chat_with_followup_streaming(
                 
                 # Send completion
                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'topic_change': True})}\n"
+                
+                # Track conversation
+                track_conversation_started_with_super_tenant(
+                    tenant_id=tenant.id,
+                    user_identifier=user_id,
+                    platform="web",
+                    db=db
+                )
+                
                 return
             
             # Continue with normal processing if no topic change
-            engine = ChatbotEngine(db)
             result = engine.process_web_message_with_advanced_feedback_llm(
                 api_key=api_key,
                 user_message=request.message,
@@ -1724,8 +1749,11 @@ async def smart_chat_with_followup_streaming(
             )
             
             if not result.get("success"):
+                logger.error(f"❌ Smart chat failed: {result.get('error')}")
                 yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
                 return
+            
+            logger.info("✅ Chatbot response received successfully")
             
             # Track conversation
             track_conversation_started_with_super_tenant(
@@ -1777,9 +1805,12 @@ async def smart_chat_with_followup_streaming(
             logger.info(f"✅ Smart chat with follow-ups + context analysis completed")
             
         except HTTPException as e:
+            logger.error(f"🚫 HTTP error in smart chat: {e.detail}")
             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
         except Exception as e:
             logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
     
     return StreamingResponse(
@@ -1791,6 +1822,7 @@ async def smart_chat_with_followup_streaming(
             "X-Accel-Buffering": "no"
         }
     )
+
 
 def should_generate_followups_llm(user_question: str, bot_response: str, company_name: str) -> tuple[bool, List[str]]:
     """
@@ -1927,93 +1959,3 @@ def calculate_followup_delay(followup: str) -> float:
 
 
 
-def analyze_conversation_context_llm(current_message: str, conversation_history: List[Dict], 
-                                   company_name: str) -> Dict[str, Any]:
-    """Use LLM to analyze conversation context and detect topic changes"""
-    from langchain_openai import ChatOpenAI
-    from langchain.prompts import PromptTemplate
-    
-    # Format recent conversation history
-    history_text = ""
-    if conversation_history and len(conversation_history) > 1:
-        recent_history = conversation_history[-6:]  # Last 3 exchanges
-        for msg in recent_history:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            history_text += f"{role}: {msg['content'][:100]}...\n"
-    
-    prompt = PromptTemplate(
-        input_variables=["current_message", "history", "company_name"],
-        template="""You are a conversation context analyzer for {company_name}'s customer service chatbot.
-
-CURRENT USER MESSAGE: "{current_message}"
-
-RECENT CONVERSATION HISTORY:
-{history}
-
-TASK: Analyze if the user is continuing the previous topic or starting fresh.
-
-DECISION RULES:
-- If user says "hello/hi/hey" after discussing a specific topic → TOPIC_CHANGE
-- If user asks completely different question → TOPIC_CHANGE  
-- If user asks follow-up about same topic → CONTINUATION
-- If no conversation history → NEW_CONVERSATION
-
-RESPONSE FORMAT:
-ANALYSIS: TOPIC_CHANGE / CONTINUATION / NEW_CONVERSATION
-PREVIOUS_TOPIC: [brief topic description or NONE]
-SUGGESTED_APPROACH: [how bot should handle this]
-
-Example: "Still working on Slack setup, or need help with something else?"
-
-Analysis:"""
-    )
-    
-    try:
-        llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo",
-            temperature=0.2,
-            openai_api_key=settings.OPENAI_API_KEY
-        )
-        
-        result = llm.invoke(prompt.format(
-            current_message=current_message,
-            history=history_text if history_text else "No previous conversation",
-            company_name=company_name
-        ))
-        
-        response_text = result.content if hasattr(result, 'content') else str(result)
-        
-        # Parse LLM response
-        analysis = {}
-        lines = response_text.split('\n')
-        
-        for line in lines:
-            if line.startswith('ANALYSIS:'):
-                analysis['type'] = line.replace('ANALYSIS:', '').strip()
-            elif line.startswith('PREVIOUS_TOPIC:'):
-                analysis['previous_topic'] = line.replace('PREVIOUS_TOPIC:', '').strip()
-            elif line.startswith('SUGGESTED_APPROACH:'):
-                analysis['suggested_approach'] = line.replace('SUGGESTED_APPROACH:', '').strip()
-        
-        return analysis
-        
-    except Exception as e:
-        logger.error(f"Error in context analysis: {e}")
-        return {'type': 'CONTINUATION', 'previous_topic': 'Unknown', 'suggested_approach': 'Continue normally'}
-
-def handle_topic_change_response(current_message: str, previous_topic: str, 
-                               suggested_approach: str, company_name: str) -> str:
-    """Generate appropriate response for topic changes"""
-    greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon']
-    
-    if any(greeting in current_message.lower() for greeting in greetings):
-        if previous_topic and previous_topic != 'NONE':
-            return f"Hi there! I see we were discussing {previous_topic}. {suggested_approach}"
-        else:
-            return f"Hello! I'm {company_name}'s AI assistant. How can I help you today?"
-    
-    # For other topic changes
-    if previous_topic and previous_topic != 'NONE':
-        return f"I notice you're asking about something different now. {suggested_approach}"
-    
-    return None
