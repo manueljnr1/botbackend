@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from app.config import settings
 from fastapi import UploadFile
 from typing import Optional, Tuple
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -256,34 +257,13 @@ class LogoUploadService:
     
     async def _validate_file(self, file: UploadFile) -> Tuple[bool, str]:
         """Validate uploaded file"""
-        
-        # Check file type
+        # Just check MIME type and size - skip PIL validation entirely
         if file.content_type not in self.allowed_types:
             return False, f"Invalid file type. Allowed: {', '.join(self.allowed_types)}"
         
-        # Check file size
         if hasattr(file, 'size') and file.size and file.size > self.max_size:
             max_mb = self.max_size / (1024 * 1024)
             return False, f"File too large. Maximum size: {max_mb:.1f}MB"
-        
-        # Additional check - read a small portion to verify it's actually an image
-        if file.content_type != "image/svg+xml":
-            try:
-                # Save current position
-                current_pos = file.file.tell() if hasattr(file.file, 'tell') else 0
-                
-                # Read first few bytes
-                file.file.seek(0)
-                header = file.file.read(512)
-                
-                # Reset position
-                file.file.seek(current_pos)
-                
-                # Try to verify it's an image
-                Image.open(io.BytesIO(header))
-                
-            except Exception:
-                return False, "File appears to be corrupted or not a valid image"
         
         return True, "Valid"
     
