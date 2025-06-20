@@ -546,8 +546,8 @@ class AdvancedSmartFeedbackManager:
                                     context_html: str, user_email: str) -> str:
         """Generate enhanced email template with business name"""
         
-        app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
-        feedback_url = f"{app_base_url}/chatbot/feedback/form/{feedback_id}"
+        feedback_base_url = os.getenv("FEEDBACK_BASE_URL") or os.getenv("APP_BASE_URL", "https://botbackend-qtbf.onrender.com")
+        feedback_url = f"{feedback_base_url}/chatbot/feedback/form/{feedback_id}"
         
         return f"""
         <!DOCTYPE html>
