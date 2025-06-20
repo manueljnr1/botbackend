@@ -1164,6 +1164,7 @@ async def get_tenant_info_for_frontend(
         return {
             "success": True,
             "business_name": tenant.business_name,
+            "tenant_id": tenant.id,
             "branding": {
                 # Colors
                 "primary_color": tenant.primary_color or "#007bff",
@@ -1190,7 +1191,7 @@ async def get_tenant_info_for_frontend(
     except Exception as e:
         # Fallback branding
         return {
-            "success": True,
+            "success": False,
             "tenant_id": tenant.id,
             "business_name": "Chatbot",
             "branding": {
