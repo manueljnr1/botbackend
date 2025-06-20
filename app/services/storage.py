@@ -1,6 +1,7 @@
 import os
 import tempfile
 import logging
+import uuid
 from typing import Optional, List
 from supabase import create_client, Client
 from app.config import settings
