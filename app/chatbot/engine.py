@@ -668,150 +668,150 @@ Your detailed, step-by-step response:"""
 
     # ========================== SMART FEEDBACK SYSTEM ==========================
     
-    def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
-                                                    max_context: int = 20) -> Dict[str, Any]:
-        """
-        Enhanced with explicit FAQ quality filtering first, then KB fallback
-        """
-        from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+    # def process_web_message_with_advanced_feedback(self, api_key: str, user_message: str, user_identifier: str, 
+    #                                                 max_context: int = 20) -> Dict[str, Any]:
+    #     """
+    #     Enhanced with explicit FAQ quality filtering first, then KB fallback
+    #     """
+    #     from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
         
-        # Get tenant from API key
-        tenant = self._get_tenant_by_api_key(api_key)
-        if not tenant:
-            logger.error(f"Invalid API key: {api_key[:5]}...")
-            return {"error": "Invalid API key", "success": False}
+    #     # Get tenant from API key
+    #     tenant = self._get_tenant_by_api_key(api_key)
+    #     if not tenant:
+    #         logger.error(f"Invalid API key: {api_key[:5]}...")
+    #         return {"error": "Invalid API key", "success": False}
         
-        # Initialize managers
-        memory = SimpleChatbotMemory(self.db, tenant.id)
-        feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+    #     # Initialize managers
+    #     memory = SimpleChatbotMemory(self.db, tenant.id)
+    #     feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
         
-        # Get or create session
-        session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
+    #     # Get or create session
+    #     session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
         
-        # FIRST: Check if user is providing email (BEFORE checking if we should request)
-        extracted_email = feedback_manager.extract_email_from_message(user_message)
-        if extracted_email:
-            logger.info(f"📧 Extracted email from message: {extracted_email}")
+    #     # FIRST: Check if user is providing email (BEFORE checking if we should request)
+    #     extracted_email = feedback_manager.extract_email_from_message(user_message)
+    #     if extracted_email:
+    #         logger.info(f"📧 Extracted email from message: {extracted_email}")
             
-            # Store email and acknowledge
-            if feedback_manager.store_user_email(session_id, extracted_email):
-                acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+    #         # Store email and acknowledge
+    #         if feedback_manager.store_user_email(session_id, extracted_email):
+    #             acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
                 
-                # Store both user message and bot response
-                memory.store_message(session_id, user_message, True)
-                memory.store_message(session_id, acknowledgment, False)
+    #             # Store both user message and bot response
+    #             memory.store_message(session_id, user_message, True)
+    #             memory.store_message(session_id, acknowledgment, False)
                 
-                logger.info(f"✅ Email captured and stored: {extracted_email}")
+    #             logger.info(f"✅ Email captured and stored: {extracted_email}")
                 
-                return {
-                    "session_id": session_id,
-                    "response": acknowledgment,
-                    "success": True,
-                    "is_new_session": is_new_session,
-                    "email_captured": True,
-                    "user_email": extracted_email,
-                    "platform": "web"
-                }
+    #             return {
+    #                 "session_id": session_id,
+    #                 "response": acknowledgment,
+    #                 "success": True,
+    #                 "is_new_session": is_new_session,
+    #                 "email_captured": True,
+    #                 "user_email": extracted_email,
+    #                 "platform": "web"
+    #             }
         
-        # SECOND: Check if we should ask for email (new conversations without email)
-        if feedback_manager.should_request_email(session_id, user_identifier):
-            email_request = feedback_manager.generate_email_request_message(tenant.name)
+    #     # SECOND: Check if we should ask for email (new conversations without email)
+    #     if feedback_manager.should_request_email(session_id, user_identifier):
+    #         email_request = feedback_manager.generate_email_request_message(tenant.name)
             
-            # Store the email request as bot message
-            memory.store_message(session_id, email_request, False)
+    #         # Store the email request as bot message
+    #         memory.store_message(session_id, email_request, False)
             
-            logger.info(f"📧 Requesting email for new conversation: {user_identifier}")
+    #         logger.info(f"📧 Requesting email for new conversation: {user_identifier}")
             
-            return {
-                "session_id": session_id,
-                "response": email_request,
-                "success": True,
-                "is_new_session": is_new_session,
-                "email_requested": True,
-                "platform": "web"
-            }
+    #         return {
+    #             "session_id": session_id,
+    #             "response": email_request,
+    #             "success": True,
+    #             "is_new_session": is_new_session,
+    #             "email_requested": True,
+    #             "platform": "web"
+    #         }
         
-        # 🔍 ENHANCED: CHECK FAQS WITH QUALITY FILTER, THEN KB
-        faqs = self._get_faqs(tenant.id)
-        logger.info(f"🔍 Checking {len(faqs)} FAQs with quality filter before using knowledge base")
+    #     # 🔍 ENHANCED: CHECK FAQS WITH QUALITY FILTER, THEN KB
+    #     faqs = self._get_faqs(tenant.id)
+    #     logger.info(f"🔍 Checking {len(faqs)} FAQs with quality filter before using knowledge base")
         
-        # Try FAQ first with quality check
-        faq_answer = self._check_faq_with_llm(user_message, faqs)
+    #     # Try FAQ first with quality check
+    #     faq_answer = self._check_faq_with_llm(user_message, faqs)
         
-        if faq_answer:
-            logger.info(f"✅ HIGH-QUALITY FAQ ANSWER FOUND - Using direct FAQ response")
+    #     if faq_answer:
+    #         logger.info(f"✅ HIGH-QUALITY FAQ ANSWER FOUND - Using direct FAQ response")
             
-            # Store messages
-            memory.store_message(session_id, user_message, True)
-            memory.store_message(session_id, faq_answer, False)
+    #         # Store messages
+    #         memory.store_message(session_id, user_message, True)
+    #         memory.store_message(session_id, faq_answer, False)
             
-            return {
-                "session_id": session_id,
-                "response": faq_answer,
-                "success": True,
-                "is_new_session": is_new_session,
-                "answered_by": "FAQ",
-                "faq_matched": True,
-                "platform": "web"
-            }
+    #         return {
+    #             "session_id": session_id,
+    #             "response": faq_answer,
+    #             "success": True,
+    #             "is_new_session": is_new_session,
+    #             "answered_by": "FAQ",
+    #             "faq_matched": True,
+    #             "platform": "web"
+    #         }
         
-        # If no adequate FAQ, proceed with KB (which has detailed content)
-        logger.info(f"📚 No adequate FAQ found - using knowledge base for detailed answer")
+    #     # If no adequate FAQ, proceed with KB (which has detailed content)
+    #     logger.info(f"📚 No adequate FAQ found - using knowledge base for detailed answer")
         
-        result = self.process_message_simple_memory(
-            api_key=api_key,
-            user_message=user_message,
-            user_identifier=user_identifier,
-            platform="web",
-            max_context=max_context
-        )
+    #     result = self.process_message_simple_memory(
+    #         api_key=api_key,
+    #         user_message=user_message,
+    #         user_identifier=user_identifier,
+    #         platform="web",
+    #         max_context=max_context
+    #     )
         
-        if result.get("success"):
-            result["answered_by"] = "KnowledgeBase"
-            result["faq_matched"] = False
+    #     if result.get("success"):
+    #         result["answered_by"] = "KnowledgeBase"
+    #         result["faq_matched"] = False
         
-        if not result.get("success"):
-            return result
+    #     if not result.get("success"):
+    #         return result
         
-        bot_response = result["response"]
+    #     bot_response = result["response"]
         
-        # Enhanced inadequate response detection with advanced scoring
-        logger.info(f"🔍 Advanced feedback: Analyzing bot response for inadequate patterns")
+    #     # Enhanced inadequate response detection with advanced scoring
+    #     logger.info(f"🔍 Advanced feedback: Analyzing bot response for inadequate patterns")
         
-        try:
-            is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
-            logger.info(f"🔍 Advanced inadequate response detection result: {is_inadequate}")
+    #     try:
+    #         is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+    #         logger.info(f"🔍 Advanced inadequate response detection result: {is_inadequate}")
             
-            if is_inadequate:
-                logger.info(f"🔔 Detected inadequate response, triggering advanced feedback system")
+    #         if is_inadequate:
+    #             logger.info(f"🔔 Detected inadequate response, triggering advanced feedback system")
                 
-                # Get conversation context
-                conversation_history = memory.get_conversation_history(user_identifier, 10)
+    #             # Get conversation context
+    #             conversation_history = memory.get_conversation_history(user_identifier, 10)
                 
-                # Create advanced feedback request (sends professional email to tenant)
-                feedback_id = feedback_manager.create_feedback_request(
-                    session_id=session_id,
-                    user_question=user_message,
-                    bot_response=bot_response,
-                    conversation_context=conversation_history
-                )
+    #             # Create advanced feedback request (sends professional email to tenant)
+    #             feedback_id = feedback_manager.create_feedback_request(
+    #                 session_id=session_id,
+    #                 user_question=user_message,
+    #                 bot_response=bot_response,
+    #                 conversation_context=conversation_history
+    #             )
                 
-                if feedback_id:
-                    logger.info(f"✅ Created advanced feedback request {feedback_id} with real-time tracking")
-                    result["feedback_triggered"] = True
-                    result["feedback_id"] = feedback_id
-                    result["feedback_system"] = "advanced"
-                else:
-                    logger.error(f"❌ Failed to create advanced feedback request")
-            else:
-                logger.info(f"✅ Response appears adequate, no feedback needed")
+    #             if feedback_id:
+    #                 logger.info(f"✅ Created advanced feedback request {feedback_id} with real-time tracking")
+    #                 result["feedback_triggered"] = True
+    #                 result["feedback_id"] = feedback_id
+    #                 result["feedback_system"] = "advanced"
+    #             else:
+    #                 logger.error(f"❌ Failed to create advanced feedback request")
+    #         else:
+    #             logger.info(f"✅ Response appears adequate, no feedback needed")
                 
-        except Exception as e:
-            logger.error(f"💥 Error in advanced feedback detection: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+    #     except Exception as e:
+    #         logger.error(f"💥 Error in advanced feedback detection: {e}")
+    #         import traceback
+    #         logger.error(traceback.format_exc())
         
-        return result
+    #     return result
 
     def handle_advanced_tenant_feedback_response(self, api_key: str, feedback_id: str, tenant_response: str) -> Dict[str, Any]:
         """
@@ -1383,10 +1383,194 @@ Your detailed, step-by-step response:"""
             }
 
     # Update your main method to use LLM-based FAQ matching
+    # def process_web_message_with_advanced_feedback_llm(self, api_key: str, user_message: str, user_identifier: str, 
+    #                                                 max_context: int = 20, use_smart_llm: bool = False) -> Dict[str, Any]:
+    #     """
+    #     Enhanced with LLM-based FAQ matching and smart answer generation + context analysis
+    #     """
+    #     from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+        
+    #     # Get tenant from API key
+    #     tenant = self._get_tenant_by_api_key(api_key)
+    #     if not tenant:
+    #         logger.error(f"Invalid API key: {api_key[:5]}...")
+    #         return {"error": "Invalid API key", "success": False}
+        
+    #     # Initialize managers
+    #     memory = SimpleChatbotMemory(self.db, tenant.id)
+    #     feedback_manager = AdvancedSmartFeedbackManager(self.db, tenant.id)
+        
+    #     # Get or create session
+    #     session_id, is_new_session = memory.get_or_create_session(user_identifier, "web")
+        
+    #     # NEW: Context analysis for topic changes
+    #     if not is_new_session:
+    #         conversation_history = memory.get_conversation_history(user_identifier, max_context)
+            
+    #         if conversation_history and len(conversation_history) > 1:
+    #             context_analysis = self.analyze_conversation_context_llm(
+    #                 user_message, 
+    #                 conversation_history, 
+    #                 tenant.name
+    #             )
+                
+    #             # Handle topic changes
+    #             if context_analysis.get('type') == 'TOPIC_CHANGE':
+    #                 topic_response = self.handle_topic_change_response(
+    #                     user_message,
+    #                     context_analysis.get('previous_topic'),
+    #                     context_analysis.get('suggested_approach'),
+    #                     tenant.name
+    #                 )
+                    
+    #                 if topic_response:
+    #                     # Store the topic change response
+    #                     memory.store_message(session_id, user_message, True)
+    #                     memory.store_message(session_id, topic_response, False)
+                        
+    #                     return {
+    #                         "session_id": session_id,
+    #                         "response": topic_response,
+    #                         "success": True,
+    #                         "is_new_session": False,
+    #                         "answered_by": "TOPIC_CHANGE_DETECTION",
+    #                         "context_analysis": context_analysis,
+    #                         "platform": "web"
+    #                     }
+        
+    #     # Email handling (same as before)
+    #     extracted_email = feedback_manager.extract_email_from_message(user_message)
+    #     if extracted_email:
+    #         logger.info(f"📧 Extracted email from message: {extracted_email}")
+            
+    #         if feedback_manager.store_user_email(session_id, extracted_email):
+    #             acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                
+    #             memory.store_message(session_id, user_message, True)
+    #             memory.store_message(session_id, acknowledgment, False)
+                
+    #             return {
+    #                 "session_id": session_id,
+    #                 "response": acknowledgment,
+    #                 "success": True,
+    #                 "is_new_session": is_new_session,
+    #                 "email_captured": True,
+    #                 "user_email": extracted_email,
+    #                 "platform": "web"
+    #             }
+        
+    #     if feedback_manager.should_request_email(session_id, user_identifier):
+    #         email_request = feedback_manager.generate_email_request_message(tenant.name)
+    #         memory.store_message(session_id, email_request, False)
+            
+    #         return {
+    #             "session_id": session_id,
+    #             "response": email_request,
+    #             "success": True,
+    #             "is_new_session": is_new_session,
+    #             "email_requested": True,
+    #             "platform": "web"
+    #         }
+        
+    #     # 🤖 NEW: LLM-BASED SMART ANSWER GENERATION
+    #     if use_smart_llm:
+    #         logger.info(f"🤖 Using smart LLM answer generation")
+            
+    #         smart_result = self._get_smart_answer_with_llm(user_message, tenant.id)
+            
+    #         if smart_result.get("answer"):
+    #             logger.info(f"✅ SMART LLM ANSWER GENERATED - Source: {smart_result['source']}")
+                
+    #             memory.store_message(session_id, user_message, True)
+    #             memory.store_message(session_id, smart_result["answer"], False)
+                
+    #             return {
+    #                 "session_id": session_id,
+    #                 "response": smart_result["answer"],
+    #                 "success": True,
+    #                 "is_new_session": is_new_session,
+    #                 "answered_by": smart_result["source"],
+    #                 "faq_available": smart_result.get("faq_available", False),
+    #                 "kb_available": smart_result.get("kb_available", False),
+    #                 "platform": "web"
+    #             }
+        
+    #     # 🤖 ENHANCED: LLM-BASED FAQ MATCHING (fallback or primary method)
+    #     faqs = self._get_faqs(tenant.id)
+    #     logger.info(f"🤖 Using LLM-based FAQ matching for {len(faqs)} FAQs")
+        
+    #     # Try LLM-based FAQ matching first
+    #     faq_answer = self._check_faq_with_llm(user_message, faqs)
+        
+    #     if faq_answer:
+    #         logger.info(f"✅ LLM FAQ MATCH FOUND - Using FAQ response")
+            
+    #         memory.store_message(session_id, user_message, True)
+    #         memory.store_message(session_id, faq_answer, False)
+            
+    #         return {
+    #             "session_id": session_id,
+    #             "response": faq_answer,
+    #             "success": True,
+    #             "is_new_session": is_new_session,
+    #             "answered_by": "FAQ_LLM",
+    #             "faq_matched": True,
+    #             "platform": "web"
+    #         }
+        
+    #     # If no FAQ match, proceed with knowledge base
+    #     logger.info(f"📚 No adequate FAQ found with LLM - using knowledge base")
+        
+    #     result = self.process_message_simple_memory(
+    #         api_key=api_key,
+    #         user_message=user_message,
+    #         user_identifier=user_identifier,
+    #         platform="web",
+    #         max_context=max_context
+    #     )
+        
+    #     if result.get("success"):
+    #         result["answered_by"] = "KnowledgeBase"
+    #         result["faq_matched"] = False
+        
+    #     # Continue with feedback detection...
+    #     if not result.get("success"):
+    #         return result
+        
+    #     bot_response = result["response"]
+        
+    #     try:
+    #         is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+            
+    #         if is_inadequate:
+    #             logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                
+    #             conversation_history = memory.get_conversation_history(user_identifier, 10)
+                
+    #             feedback_id = feedback_manager.create_feedback_request(
+    #                 session_id=session_id,
+    #                 user_question=user_message,
+    #                 bot_response=bot_response,
+    #                 conversation_context=conversation_history
+    #             )
+                
+    #             if feedback_id:
+    #                 result["feedback_triggered"] = True
+    #                 result["feedback_id"] = feedback_id
+    #                 result["feedback_system"] = "advanced"
+            
+    #     except Exception as e:
+    #         logger.error(f"💥 Error in feedback detection: {e}")
+        
+    #     return result
+    
+
+
+
     def process_web_message_with_advanced_feedback_llm(self, api_key: str, user_message: str, user_identifier: str, 
-                                                    max_context: int = 20, use_smart_llm: bool = False) -> Dict[str, Any]:
+                                                max_context: int = 20, use_smart_llm: bool = False) -> Dict[str, Any]:
         """
-        Enhanced with LLM-based FAQ matching and smart answer generation + context analysis
+        Enhanced with LLM-based FAQ matching and smart answer generation + context analysis + FEEDBACK DETECTION
         """
         from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
         
@@ -1472,7 +1656,7 @@ Your detailed, step-by-step response:"""
                 "platform": "web"
             }
         
-        # 🤖 NEW: LLM-BASED SMART ANSWER GENERATION
+        # 🤖 NEW: LLM-BASED SMART ANSWER GENERATION WITH FEEDBACK DETECTION
         if use_smart_llm:
             logger.info(f"🤖 Using smart LLM answer generation")
             
@@ -1481,10 +1665,12 @@ Your detailed, step-by-step response:"""
             if smart_result.get("answer"):
                 logger.info(f"✅ SMART LLM ANSWER GENERATED - Source: {smart_result['source']}")
                 
+                # Store messages in memory
                 memory.store_message(session_id, user_message, True)
                 memory.store_message(session_id, smart_result["answer"], False)
                 
-                return {
+                # 🔔 CRITICAL: ADD FEEDBACK DETECTION FOR SMART LLM RESPONSES
+                result = {
                     "session_id": session_id,
                     "response": smart_result["answer"],
                     "success": True,
@@ -1494,6 +1680,47 @@ Your detailed, step-by-step response:"""
                     "kb_available": smart_result.get("kb_available", False),
                     "platform": "web"
                 }
+                
+                # Detect inadequate responses and trigger feedback system
+                try:
+                    is_inadequate = feedback_manager.detect_inadequate_response(smart_result["answer"])
+                    logger.info(f"🔍 Smart LLM inadequate response detection result: {is_inadequate}")
+                    
+                    if is_inadequate:
+                        logger.info(f"🔔 Detected inadequate Smart LLM response, triggering feedback system")
+                        
+                        # Get conversation context
+                        conversation_history = memory.get_conversation_history(user_identifier, 10)
+                        
+                        # Create feedback request
+                        feedback_id = feedback_manager.create_feedback_request(
+                            session_id=session_id,
+                            user_question=user_message,
+                            bot_response=smart_result["answer"],
+                            conversation_context=conversation_history
+                        )
+                        
+                        if feedback_id:
+                            # Add feedback info to response
+                            result["feedback_triggered"] = True
+                            result["feedback_id"] = feedback_id
+                            result["feedback_system"] = "advanced"
+                            
+                            # Optionally add feedback acknowledgment to response
+                            feedback_msg = f"\n\nI've noticed this might not fully answer your question. I've sent this conversation to our team for review, and they'll follow up with you shortly with a better response."
+                            result["response"] = smart_result["answer"] + feedback_msg
+                            
+                            logger.info(f"✅ Feedback request created for Smart LLM response: {feedback_id}")
+                        else:
+                            logger.error(f"❌ Failed to create feedback request for Smart LLM response")
+                    else:
+                        logger.info(f"✅ Smart LLM response appears adequate, no feedback needed")
+                        
+                except Exception as feedback_error:
+                    logger.error(f"💥 Error in Smart LLM feedback detection: {feedback_error}")
+                    # Continue with normal response if feedback system fails
+                
+                return result
         
         # 🤖 ENHANCED: LLM-BASED FAQ MATCHING (fallback or primary method)
         faqs = self._get_faqs(tenant.id)
@@ -1533,7 +1760,7 @@ Your detailed, step-by-step response:"""
             result["answered_by"] = "KnowledgeBase"
             result["faq_matched"] = False
         
-        # Continue with feedback detection...
+        # Continue with feedback detection for KB responses...
         if not result.get("success"):
             return result
         
@@ -1543,7 +1770,7 @@ Your detailed, step-by-step response:"""
             is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
             
             if is_inadequate:
-                logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                logger.info(f"🔔 Detected inadequate KB response, triggering feedback system")
                 
                 conversation_history = memory.get_conversation_history(user_identifier, 10)
                 
@@ -1560,10 +1787,14 @@ Your detailed, step-by-step response:"""
                     result["feedback_system"] = "advanced"
             
         except Exception as e:
-            logger.error(f"💥 Error in feedback detection: {e}")
+            logger.error(f"💥 Error in KB feedback detection: {e}")
         
         return result
-    
+
+
+
+
+
 
     def _check_faq_first_with_quality_filter(self, user_message: str, faqs: List[Dict[str, str]]) -> Optional[str]:
         """
