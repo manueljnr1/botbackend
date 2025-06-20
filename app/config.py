@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+    # Supabase Storage
+    SUPABASE_STORAGE_URL: str = os.getenv("SUPABASE_STORAGE_URL", "")
+    SUPABASE_STORAGE_BUCKET: str = os.getenv("SUPABASE_STORAGE_BUCKET", "tenant-logos")
+    
+    # Logo upload settings
+    MAX_LOGO_SIZE: int = 2 * 1024 * 1024  # 2MB
+    ALLOWED_LOGO_TYPES: list = ["image/jpeg", "image/png", "image/webp", "image/svg+xml"]
     
     def get_allowed_domains_list(self) -> list:
         """Get allowed domains as a list"""

@@ -11,6 +11,7 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import Request
+from fastapi import File, UploadFile
 from typing import List, Optional
 from pydantic import BaseModel,  EmailStr
 from pydantic import field_validator
@@ -31,6 +32,7 @@ from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
 
 from app.auth.supabase_service import supabase_auth_service
+from app.services.storage import LogoUploadService
 
 import logging
 logger = logging.getLogger(__name__)
@@ -155,6 +157,25 @@ class TenantEmailConfigUpdate(BaseModel):
     feedback_email: Optional[EmailStr] = None
     enable_feedback_system: Optional[bool] = None
     feedback_notification_enabled: Optional[bool] = None
+
+
+
+class BrandingUpdate(BaseModel):
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    text_color: Optional[str] = None
+    background_color: Optional[str] = None
+    user_bubble_color: Optional[str] = None
+    bot_bubble_color: Optional[str] = None
+    border_color: Optional[str] = None
+    logo_image_url: Optional[str] = None
+    logo_text: Optional[str] = None
+    border_radius: Optional[str] = None
+    widget_position: Optional[str] = None
+    font_family: Optional[str] = None
+    custom_css: Optional[str] = None
+
+
 
 # Rate limiting
 
@@ -1142,9 +1163,6 @@ async def update_tenant_prompt(
 
 
 
-
-
-
 def normalize_email(email: str) -> str:
     """Utility function to normalize email addresses"""
     if not email:
@@ -1156,3 +1174,148 @@ def emails_match(email1: str, email2: str) -> bool:
     if not email1 or not email2:
         return False
     return normalize_email(email1) == normalize_email(email2)
+
+
+
+
+@router.put("/{tenant_id}/branding")
+async def update_tenant_branding(
+    tenant_id: int,
+    branding_update: BrandingUpdate,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update tenant branding configuration"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    # Validate colors
+    color_fields = [
+        'primary_color', 'secondary_color', 'text_color', 
+        'background_color', 'user_bubble_color', 'bot_bubble_color', 'border_color'
+    ]
+    
+    update_data = branding_update.model_dump(exclude_unset=True)
+    
+    for field, value in update_data.items():
+        if field in color_fields and value:
+            if not validate_hex_color(value):
+                raise HTTPException(status_code=400, detail=f"Invalid color format for {field}")
+        
+        setattr(tenant, field, value)
+    
+    tenant.branding_updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {"success": True, "message": "Branding updated successfully"}
+
+def validate_hex_color(color: str) -> bool:
+    """Validate hex color format"""
+    import re
+    return bool(re.match(r'^#[0-9A-Fa-f]{6}$', color))
+
+
+
+@router.post("/{tenant_id}/upload-logo")
+async def upload_tenant_logo(
+    tenant_id: int,
+    file: UploadFile = File(...),
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Upload logo for tenant"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    # Validate file size
+    if file.size and file.size > settings.MAX_LOGO_SIZE:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File too large. Maximum size: {settings.MAX_LOGO_SIZE / (1024*1024):.1f}MB"
+        )
+    
+    logo_service = LogoUploadService()
+    
+    # Delete old logo if exists
+    if tenant.logo_image_url:
+        await logo_service.delete_logo(tenant.logo_image_url)
+    
+    # Upload new logo
+    success, message, logo_url = await logo_service.upload_logo(tenant_id, file)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    # Update tenant record
+    tenant.logo_image_url = logo_url
+    tenant.branding_updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": message,
+        "logo_url": logo_url,
+        "tenant_id": tenant_id
+    }
+
+@router.delete("/{tenant_id}/logo")
+async def delete_tenant_logo(
+    tenant_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Delete tenant logo"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    if not tenant.logo_image_url:
+        raise HTTPException(status_code=404, detail="No logo found")
+    
+    logo_service = LogoUploadService()
+    
+    # Delete from storage
+    deleted = await logo_service.delete_logo(tenant.logo_image_url)
+    
+    # Update tenant record regardless (cleanup)
+    old_url = tenant.logo_image_url
+    tenant.logo_image_url = None
+    tenant.branding_updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Logo deleted successfully",
+        "deleted_from_storage": deleted,
+        "old_url": old_url
+    }
+
+@router.get("/{tenant_id}/logo-info")
+async def get_tenant_logo_info(
+    tenant_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get current logo information"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+    
+    return {
+        "tenant_id": tenant_id,
+        "has_logo": bool(tenant.logo_image_url),
+        "logo_url": tenant.logo_image_url,
+        "logo_text_fallback": tenant.logo_text or (tenant.business_name or tenant.name)[:2].upper(),
+        "upload_settings": {
+            "max_size_mb": settings.MAX_LOGO_SIZE / (1024*1024),
+            "allowed_types": settings.ALLOWED_LOGO_TYPES,
+            "recommended_size": "512x512 pixels or smaller",
+            "recommended_formats": ["PNG with transparency", "SVG for scalability", "WebP for optimization"]
+        }
+    }

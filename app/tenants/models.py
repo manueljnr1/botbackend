@@ -6,6 +6,11 @@ from app.database import Base
 from datetime import datetime, timedelta
 import secrets
 from typing import TYPE_CHECKING
+from sqlalchemy.orm import validates
+import re
+
+
+
 
 if TYPE_CHECKING:
     from app.live_chat.models import Agent, Conversation
@@ -77,6 +82,37 @@ class Tenant(Base):
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan", overlaps="tenant_credentials")
     subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
     
+
+    # Branding and customization fields
+    primary_color = Column(String(7), default="#007bff")  # Hex color
+    secondary_color = Column(String(7), default="#f0f4ff")
+    text_color = Column(String(7), default="#222222")
+    background_color = Column(String(7), default="#ffffff")
+    user_bubble_color = Column(String(7), default="#007bff")
+    bot_bubble_color = Column(String(7), default="#f0f4ff")
+    border_color = Column(String(7), default="#e0e0e0")
+    
+    # Logo options
+    logo_image_url = Column(String, nullable=True)  # URL to uploaded logo
+    logo_text = Column(String(10), nullable=True)   # Fallback text (e.g., "SB")
+    
+    # Advanced customization
+    border_radius = Column(String(10), default="12px")
+    widget_position = Column(String(20), default="bottom-right")
+    font_family = Column(String(100), default="Inter, sans-serif")
+    
+    # Custom CSS for power users
+    custom_css = Column(Text, nullable=True)
+    
+    # Branding validation
+    branding_updated_at = Column(DateTime, nullable=True)
+    branding_version = Column(Integer, default=1, nullable=True)  # For cache invalidation
+
+
+
+
+
+
     # Live chat relationships (FIXED - no duplicates)
     agents = relationship(
     "Agent", 
@@ -96,6 +132,61 @@ class Tenant(Base):
         if email:
             return email.lower().strip()
         return email
+
+
+    @validates('primary_color', 'secondary_color', 'text_color', 'background_color', 
+              'user_bubble_color', 'bot_bubble_color', 'border_color')
+    def validate_color(self, key, color):
+        """Validate hex color format"""
+        if color is None:
+            return color
+        
+        # Remove any whitespace
+        color = color.strip()
+        
+        # Check hex format
+        if not re.match(r'^#[0-9A-Fa-f]{6}$', color):
+            raise ValueError(f"Invalid color format for {key}. Must be hex format like #007bff")
+        
+        return color.upper()  # Normalize to uppercase
+    
+    @validates('widget_position')
+    def validate_position(self, key, position):
+        """Validate widget position"""
+        if position is None:
+            return position
+            
+        valid_positions = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
+        if position not in valid_positions:
+            raise ValueError(f"Invalid widget position. Must be one of: {valid_positions}")
+        
+        return position
+    
+    @validates('logo_text')
+    def validate_logo_text(self, key, logo_text):
+        """Validate logo text length"""
+        if logo_text is None:
+            return logo_text
+            
+        if len(logo_text) > 3:
+            return logo_text[:3]  # Truncate to 3 characters
+        
+        return logo_text.upper()  # Normalize to uppercase
+    
+    @validates('border_radius')
+    def validate_border_radius(self, key, radius):
+        """Validate border radius CSS format"""
+        if radius is None:
+            return radius
+            
+        # Basic validation for CSS units
+        if not re.match(r'^\d+(\.\d+)?(px|rem|em|%)$', radius):
+            return '12px'  # Default fallback
+        
+        return radius
+
+
+
 
 # ADD this event listener AFTER your Tenant class definition
 @event.listens_for(Tenant.email, 'set')

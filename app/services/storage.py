@@ -4,6 +4,8 @@ import logging
 from typing import Optional, List
 from supabase import create_client, Client
 from app.config import settings
+from fastapi import UploadFile
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class SupabaseStorageService:
         
         # Ensure buckets exist
         self._ensure_buckets_exist()
+        
     
     def _ensure_buckets_exist(self):
         """Create storage buckets if they don't exist"""
@@ -177,7 +180,205 @@ class SupabaseStorageService:
             return True
         except:
             return False
+        
 
-
-# Global instance
+class LogoUploadService:
+    def __init__(self):
+        # Initialize Supabase client with service key (for admin operations)
+        self.supabase: Client = create_client(
+            settings.SUPABASE_URL, 
+            settings.SUPABASE_SERVICE_KEY
+        )
+        self.bucket_name = settings.SUPABASE_STORAGE_BUCKET or "tenant-logos"
+        self.max_size = settings.MAX_LOGO_SIZE or 2 * 1024 * 1024  # 2MB
+        
+        # Allowed file types
+        self.allowed_types = [
+            "image/jpeg", "image/jpg", "image/png", 
+            "image/webp", "image/svg+xml"
+        ]
+    
+    async def upload_logo(self, tenant_id: int, file: UploadFile) -> Tuple[bool, str, Optional[str]]:
+        """
+        Upload logo to Supabase Storage
+        Returns: (success, message, logo_url)
+        """
+        try:
+            # Validate file
+            validation_result = await self._validate_file(file)
+            if not validation_result[0]:
+                return False, validation_result[1], None
+            
+            # Generate unique filename
+            file_extension = self._get_file_extension(file.filename)
+            filename = f"tenant_{tenant_id}_{uuid.uuid4().hex}{file_extension}"
+            
+            # Read file content
+            file_content = await file.read()
+            
+            # Optimize image (except SVG)
+            if file.content_type != "image/svg+xml":
+                optimized_content = self._optimize_image(file_content, file.content_type)
+            else:
+                optimized_content = file_content
+            
+            # Upload to Supabase Storage
+            logger.info(f"Uploading logo for tenant {tenant_id}: {filename}")
+            
+            response = self.supabase.storage.from_(self.bucket_name).upload(
+                filename, 
+                optimized_content,
+                file_options={
+                    "content-type": file.content_type,
+                    "cache-control": "3600"  # Cache for 1 hour
+                }
+            )
+            
+            # Check for upload errors
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Supabase upload error: {response.error}")
+                return False, f"Upload failed: {response.error}", None
+            
+            # Get public URL
+            public_url_response = self.supabase.storage.from_(self.bucket_name).get_public_url(filename)
+            
+            if not public_url_response:
+                return False, "Failed to get public URL", None
+            
+            public_url = public_url_response
+            logger.info(f"Logo uploaded successfully: {public_url}")
+            
+            return True, "Logo uploaded successfully", public_url
+            
+        except Exception as e:
+            logger.error(f"Upload error: {str(e)}")
+            return False, f"Upload error: {str(e)}", None
+    
+    async def _validate_file(self, file: UploadFile) -> Tuple[bool, str]:
+        """Validate uploaded file"""
+        
+        # Check file type
+        if file.content_type not in self.allowed_types:
+            return False, f"Invalid file type. Allowed: {', '.join(self.allowed_types)}"
+        
+        # Check file size
+        if hasattr(file, 'size') and file.size and file.size > self.max_size:
+            max_mb = self.max_size / (1024 * 1024)
+            return False, f"File too large. Maximum size: {max_mb:.1f}MB"
+        
+        # Additional check - read a small portion to verify it's actually an image
+        if file.content_type != "image/svg+xml":
+            try:
+                # Save current position
+                current_pos = file.file.tell() if hasattr(file.file, 'tell') else 0
+                
+                # Read first few bytes
+                file.file.seek(0)
+                header = file.file.read(512)
+                
+                # Reset position
+                file.file.seek(current_pos)
+                
+                # Try to verify it's an image
+                Image.open(io.BytesIO(header))
+                
+            except Exception:
+                return False, "File appears to be corrupted or not a valid image"
+        
+        return True, "Valid"
+    
+    def _get_file_extension(self, filename: str) -> str:
+        """Get file extension from filename"""
+        if not filename:
+            return ".png"  # Default
+        return os.path.splitext(filename)[1].lower() or ".png"
+    
+    def _optimize_image(self, content: bytes, content_type: str) -> bytes:
+        """Optimize image for web use"""
+        try:
+            # Open image with PIL
+            image = Image.open(io.BytesIO(content))
+            
+            # Convert to RGB if necessary (for JPEG compatibility)
+            if image.mode in ('RGBA', 'P') and content_type == "image/jpeg":
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                if image.mode == 'RGBA':
+                    background.paste(image, mask=image.split()[-1])
+                else:
+                    background.paste(image)
+                image = background
+            
+            # Resize if too large (max 512x512 for logos)
+            max_size = (512, 512)
+            if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
+                image.thumbnail(max_size, Image.Resampling.LANCZOS)
+                logger.info(f"Resized image to {image.size}")
+            
+            # Save optimized image
+            output = io.BytesIO()
+            
+            if content_type == "image/png":
+                image.save(output, format="PNG", optimize=True)
+            elif content_type == "image/webp":
+                image.save(output, format="WEBP", optimize=True, quality=85)
+            else:  # JPEG
+                image.save(output, format="JPEG", optimize=True, quality=85)
+            
+            optimized_content = output.getvalue()
+            
+            # Log compression results
+            original_size = len(content)
+            optimized_size = len(optimized_content)
+            compression_ratio = (1 - optimized_size / original_size) * 100
+            
+            logger.info(f"Image optimized: {original_size} → {optimized_size} bytes ({compression_ratio:.1f}% reduction)")
+            
+            return optimized_content
+            
+        except Exception as e:
+            logger.warning(f"Image optimization failed: {e}. Using original.")
+            return content
+    
+    async def delete_logo(self, logo_url: str) -> bool:
+        """Delete logo from Supabase Storage"""
+        try:
+            # Extract filename from URL
+            # URL format: https://project.supabase.co/storage/v1/object/public/tenant-logos/filename
+            if '/tenant-logos/' in logo_url:
+                filename = logo_url.split('/tenant-logos/')[-1]
+            else:
+                logger.warning(f"Cannot extract filename from URL: {logo_url}")
+                return False
+            
+            logger.info(f"Deleting logo: {filename}")
+            
+            response = self.supabase.storage.from_(self.bucket_name).remove([filename])
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Delete error: {response.error}")
+                return False
+            
+            logger.info(f"Logo deleted successfully: {filename}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting logo: {e}")
+            return False
+    
+    def get_logo_info(self, tenant_id: int) -> dict:
+        """Get logo upload guidelines and settings"""
+        return {
+            "max_size_mb": self.max_size / (1024 * 1024),
+            "allowed_types": self.allowed_types,
+            "recommended_size": "512x512 pixels or smaller",
+            "recommended_formats": [
+                "PNG with transparency (best for logos)",
+                "SVG for perfect scalability", 
+                "WebP for smallest file size",
+                "JPEG for photos"
+            ],
+            "bucket_name": self.bucket_name,
+            "tenant_prefix": f"tenant_{tenant_id}_"
+        }
+    
 storage_service = SupabaseStorageService()

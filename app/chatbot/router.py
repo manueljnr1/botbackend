@@ -1157,51 +1157,53 @@ async def get_tenant_info_for_frontend(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Get tenant information for frontend chatbot widget
-    Returns business name and branding info for the chatbot header
-    """
+    """Enhanced tenant info with full branding support"""
     try:
-        # Get tenant from API key
         tenant = get_tenant_from_api_key(api_key, db)
         
-        # Return essential info for frontend
         return {
             "success": True,
             "business_name": tenant.business_name,
-            "tenant_name": tenant.name,  # Fallback if business_name is empty
-            "display_name": tenant.business_name or tenant.name,
             "branding": {
-                "primary_color": "#6d28d9",  # Default purple, could be customizable later
-                "logo_text": (tenant.business_name or tenant.name)[:2].upper(),  # First 2 letters for logo
-                "welcome_message": f"Hey there! I'm the AI assistant for {tenant.business_name or tenant.name}. How can I help you today?"
-            }
-        }
-        
-    except HTTPException as e:
-        # Return error for invalid API key
-        return {
-            "success": False,
-            "error": "Invalid API key",
-            "business_name": "Chatbot",  # Fallback
-            "display_name": "Chatbot",
-            "branding": {
-                "primary_color": "#6d28d9",
-                "logo_text": "AI",
-                "welcome_message": "Hello! How can I assist you today?"
+                # Colors
+                "primary_color": tenant.primary_color or "#007bff",
+                "secondary_color": tenant.secondary_color or "#f0f4ff", 
+                "text_color": tenant.text_color or "#222222",
+                "background_color": tenant.background_color or "#ffffff",
+                "user_bubble_color": tenant.user_bubble_color or "#007bff",
+                "bot_bubble_color": tenant.bot_bubble_color or "#f0f4ff",
+                "border_color": tenant.border_color or "#e0e0e0",
+                
+                # Logo
+                "logo_image": tenant.logo_image_url,
+                "logo_text": tenant.logo_text or (tenant.business_name or tenant.name)[:2].upper(),
+                
+                # Layout
+                "border_radius": tenant.border_radius or "12px",
+                "widget_position": tenant.widget_position or "bottom-right",
+                "font_family": tenant.font_family or "Inter, sans-serif",
+                
+                # Custom CSS
+                "custom_css": tenant.custom_css
             }
         }
     except Exception as e:
-        logger.error(f"Error getting tenant info: {str(e)}")
+        # Fallback branding
         return {
             "success": False,
-            "error": "Server error",
             "business_name": "Chatbot",
-            "display_name": "Chatbot", 
             "branding": {
-                "primary_color": "#6d28d9",
+                "primary_color": "#007bff",
+                "secondary_color": "#f0f4ff",
+                "text_color": "#222222",
+                "background_color": "#ffffff",
+                "user_bubble_color": "#007bff", 
+                "bot_bubble_color": "#f0f4ff",
+                "border_color": "#e0e0e0",
                 "logo_text": "AI",
-                "welcome_message": "Hello! How can I assist you today?"
+                "border_radius": "12px",
+                "widget_position": "bottom-right",
+                "font_family": "Inter, sans-serif"
             }
         }
 
