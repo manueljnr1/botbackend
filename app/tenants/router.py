@@ -182,8 +182,8 @@ class BrandingUpdate(BaseModel):
 
 class LogoUploadRequest(BaseModel):
     file_data: str  # Base64 encoded file data
-    filename: str
-    content_type: str
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 
@@ -1309,7 +1309,6 @@ async def upload_tenant_logo(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Upload logo using base64 encoded data"""
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
@@ -1328,6 +1327,20 @@ async def upload_tenant_logo(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid base64 data: {str(e)}")
         
+        # Handle missing filename
+        filename = upload_data.filename or "logo"
+        
+        # Handle missing content_type
+        content_type = upload_data.content_type
+        if not content_type:
+            # Try to detect from base64 data
+            if upload_data.file_data.startswith('/9j/'):
+                content_type = "image/jpeg"
+            elif upload_data.file_data.startswith('iVBOR'):
+                content_type = "image/png"
+            else:
+                content_type = "image/jpeg"  # default
+        
         # Validate file size
         max_size = 2 * 1024 * 1024  # 2MB
         if file_size > max_size:
@@ -1337,19 +1350,19 @@ async def upload_tenant_logo(
                 detail=f"File too large. Maximum size: {max_mb:.1f}MB"
             )
         
-        # Validate content type
+        # Validate content type (only check once)
         allowed_types = [
             "image/jpeg", "image/jpg", "image/png", 
             "image/webp", "image/svg+xml"
         ]
-        if upload_data.content_type not in allowed_types:
+        if content_type not in allowed_types:
             raise HTTPException(
                 status_code=400, 
                 detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
             )
         
         # Validate it's actually an image (except SVG)
-        if upload_data.content_type != "image/svg+xml":
+        if content_type != "image/svg+xml":
             try:
                 Image.open(io.BytesIO(file_content))
             except Exception:
@@ -1367,7 +1380,7 @@ async def upload_tenant_logo(
                 self.file.seek(0)
                 return self.file.read()
         
-        mock_file = MockUploadFile(file_content, upload_data.filename, upload_data.content_type)
+        mock_file = MockUploadFile(file_content, filename, content_type)
         
         # Initialize logo service
         logo_service = LogoUploadService()
@@ -1402,9 +1415,6 @@ async def upload_tenant_logo(
     except Exception as e:
         logger.error(f"Logo upload error: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-
-
-
 
 @router.post("/{tenant_id}/test-logo-service")
 async def test_logo_service(
