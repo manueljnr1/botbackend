@@ -1,4 +1,5 @@
 import os
+import io
 import tempfile
 import logging
 import uuid
@@ -30,22 +31,44 @@ class SupabaseStorageService:
         
     
     def _ensure_buckets_exist(self):
-        """Create storage buckets if they don't exist"""
+        """Create storage buckets if they don't exist - ENHANCED"""
         try:
             # List existing buckets
             buckets_response = self.client.storage.list_buckets()
-            existing_buckets = [bucket.name for bucket in buckets_response]
+            
+            if hasattr(buckets_response, 'data') and buckets_response.data:
+                existing_buckets = [bucket.name for bucket in buckets_response.data]
+            elif isinstance(buckets_response, list):
+                existing_buckets = [bucket.name for bucket in buckets_response]
+            else:
+                logger.warning("Could not determine existing buckets, attempting to create anyway")
+                existing_buckets = []
             
             # Create knowledge-base-files bucket if not exists
             if self.knowledge_base_bucket not in existing_buckets:
-                self.client.storage.create_bucket(self.knowledge_base_bucket, {"public": False})
-                logger.info(f"Created bucket: {self.knowledge_base_bucket}")
+                try:
+                    self.client.storage.create_bucket(self.knowledge_base_bucket, {"public": False})
+                    logger.info(f"Created bucket: {self.knowledge_base_bucket}")
+                except Exception as e:
+                    logger.warning(f"Could not create {self.knowledge_base_bucket}: {e}")
             
             # Create vector-stores bucket if not exists
             if self.vector_store_bucket not in existing_buckets:
-                self.client.storage.create_bucket(self.vector_store_bucket, {"public": False})
-                logger.info(f"Created bucket: {self.vector_store_bucket}")
-                
+                try:
+                    self.client.storage.create_bucket(self.vector_store_bucket, {"public": False})
+                    logger.info(f"Created bucket: {self.vector_store_bucket}")
+                except Exception as e:
+                    logger.warning(f"Could not create {self.vector_store_bucket}: {e}")
+            
+            # Create tenant-logos bucket if not exists
+            logo_bucket = getattr(self, 'bucket_name', 'tenant-logos')
+            if logo_bucket not in existing_buckets:
+                try:
+                    self.client.storage.create_bucket(logo_bucket, {"public": True})  # Logos should be public
+                    logger.info(f"Created bucket: {logo_bucket}")
+                except Exception as e:
+                    logger.warning(f"Could not create {logo_bucket}: {e}")
+                    
         except Exception as e:
             logger.warning(f"Could not verify/create buckets: {e}")
             # Continue anyway - buckets might exist but we can't list them
@@ -257,17 +280,40 @@ class LogoUploadService:
             return False, f"Upload error: {str(e)}", None
     
     async def _validate_file(self, file: UploadFile) -> Tuple[bool, str]:
-        """Validate uploaded file"""
-        # Just check MIME type and size - skip PIL validation entirely
-        if file.content_type not in self.allowed_types:
-            return False, f"Invalid file type. Allowed: {', '.join(self.allowed_types)}"
+        """Validate uploaded file - ENHANCED VERSION"""
+        try:
+            # Check MIME type
+            if file.content_type not in self.allowed_types:
+                return False, f"Invalid file type. Allowed: {', '.join(self.allowed_types)}"
+            
+            # Read file content to check size
+            content = await file.read()
+            file_size = len(content)
+            
+            # Reset file position for later use
+            file.file.seek(0) if hasattr(file.file, 'seek') else None
+            
+            if file_size > self.max_size:
+                max_mb = self.max_size / (1024 * 1024)
+                return False, f"File too large. Maximum size: {max_mb:.1f}MB"
+            
+            # Basic file validation for non-SVG files
+            if file.content_type != "image/svg+xml":
+                try:
+                    from io import BytesIO
+                    from PIL import Image
+                    
+                    # Try to open with PIL to verify it's a valid image
+                    Image.open(BytesIO(content))
+                except Exception:
+                    return False, "Invalid image file"
+            
+            return True, "Valid"
+            
+        except Exception as e:
+            logger.error(f"File validation error: {e}")
+            return False, f"Validation failed: {str(e)}"
         
-        if hasattr(file, 'size') and file.size and file.size > self.max_size:
-            max_mb = self.max_size / (1024 * 1024)
-            return False, f"File too large. Maximum size: {max_mb:.1f}MB"
-        
-        return True, "Valid"
-    
     def _get_file_extension(self, filename: str) -> str:
         """Get file extension from filename"""
         if not filename:

@@ -1225,42 +1225,72 @@ async def upload_tenant_logo(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Upload logo for tenant"""
-    tenant = get_tenant_from_api_key(api_key, db)
+    """Upload logo for tenant - FIXED VERSION"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        if tenant.id != tenant_id:
+            raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+        
+        # Read file content once
+        file_content = await file.read()
+        file_size = len(file_content)
+        
+        # Validate file size using the service's settings
+        logo_service = LogoUploadService()
+        
+        if file_size > logo_service.max_size:
+            max_mb = logo_service.max_size / (1024*1024)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"File too large. Maximum size: {max_mb:.1f}MB"
+            )
+        
+        # Validate file type
+        if file.content_type not in logo_service.allowed_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file type. Allowed: {', '.join(logo_service.allowed_types)}"
+            )
+        
+        # Delete old logo if exists
+        if tenant.logo_image_url:
+            try:
+                await logo_service.delete_logo(tenant.logo_image_url)
+            except Exception as e:
+                logger.warning(f"Failed to delete old logo: {e}")
+        
+        # Create a new UploadFile-like object with the content
+        from io import BytesIO
+        
+        # Reset file position and create new file object
+        file.file = BytesIO(file_content)
+        file.file.seek(0)
+        
+        # Upload new logo
+        success, message, logo_url = await logo_service.upload_logo(tenant_id, file)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        # Update tenant record
+        tenant.logo_image_url = logo_url
+        tenant.branding_updated_at = datetime.utcnow()
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": message,
+            "logo_url": logo_url,
+            "tenant_id": tenant_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Logo upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     
-    if tenant.id != tenant_id:
-        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
-    
-    # Validate file size
-    if file.size and file.size > settings.MAX_LOGO_SIZE:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File too large. Maximum size: {settings.MAX_LOGO_SIZE / (1024*1024):.1f}MB"
-        )
-    
-    logo_service = LogoUploadService()
-    
-    # Delete old logo if exists
-    if tenant.logo_image_url:
-        await logo_service.delete_logo(tenant.logo_image_url)
-    
-    # Upload new logo
-    success, message, logo_url = await logo_service.upload_logo(tenant_id, file)
-    
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
-    
-    # Update tenant record
-    tenant.logo_image_url = logo_url
-    tenant.branding_updated_at = datetime.utcnow()
-    db.commit()
-    
-    return {
-        "success": True,
-        "message": message,
-        "logo_url": logo_url,
-        "tenant_id": tenant_id
-    }
 
 @router.delete("/{tenant_id}/logo")
 async def delete_tenant_logo(
@@ -1301,21 +1331,34 @@ async def get_tenant_logo_info(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Get current logo information"""
-    tenant = get_tenant_from_api_key(api_key, db)
-    
-    if tenant.id != tenant_id:
-        raise HTTPException(status_code=403, detail="API key doesn't match tenant")
-    
-    return {
-        "tenant_id": tenant_id,
-        "has_logo": bool(tenant.logo_image_url),
-        "logo_url": tenant.logo_image_url,
-        "logo_text_fallback": tenant.logo_text or (tenant.business_name or tenant.name)[:2].upper(),
-        "upload_settings": {
-            "max_size_mb": settings.MAX_LOGO_SIZE / (1024*1024),
-            "allowed_types": settings.ALLOWED_LOGO_TYPES,
-            "recommended_size": "512x512 pixels or smaller",
-            "recommended_formats": ["PNG with transparency", "SVG for scalability", "WebP for optimization"]
+    """Get current logo information - FIXED"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        if tenant.id != tenant_id:
+            raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+        
+        # Get settings safely
+        max_size = getattr(settings, 'MAX_LOGO_SIZE', 2 * 1024 * 1024)
+        allowed_types = getattr(settings, 'ALLOWED_LOGO_TYPES', [
+            "image/jpeg", "image/jpg", "image/png", 
+            "image/webp", "image/svg+xml"
+        ])
+        
+        return {
+            "tenant_id": tenant_id,
+            "has_logo": bool(tenant.logo_image_url),
+            "logo_url": tenant.logo_image_url,
+            "logo_text_fallback": tenant.logo_text or (tenant.business_name or tenant.name)[:2].upper(),
+            "upload_settings": {
+                "max_size_mb": max_size / (1024*1024),
+                "allowed_types": allowed_types,
+                "recommended_size": "512x512 pixels or smaller",
+                "recommended_formats": ["PNG with transparency", "SVG for scalability", "WebP for optimization"]
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting logo info: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get logo information")
