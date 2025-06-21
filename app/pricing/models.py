@@ -15,6 +15,15 @@ class PlanType(str, Enum):
     AGENCY = "agency"
 
 
+class Allplans(str):
+    FREE = "Free"
+    BASIC = "Basic"
+    GROWTH = "Growth"
+    PRO = "Pro"  
+    AGENCY = "Agency"
+    
+
+
 class PricingPlan(Base):
     __tablename__ = "pricing_plans"
     

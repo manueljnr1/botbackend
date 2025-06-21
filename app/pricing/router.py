@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.database import get_db
-from app.pricing.models import PricingPlan, TenantSubscription, UsageLog, BillingHistory
+from app.pricing.models import PricingPlan, TenantSubscription, UsageLog, BillingHistory, Allplans
 from app.pricing.schemas import (
     PricingPlanOut, PricingPlanCreate, PricingPlanUpdate,
     SubscriptionOut, SubscriptionCreate, SubscriptionUpdate,
@@ -426,6 +426,29 @@ async def get_plan_by_type(
         )
     
     return plan
+
+
+@router.get("/allplans")
+async def get_all_plans(
+    db: Session = Depends(get_db)
+):
+    """Get all pricing plans"""
+    pricing_service = PricingService(db)
+    plans = pricing_service.get_all_plans()
+    
+    if not plans:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No plans found"
+        )
+    
+    return plans
+
+
+
+
+
+
 
 
 @router.post("/add-addon/{addon_type}")

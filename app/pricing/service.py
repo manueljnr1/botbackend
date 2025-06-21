@@ -136,6 +136,14 @@ class PricingService:
             PricingPlan.is_active == True
         ).first()
     
+
+    def get_all_plans(self) -> List[PricingPlan]:
+        """Get all active plans"""
+        return self.db.query(PricingPlan).filter(
+            PricingPlan.is_active == True
+        ).all()
+
+    
     def create_free_subscription_for_tenant(self, tenant_id: int) -> Optional[TenantSubscription]:
         """
         Create a free subscription for a new tenant - ENHANCED VERSION
