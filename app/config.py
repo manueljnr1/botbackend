@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # Supabase Storage
     SUPABASE_STORAGE_URL: str = os.getenv("SUPABASE_STORAGE_URL", "")
-    SUPABASE_STORAGE_BUCKET: str = os.getenv("SUPABASE_STORAGE_BUCKET", "tenant-logos")
+    SUPABASE_STORAGE_BUCKET = "tenant-logos"
     
     # Logo upload settings
     MAX_LOGO_SIZE: int = 2 * 1024 * 1024  # 2MB
