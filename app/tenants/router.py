@@ -30,6 +30,9 @@ from app.auth.models import TenantCredentials
 from app.config import settings
 from app.tenants.models import TenantPasswordReset
 from app.admin.models import Admin
+from base64 import b64decode
+import io
+from PIL import Image
 
 from app.auth.supabase_service import supabase_auth_service
 from app.services.storage import LogoUploadService
@@ -174,6 +177,13 @@ class BrandingUpdate(BaseModel):
     widget_position: Optional[str] = None
     font_family: Optional[str] = None
     custom_css: Optional[str] = None
+
+
+
+class LogoUploadRequest(BaseModel):
+    file_data: str  # Base64 encoded file data
+    filename: str
+    content_type: str
 
 
 
@@ -1295,122 +1305,91 @@ def validate_hex_color(color: str) -> bool:
 @router.post("/{tenant_id}/upload-logo")
 async def upload_tenant_logo(
     tenant_id: int,
-    file: UploadFile = File(...),
+    upload_data: LogoUploadRequest,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Upload logo for tenant - DEBUG VERSION"""
-    logger.info(f"🔄 Starting logo upload for tenant {tenant_id}")
-    
+    """Upload logo using base64 encoded data"""
     try:
-        # Step 1: Validate API key
-        logger.info("Step 1: Validating API key...")
         tenant = get_tenant_from_api_key(api_key, db)
-        logger.info(f"✅ API key valid for tenant: {tenant.name}")
         
         if tenant.id != tenant_id:
-            logger.error(f"❌ API key mismatch: key for {tenant.id}, requested {tenant_id}")
             raise HTTPException(status_code=403, detail="API key doesn't match tenant")
         
-        # Step 2: Validate file basics
-        logger.info(f"Step 2: File details - name: {file.filename}, type: {file.content_type}")
-        
-        if not file.filename:
-            logger.error("❌ No filename provided")
-            raise HTTPException(status_code=400, detail="No file provided")
-        
-        # Step 3: Check if LogoUploadService can be created
-        logger.info("Step 3: Creating LogoUploadService...")
+        # Decode base64 data
         try:
-            logo_service = LogoUploadService()
-            logger.info("✅ LogoUploadService created successfully")
-        except Exception as service_error:
-            logger.error(f"❌ Failed to create LogoUploadService: {service_error}")
-            raise HTTPException(status_code=500, detail=f"Service initialization failed: {str(service_error)}")
-        
-        # Step 4: Read file content
-        logger.info("Step 4: Reading file content...")
-        try:
-            file_content = await file.read()
+            # Remove data URL prefix if present (data:image/png;base64,)
+            file_data = upload_data.file_data
+            if file_data.startswith('data:'):
+                file_data = file_data.split(',')[1]
+            
+            file_content = b64decode(file_data)
             file_size = len(file_content)
-            logger.info(f"✅ File read successfully: {file_size} bytes")
-        except Exception as read_error:
-            logger.error(f"❌ Failed to read file: {read_error}")
-            raise HTTPException(status_code=400, detail=f"Could not read file: {str(read_error)}")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 data: {str(e)}")
         
-        # Step 5: Validate file size
-        logger.info("Step 5: Validating file size...")
-        if file_size > logo_service.max_size:
-            max_mb = logo_service.max_size / (1024*1024)
-            logger.error(f"❌ File too large: {file_size} bytes > {logo_service.max_size} bytes")
+        # Validate file size
+        max_size = 2 * 1024 * 1024  # 2MB
+        if file_size > max_size:
+            max_mb = max_size / (1024*1024)
             raise HTTPException(
                 status_code=400, 
                 detail=f"File too large. Maximum size: {max_mb:.1f}MB"
             )
-        logger.info(f"✅ File size OK: {file_size} bytes")
         
-        # Step 6: Validate content type
-        logger.info("Step 6: Validating content type...")
-        if file.content_type not in logo_service.allowed_types:
-            logger.error(f"❌ Invalid content type: {file.content_type}")
+        # Validate content type
+        allowed_types = [
+            "image/jpeg", "image/jpg", "image/png", 
+            "image/webp", "image/svg+xml"
+        ]
+        if upload_data.content_type not in allowed_types:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Invalid file type. Allowed: {', '.join(logo_service.allowed_types)}"
+                detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
             )
-        logger.info(f"✅ Content type OK: {file.content_type}")
         
-        # Step 7: Handle old logo deletion
-        logger.info("Step 7: Checking for existing logo...")
+        # Validate it's actually an image (except SVG)
+        if upload_data.content_type != "image/svg+xml":
+            try:
+                Image.open(io.BytesIO(file_content))
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid image file")
+        
+        # Create a mock UploadFile object for the service
+        class MockUploadFile:
+            def __init__(self, content, filename, content_type):
+                self.file = io.BytesIO(content)
+                self.filename = filename
+                self.content_type = content_type
+                self.size = len(content)
+            
+            async def read(self):
+                self.file.seek(0)
+                return self.file.read()
+        
+        mock_file = MockUploadFile(file_content, upload_data.filename, upload_data.content_type)
+        
+        # Initialize logo service
+        logo_service = LogoUploadService()
+        
+        # Delete old logo if exists
         if tenant.logo_image_url:
-            logger.info(f"Found existing logo: {tenant.logo_image_url}")
             try:
                 await logo_service.delete_logo(tenant.logo_image_url)
-                logger.info("✅ Old logo deleted successfully")
-            except Exception as delete_error:
-                logger.warning(f"⚠️ Failed to delete old logo: {delete_error}")
-                # Continue anyway
-        else:
-            logger.info("No existing logo to delete")
+            except Exception as e:
+                logger.warning(f"Failed to delete old logo: {e}")
         
-        # Step 8: Reset file for upload
-        logger.info("Step 8: Preparing file for upload...")
-        try:
-            from io import BytesIO
-            file.file = BytesIO(file_content)
-            file.file.seek(0)
-            logger.info("✅ File reset for upload")
-        except Exception as reset_error:
-            logger.error(f"❌ Failed to reset file: {reset_error}")
-            raise HTTPException(status_code=500, detail=f"File preparation failed: {str(reset_error)}")
-        
-        # Step 9: Attempt upload
-        logger.info("Step 9: Uploading to storage...")
-        try:
-            success, message, logo_url = await logo_service.upload_logo(tenant_id, file)
-            logger.info(f"Upload result: success={success}, message={message}, url={logo_url}")
-        except Exception as upload_error:
-            logger.error(f"❌ Upload failed with exception: {upload_error}")
-            logger.error(f"Upload error type: {type(upload_error).__name__}")
-            import traceback
-            logger.error(f"Upload traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Upload failed: {str(upload_error)}")
+        # Upload new logo
+        success, message, logo_url = await logo_service.upload_logo(tenant_id, mock_file)
         
         if not success:
-            logger.error(f"❌ Upload unsuccessful: {message}")
             raise HTTPException(status_code=400, detail=message)
         
-        # Step 10: Update database
-        logger.info("Step 10: Updating database...")
-        try:
-            tenant.logo_image_url = logo_url
-            tenant.branding_updated_at = datetime.utcnow()
-            db.commit()
-            logger.info("✅ Database updated successfully")
-        except Exception as db_error:
-            logger.error(f"❌ Database update failed: {db_error}")
-            raise HTTPException(status_code=500, detail=f"Database update failed: {str(db_error)}")
+        # Update tenant record
+        tenant.logo_image_url = logo_url
+        tenant.branding_updated_at = datetime.utcnow()
+        db.commit()
         
-        logger.info(f"🎉 Logo upload completed successfully for tenant {tenant_id}")
         return {
             "success": True,
             "message": message,
@@ -1418,14 +1397,10 @@ async def upload_tenant_logo(
             "tenant_id": tenant_id
         }
         
-    except HTTPException as he:
-        logger.error(f"❌ HTTP Exception in logo upload: {he.status_code} - {he.detail}")
-        raise he
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Unexpected error in logo upload: {e}")
-        logger.error(f"Error type: {type(e).__name__}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Logo upload error: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 

@@ -192,3 +192,39 @@ class FlutterwaveService:
         except Exception as e:
             logger.error(f"Error handling webhook: {e}")
             return {"event": "error", "error": str(e)}
+        
+
+
+    def verify_payment_detailed(self, transaction_id: str) -> Dict[str, Any]:
+        """Enhanced payment verification with more details"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/transactions/{transaction_id}/verify",
+                headers=self._get_headers()
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data["status"] == "success":
+                    transaction_data = data["data"]
+                    
+                    return {
+                        "success": True,
+                        "status": transaction_data["status"],
+                        "amount": transaction_data["amount"],
+                        "currency": transaction_data["currency"],
+                        "tx_ref": transaction_data["tx_ref"],
+                        "flw_ref": transaction_data["flw_ref"],
+                        "customer": transaction_data["customer"],
+                        "meta": transaction_data.get("meta", {}),
+                        "payment_date": transaction_data["created_at"],
+                        "processor_response": transaction_data.get("processor_response"),
+                        "card": transaction_data.get("card", {}),
+                        "account": transaction_data.get("account", {})
+                    }
+            
+            return {"success": False, "error": "Payment verification failed"}
+            
+        except Exception as e:
+            logger.error(f"Error verifying payment: {e}")
+            return {"success": False, "error": str(e)}
