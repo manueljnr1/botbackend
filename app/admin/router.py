@@ -1,5 +1,6 @@
 # app/admin/router.py
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
+import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import List, Dict, Any, Optional
@@ -13,7 +14,13 @@ from app.knowledge_base.models import KnowledgeBase, FAQ
 from app.chatbot.models import ChatSession, ChatMessage
 from app.auth.router import get_current_user, get_admin_user
 from app.core.security import get_password_hash
+from app.tenants.api_key_service import EnhancedAPIKeyResetService, get_enhanced_api_key_reset_service
 
+router = APIRouter()
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 router = APIRouter()
 
 # =============================================================================
@@ -116,6 +123,71 @@ class TenantOverviewResponse(BaseModel):
     total_tenants: int
     active_tenants: int
     tenant_stats: List[TenantStatsResponse]
+
+
+class AdminAPIKeyResetRequest(BaseModel):
+    reason: Optional[str] = None
+
+class AdminAPIKeyResetResponse(BaseModel):
+    success: bool
+    message: str
+    tenant_id: int
+    tenant_name: Optional[str] = None
+    new_api_key: Optional[str] = None
+    old_api_key_masked: Optional[str] = None
+    reset_timestamp: Optional[str] = None
+    reset_by: str
+    verification_method: Optional[str] = None
+    error: Optional[str] = None
+
+class BulkAPIKeyResetRequest(BaseModel):
+    tenant_ids: List[int]
+    reason: Optional[str] = None
+
+class BulkAPIKeyResetResponse(BaseModel):
+    success: bool
+    message: str
+    total_requested: int
+    successful_resets: int
+    failed_resets: int
+    results: List[Dict[str, Any]]
+    errors: List[Dict[str, Any]] = []
+
+class SecurityAuditResponse(BaseModel):
+    success: bool
+    audit_period_days: int
+    total_tenants: int
+    security_summary: Dict[str, Any]
+    recent_resets: List[Dict[str, Any]]
+    recommendations: List[str]
+    error: Optional[str] = None
+
+
+class MigrationAuditResponse(BaseModel):
+    success: bool
+    audit_timestamp: Optional[str] = None
+    summary: Dict[str, Any]
+    duplicate_details: List[Dict[str, Any]]
+    invalid_key_details: List[Dict[str, Any]]
+    recommendations: List[str]
+    error: Optional[str] = None
+
+class MigrationFixRequest(BaseModel):
+    dry_run: bool = True
+    fix_duplicates: bool = True
+    fix_invalid: bool = True
+
+class MigrationFixResponse(BaseModel):
+    success: bool
+    migration_type: str
+    total_fixes: int
+    duplicate_fixes: Dict[str, Any]
+    invalid_fixes: Dict[str, Any]
+    initial_audit: Dict[str, Any]
+    final_audit: Dict[str, Any]
+    error: Optional[str] = None
+
+
 
 # =============================================================================
 # USER MANAGEMENT ENDPOINTS
@@ -815,3 +887,668 @@ async def admin_bulk_tenant_action(
         "action": action,
         "affected_tenants": updated_count
     }
+
+
+
+# =============================================================================# API KEY RESET ENDPOINTS
+
+@router.post("/tenants/{tenant_id}/reset-api-key", response_model=AdminAPIKeyResetResponse)
+async def admin_reset_tenant_api_key(
+    tenant_id: int,
+    reset_request: AdminAPIKeyResetRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to reset any tenant's API key (bypasses password verification)
+    Enhanced with better audit logging
+    """
+    try:
+        # Get admin identifier for audit
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Initialize the enhanced service
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        # Perform admin reset (bypasses password validation)
+        result = await api_service.admin_reset_tenant_api_key(
+            tenant_id=tenant_id,
+            reason=reset_request.reason
+        )
+        
+        if result["success"]:
+            # Enhanced audit with security context
+            api_service.audit_api_key_reset(
+                tenant_id=tenant_id,
+                reset_by=f"admin:{admin_identifier}",
+                reason=reset_request.reason or "Admin-initiated reset",
+                verification_method="admin_override"
+            )
+            
+            logger.info(
+                f"🔧 Admin {admin_identifier} reset API key for tenant {tenant_id} "
+                f"(bypassed password verification)"
+            )
+            
+            # Add admin info to response
+            result["reset_by"] = admin_identifier
+            result["verification_method"] = "admin_override"
+        
+        return AdminAPIKeyResetResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"❌ Admin API key reset failed for tenant {tenant_id}: {str(e)}")
+        return AdminAPIKeyResetResponse(
+            success=False,
+            error=f"Admin API key reset failed: {str(e)}",
+            tenant_id=tenant_id,
+            reset_by=getattr(current_user, 'username', 'unknown_admin'),
+            verification_method="admin_override"
+        )
+
+@router.get("/tenants/{tenant_id}/api-key-info")
+async def admin_get_tenant_api_key_info(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to get API key information for any tenant
+    Enhanced with authentication method details
+    """
+    try:
+        api_service = get_enhanced_api_key_reset_service(db)
+        result = api_service.get_tenant_api_key_info(tenant_id)
+        
+        if result["success"]:
+            # Add admin-specific info
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            if tenant:
+                # Check for recent password verification attempts (security monitoring)
+                has_supabase = bool(tenant.supabase_user_id)
+                has_local_creds = bool(
+                    db.query(TenantCredentials).filter(
+                        TenantCredentials.tenant_id == tenant_id
+                    ).first()
+                )
+                
+                result.update({
+                    "admin_view": True,
+                    "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                    "is_active": tenant.is_active,
+                    "business_name": tenant.business_name,
+                    "email": tenant.email,
+                    "supabase_user_id": tenant.supabase_user_id,
+                    "security_status": {
+                        "has_supabase_auth": has_supabase,
+                        "has_local_credentials": has_local_creds,
+                        "authentication_methods_count": sum([has_supabase, has_local_creds])
+                    }
+                })
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Admin failed to get API key info for tenant {tenant_id}: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Failed to get API key info: {str(e)}"
+        }
+
+@router.post("/tenants/bulk-reset-api-keys", response_model=BulkAPIKeyResetResponse)
+async def admin_bulk_reset_api_keys(
+    bulk_request: BulkAPIKeyResetRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to reset API keys for multiple tenants at once
+    Enhanced with better error handling and security logging
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        successful_resets = []
+        failed_resets = []
+        errors = []
+        
+        logger.info(
+            f"🔧 Admin {admin_identifier} starting bulk API key reset for "
+            f"{len(bulk_request.tenant_ids)} tenants (SECURITY OPERATION)"
+        )
+        
+        for tenant_id in bulk_request.tenant_ids:
+            try:
+                # Reset API key for this tenant
+                result = await api_service.admin_reset_tenant_api_key(
+                    tenant_id=tenant_id,
+                    reason=bulk_request.reason or "Bulk admin reset"
+                )
+                
+                if result["success"]:
+                    successful_resets.append({
+                        "tenant_id": tenant_id,
+                        "tenant_name": result.get("tenant_name"),
+                        "new_api_key": result.get("new_api_key"),
+                        "old_api_key_masked": result.get("old_api_key_masked"),
+                        "verification_method": "admin_override"
+                    })
+                    
+                    # Enhanced audit for each successful reset
+                    api_service.audit_api_key_reset(
+                        tenant_id=tenant_id,
+                        reset_by=f"admin_bulk:{admin_identifier}",
+                        reason=bulk_request.reason or "Bulk admin reset",
+                        verification_method="admin_override"
+                    )
+                else:
+                    failed_resets.append({
+                        "tenant_id": tenant_id,
+                        "error": result.get("error", "Unknown error")
+                    })
+                    errors.append({
+                        "tenant_id": tenant_id,
+                        "error": result.get("error", "Unknown error")
+                    })
+                    
+            except Exception as e:
+                error_msg = f"Exception during reset: {str(e)}"
+                failed_resets.append({
+                    "tenant_id": tenant_id,
+                    "error": error_msg
+                })
+                errors.append({
+                    "tenant_id": tenant_id,
+                    "error": error_msg
+                })
+                logger.error(f"❌ Failed to reset API key for tenant {tenant_id}: {e}")
+        
+        total_requested = len(bulk_request.tenant_ids)
+        successful_count = len(successful_resets)
+        failed_count = len(failed_resets)
+        
+        # Enhanced security logging for bulk operations
+        logger.info(
+            f"✅ BULK API KEY RESET COMPLETED: "
+            f"Admin: {admin_identifier} | "
+            f"Success: {successful_count}/{total_requested} | "
+            f"Reason: {bulk_request.reason or 'Not specified'} | "
+            f"Tenant IDs: {bulk_request.tenant_ids}"
+        )
+        
+        return BulkAPIKeyResetResponse(
+            success=successful_count > 0,
+            message=f"Bulk reset completed: {successful_count} successful, {failed_count} failed",
+            total_requested=total_requested,
+            successful_resets=successful_count,
+            failed_resets=failed_count,
+            results=successful_resets,
+            errors=errors
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Bulk API key reset failed: {str(e)}")
+        return BulkAPIKeyResetResponse(
+            success=False,
+            message=f"Bulk reset failed: {str(e)}",
+            total_requested=len(bulk_request.tenant_ids),
+            successful_resets=0,
+            failed_resets=len(bulk_request.tenant_ids),
+            results=[],
+            errors=[{"error": str(e)}]
+        )
+
+@router.get("/tenants/api-key-security-audit", response_model=SecurityAuditResponse)
+async def get_api_key_security_audit(
+    days: int = Query(30, description="Number of days to look back for audit"),
+    include_auth_methods: bool = Query(True, description="Include authentication method analysis"),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Enhanced security audit of API keys with authentication method analysis
+    Provides insights into tenant security posture
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Get all active tenants
+        tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+        
+        # Security analysis
+        security_summary = {
+            "total_active_tenants": len(tenants),
+            "tenants_with_supabase_auth": 0,
+            "tenants_with_local_auth": 0,
+            "tenants_with_both_auth": 0,
+            "tenants_with_no_auth": 0,
+            "tenants_with_api_keys": 0,
+            "tenants_missing_api_keys": 0
+        }
+        
+        tenant_details = []
+        auth_method_breakdown = {
+            "supabase_only": 0,
+            "local_only": 0,
+            "both_methods": 0,
+            "no_methods": 0
+        }
+        
+        for tenant in tenants:
+            # Check authentication methods
+            has_supabase = bool(tenant.supabase_user_id)
+            has_local_creds = bool(
+                db.query(TenantCredentials).filter(
+                    TenantCredentials.tenant_id == tenant.id
+                ).first()
+            )
+            has_api_key = bool(tenant.api_key)
+            
+            # Update counters
+            if has_supabase:
+                security_summary["tenants_with_supabase_auth"] += 1
+            if has_local_creds:
+                security_summary["tenants_with_local_auth"] += 1
+            if has_supabase and has_local_creds:
+                security_summary["tenants_with_both_auth"] += 1
+                auth_method_breakdown["both_methods"] += 1
+            elif has_supabase and not has_local_creds:
+                auth_method_breakdown["supabase_only"] += 1
+            elif has_local_creds and not has_supabase:
+                auth_method_breakdown["local_only"] += 1
+            else:
+                security_summary["tenants_with_no_auth"] += 1
+                auth_method_breakdown["no_methods"] += 1
+            
+            if has_api_key:
+                security_summary["tenants_with_api_keys"] += 1
+            else:
+                security_summary["tenants_missing_api_keys"] += 1
+            
+            # Detailed tenant info for admin
+            if include_auth_methods:
+                tenant_details.append({
+                    "tenant_id": tenant.id,
+                    "tenant_name": tenant.name,
+                    "business_name": tenant.business_name,
+                    "email": tenant.email,
+                    "api_key_masked": f"{tenant.api_key[:8]}...{tenant.api_key[-4:]}" if tenant.api_key else "Missing",
+                    "has_supabase_auth": has_supabase,
+                    "has_local_credentials": has_local_creds,
+                    "auth_method_count": sum([has_supabase, has_local_creds]),
+                    "security_score": calculate_tenant_security_score(has_supabase, has_local_creds, has_api_key),
+                    "last_updated": tenant.updated_at.isoformat() if tenant.updated_at else None
+                })
+        
+        # Generate security recommendations
+        recommendations = generate_security_recommendations(security_summary, auth_method_breakdown)
+        
+        # Mock recent resets (in production, you'd have a proper audit log table)
+        recent_resets = [
+            {
+                "info": "This is a simplified audit view. Consider implementing a dedicated audit log table for production use.",
+                "recommendation": "Store detailed reset logs with timestamps, IP addresses, and verification methods"
+            }
+        ]
+        
+        # Log admin access to security audit
+        logger.info(
+            f"🔍 SECURITY AUDIT ACCESSED: "
+            f"Admin: {admin_identifier} | "
+            f"Period: {days} days | "
+            f"Tenants analyzed: {len(tenants)}"
+        )
+        
+        return SecurityAuditResponse(
+            success=True,
+            audit_period_days=days,
+            total_tenants=len(tenants),
+            security_summary={
+                **security_summary,
+                "auth_method_breakdown": auth_method_breakdown,
+                "tenant_details": tenant_details if include_auth_methods else []
+            },
+            recent_resets=recent_resets,
+            recommendations=recommendations
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Security audit failed: {str(e)}")
+        return SecurityAuditResponse(
+            success=False,
+            audit_period_days=days,
+            total_tenants=0,
+            security_summary={},
+            recent_resets=[],
+            recommendations=[],
+            error=f"Security audit failed: {str(e)}"
+        )
+
+def calculate_tenant_security_score(has_supabase: bool, has_local_creds: bool, has_api_key: bool) -> int:
+    """
+    Calculate a simple security score for a tenant (0-100)
+    """
+    score = 0
+    
+    # API key existence (40 points)
+    if has_api_key:
+        score += 40
+    
+    # Authentication methods (60 points total)
+    if has_supabase and has_local_creds:
+        score += 60  # Best: both methods available
+    elif has_supabase or has_local_creds:
+        score += 40  # Good: one method available
+    # else: 0 points for no auth methods
+    
+    return score
+
+def generate_security_recommendations(security_summary: Dict[str, Any], auth_breakdown: Dict[str, Any]) -> List[str]:
+    """
+    Generate security recommendations based on audit findings
+    """
+    recommendations = []
+    
+    if security_summary["tenants_missing_api_keys"] > 0:
+        recommendations.append(
+            f"🚨 {security_summary['tenants_missing_api_keys']} tenants are missing API keys. "
+            "Use the migration utility to fix this."
+        )
+    
+    if security_summary["tenants_with_no_auth"] > 0:
+        recommendations.append(
+            f"⚠️ {security_summary['tenants_with_no_auth']} tenants have no authentication methods. "
+            "These tenants cannot reset their API keys safely."
+        )
+    
+    if auth_breakdown["local_only"] > auth_breakdown["supabase_only"]:
+        recommendations.append(
+            "💡 Consider migrating local-only tenants to Supabase for better security and management."
+        )
+    
+    if security_summary["tenants_with_both_auth"] < security_summary["total_active_tenants"] * 0.8:
+        recommendations.append(
+            "🔐 Consider enabling multiple authentication methods for better security redundancy."
+        )
+    
+    # Always recommend regular rotation
+    recommendations.append(
+        "🔄 Implement regular API key rotation (every 90 days) for enhanced security."
+    )
+    
+    recommendations.append(
+        "📊 Consider implementing a dedicated audit log table for detailed security monitoring."
+    )
+    
+    return recommendations
+
+@router.post("/tenants/{tenant_id}/force-password-verification")
+async def admin_test_tenant_password_verification(
+    tenant_id: int,
+    password_data: dict,  # {"password": "test_password"}
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to test tenant password verification
+    Useful for troubleshooting authentication issues
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        password = password_data.get("password")
+        if not password:
+            raise HTTPException(status_code=400, detail="Password is required")
+        
+        # Initialize the service
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        # Test password verification
+        verification_result = await api_service.verify_tenant_password(tenant_id, password)
+        
+        # Log admin testing activity
+        logger.info(
+            f"🔧 Admin {admin_identifier} tested password verification for tenant {tenant_id}: "
+            f"Result: {verification_result['success']} | "
+            f"Method: {verification_result.get('method', 'unknown')}"
+        )
+        
+        return {
+            "success": True,
+            "admin_test": True,
+            "tenant_id": tenant_id,
+            "password_verification": verification_result,
+            "tested_by": admin_identifier
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Admin password verification test failed: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Password verification test failed: {str(e)}"
+        }
+    
+
+
+@router.get("/api-key-migration/audit", response_model=MigrationAuditResponse)
+async def admin_audit_api_keys(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to audit all tenant API keys for issues
+    Shows duplicates, invalid formats, and missing keys
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Initialize migration service
+        migration_service = APIKeyMigrationService(db)
+        
+        # Run comprehensive audit
+        audit_result = migration_service.comprehensive_api_key_audit()
+        
+        # Log admin access
+        logger.info(
+            f"🔍 API Key Migration Audit: "
+            f"Admin: {admin_identifier} | "
+            f"Total tenants: {audit_result.get('summary', {}).get('total_tenants', 0)} | "
+            f"Issues found: {len(audit_result.get('duplicate_details', [])) + len(audit_result.get('invalid_key_details', []))}"
+        )
+        
+        if audit_result["success"]:
+            return MigrationAuditResponse(**audit_result)
+        else:
+            return MigrationAuditResponse(
+                success=False,
+                summary={},
+                duplicate_details=[],
+                invalid_key_details=[],
+                recommendations=[],
+                error=audit_result.get("error")
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ API key migration audit failed: {str(e)}")
+        return MigrationAuditResponse(
+            success=False,
+            summary={},
+            duplicate_details=[],
+            invalid_key_details=[],
+            recommendations=[],
+            error=f"Audit failed: {str(e)}"
+        )
+
+@router.post("/api-key-migration/fix", response_model=MigrationFixResponse)
+async def admin_fix_api_keys(
+    fix_request: MigrationFixRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to fix API key issues
+    Can run in dry-run mode to preview changes before applying
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Security check for actual fixes
+        if not fix_request.dry_run:
+            logger.warning(
+                f"🚨 CRITICAL: Admin {admin_identifier} is attempting to FIX API keys (NOT dry-run). "
+                f"This will modify the database!"
+            )
+        
+        # Run migration
+        migration_result = run_api_key_migration(dry_run=fix_request.dry_run)
+        
+        # Enhanced logging
+        if migration_result["success"]:
+            action_type = "DRY-RUN PREVIEW" if fix_request.dry_run else "ACTUAL FIXES APPLIED"
+            logger.info(
+                f"✅ API Key Migration {action_type}: "
+                f"Admin: {admin_identifier} | "
+                f"Total fixes: {migration_result.get('total_fixes', 0)} | "
+                f"Duplicates: {migration_result.get('duplicate_fixes', {}).get('fixed_count', 0)} | "
+                f"Invalid: {migration_result.get('invalid_fixes', {}).get('fixed_count', 0)}"
+            )
+        else:
+            logger.error(
+                f"❌ API Key Migration FAILED: "
+                f"Admin: {admin_identifier} | "
+                f"Error: {migration_result.get('error')}"
+            )
+        
+        return MigrationFixResponse(**migration_result)
+        
+    except Exception as e:
+        logger.error(f"❌ API key migration fix failed: {str(e)}")
+        return MigrationFixResponse(
+            success=False,
+            migration_type="error",
+            total_fixes=0,
+            duplicate_fixes={},
+            invalid_fixes={},
+            initial_audit={},
+            final_audit={},
+            error=f"Migration failed: {str(e)}"
+        )
+
+@router.get("/api-key-migration/status")
+async def admin_get_migration_status(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to get quick migration status overview
+    Lightweight version of the full audit
+    """
+    try:
+        migration_service = APIKeyMigrationService(db)
+        
+        # Quick counts
+        total_tenants = db.query(Tenant).count()
+        active_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
+        
+        # Quick issue detection
+        duplicates = migration_service.find_duplicate_api_keys()
+        invalid_keys = migration_service.find_invalid_api_keys()
+        
+        null_api_keys = db.query(Tenant).filter(
+            Tenant.api_key.is_(None),
+            Tenant.is_active == True
+        ).count()
+        
+        total_issues = len(duplicates) + len(invalid_keys) + null_api_keys
+        
+        # Status determination
+        if total_issues == 0:
+            status = "healthy"
+            message = "All API keys are valid and unique"
+        elif total_issues <= 5:
+            status = "minor_issues"
+            message = f"{total_issues} minor issues found"
+        else:
+            status = "needs_attention"
+            message = f"{total_issues} issues require attention"
+        
+        return {
+            "success": True,
+            "status": status,
+            "message": message,
+            "summary": {
+                "total_tenants": total_tenants,
+                "active_tenants": active_tenants,
+                "total_issues": total_issues,
+                "duplicate_groups": len(duplicates),
+                "invalid_keys": len(invalid_keys),
+                "null_keys": null_api_keys
+            },
+            "recommendations": [
+                "Run full audit for detailed analysis" if total_issues > 0 else "No action required",
+                "Use dry-run mode before applying fixes" if total_issues > 0 else None
+            ],
+            "next_actions": [
+                f"GET /admin/api-key-migration/audit - Full detailed audit",
+                f"POST /admin/api-key-migration/fix - Fix issues (with dry_run: true first)"
+            ] if total_issues > 0 else []
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Migration status check failed: {str(e)}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Status check failed: {str(e)}",
+            "summary": {},
+            "recommendations": ["Contact system administrator"],
+            "next_actions": []
+        }
+
+@router.post("/api-key-migration/preview-fix")
+async def admin_preview_api_key_fixes(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to preview what would be fixed without making changes
+    Quick preview version of the full fix operation
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        migration_service = APIKeyMigrationService(db)
+        
+        # Preview duplicate fixes
+        duplicate_preview = migration_service.fix_duplicate_api_keys(dry_run=True)
+        
+        # Preview invalid key fixes  
+        invalid_preview = migration_service.fix_invalid_api_keys(dry_run=True)
+        
+        total_preview_fixes = duplicate_preview.get("fixed_count", 0) + invalid_preview.get("fixed_count", 0)
+        
+        logger.info(
+            f"🔍 API Key Fix Preview: "
+            f"Admin: {admin_identifier} | "
+            f"Would fix: {total_preview_fixes} tenants"
+        )
+        
+        return {
+            "success": True,
+            "preview_type": "dry_run",
+            "total_would_fix": total_preview_fixes,
+            "duplicate_fixes_preview": duplicate_preview,
+            "invalid_fixes_preview": invalid_preview,
+            "warning": "This is a preview only. No changes have been made to the database.",
+            "next_step": "Use POST /admin/api-key-migration/fix with dry_run: false to apply these changes"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ API key fix preview failed: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Preview failed: {str(e)}"
+        }

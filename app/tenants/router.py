@@ -36,6 +36,7 @@ from PIL import Image
 
 from app.auth.supabase_service import supabase_auth_service
 from app.services.storage import LogoUploadService
+from app.tenants.api_key_service import EnhancedAPIKeyResetService, get_enhanced_api_key_reset_service
 
 import logging
 logger = logging.getLogger(__name__)
@@ -184,6 +185,36 @@ class LogoUploadRequest(BaseModel):
     file_data: str  # Base64 encoded file data
     filename: Optional[str] = None
     content_type: Optional[str] = None
+
+
+
+class EnhancedAPIKeyResetRequest(BaseModel):
+    current_api_key: str
+    password: str  # 🔒 NEW: Account password required
+    reason: Optional[str] = None
+
+class APIKeyResetResponse(BaseModel):
+    success: bool
+    message: str
+    new_api_key: Optional[str] = None
+    old_api_key_masked: Optional[str] = None
+    reset_timestamp: Optional[str] = None
+    verification_method: Optional[str] = None
+    error: Optional[str] = None
+
+class APIKeyInfoResponse(BaseModel):
+    success: bool
+    tenant_id: Optional[int] = None
+    tenant_name: Optional[str] = None
+    api_key_masked: Optional[str] = None
+    last_updated: Optional[str] = None
+    tenant_active: Optional[bool] = None
+    authentication_methods: Optional[dict[str, bool]] = None
+    error: Optional[str] = None
+
+class HeaderBasedResetRequest(BaseModel):
+    password: str  # 🔒 NEW: Password required even for header-based reset
+    reason: Optional[str] = None
 
 
 
@@ -1554,3 +1585,190 @@ async def get_tenant_logo_info(
     except Exception as e:
         logger.error(f"Error getting logo info: {e}")
         raise HTTPException(status_code=500, detail="Failed to get logo information")
+    
+
+
+
+@router.post("/{tenant_id}/reset-api-key", response_model=APIKeyResetResponse)
+async def reset_tenant_api_key_self(
+    tenant_id: int,
+    reset_request: EnhancedAPIKeyResetRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Reset API key for tenant (self-service) with password verification
+    Requires both current API key AND account password for security
+    """
+    try:
+        # Initialize the enhanced service
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        # Perform the reset with password verification
+        result = await api_service.reset_tenant_api_key_with_password(
+            tenant_id=tenant_id,
+            current_api_key=reset_request.current_api_key,
+            password=reset_request.password,  # 🔒 Password verification
+            reason=reset_request.reason,
+            force=False  # Tenant must provide valid current API key AND password
+        )
+        
+        if result["success"]:
+            # Audit the reset with verification method
+            api_service.audit_api_key_reset(
+                tenant_id=tenant_id,
+                reset_by="tenant_self",
+                reason=reset_request.reason or "Self-service reset",
+                verification_method=result.get("verification_method", "unknown")
+            )
+            
+            logger.info(
+                f"🔑 Tenant {tenant_id} successfully reset their API key "
+                f"(verified via {result.get('verification_method')})"
+            )
+        
+        return APIKeyResetResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in tenant API key reset: {str(e)}")
+        return APIKeyResetResponse(
+            success=False,
+            error=f"API key reset failed: {str(e)}"
+        )
+
+@router.get("/{tenant_id}/api-key-info", response_model=APIKeyInfoResponse)
+async def get_tenant_api_key_info_endpoint(
+    tenant_id: int,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get API key information (masked) for tenant with authentication methods info
+    Uses existing API key validation
+    """
+    try:
+        # Validate API key ownership
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        if tenant.id != tenant_id:
+            raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+        
+        # Get API key info with enhanced details
+        api_service = get_enhanced_api_key_reset_service(db)
+        result = api_service.get_tenant_api_key_info(tenant_id)
+        
+        return APIKeyInfoResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting API key info: {str(e)}")
+        return APIKeyInfoResponse(
+            success=False,
+            error=f"Failed to get API key info: {str(e)}"
+        )
+
+@router.post("/{tenant_id}/regenerate-api-key")
+async def regenerate_api_key_with_current_auth(
+    tenant_id: int,
+    reset_request: HeaderBasedResetRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Alternative endpoint using header authentication with password verification
+    More convenient for authenticated requests but still requires password
+    """
+    try:
+        # Validate API key ownership
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        if tenant.id != tenant_id:
+            raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+        
+        # Initialize the enhanced service
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        # Perform the reset with password verification
+        result = await api_service.reset_tenant_api_key_with_password(
+            tenant_id=tenant_id,
+            current_api_key=api_key,
+            password=reset_request.password,  # 🔒 Password verification required
+            reason=reset_request.reason,
+            force=False
+        )
+        
+        if result["success"]:
+            # Audit the reset
+            api_service.audit_api_key_reset(
+                tenant_id=tenant_id,
+                reset_by="tenant_self",
+                reason=reset_request.reason or "API key regeneration via header auth",
+                verification_method=result.get("verification_method", "unknown")
+            )
+            
+            logger.info(
+                f"🔑 Tenant {tenant_id} regenerated API key via header auth "
+                f"(verified via {result.get('verification_method')})"
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in API key regeneration: {str(e)}")
+        return {
+            "success": False,
+            "error": f"API key regeneration failed: {str(e)}"
+        }
+
+@router.post("/{tenant_id}/verify-password")
+async def verify_tenant_password_endpoint(
+    tenant_id: int,
+    password_data: dict,  # {"password": "user_password"}
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Verify tenant password without resetting API key
+    Useful for pre-validation before sensitive operations
+    """
+    try:
+        # Validate API key ownership
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        if tenant.id != tenant_id:
+            raise HTTPException(status_code=403, detail="API key doesn't match tenant")
+        
+        password = password_data.get("password")
+        if not password:
+            raise HTTPException(status_code=400, detail="Password is required")
+        
+        # Initialize the service
+        api_service = get_enhanced_api_key_reset_service(db)
+        
+        # Verify password
+        verification_result = await api_service.verify_tenant_password(tenant_id, password)
+        
+        if verification_result["success"]:
+            logger.info(f"🔐 Password verification successful for tenant {tenant_id}")
+            return {
+                "success": True,
+                "message": "Password verified successfully",
+                "verification_method": verification_result.get("method")
+            }
+        else:
+            logger.warning(f"🚨 Password verification failed for tenant {tenant_id}")
+            return {
+                "success": False,
+                "error": "Password verification failed"
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in password verification: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Password verification failed: {str(e)}"
+        }
