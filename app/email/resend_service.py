@@ -5,7 +5,7 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 class ResendEmailService:
-    """Email service using Resend for sending transactional emails"""
+    """Email service using Resend... for sending transactional emails"""
     
     def __init__(self):
         self.api_key = os.getenv("RESEND_API_KEY")
