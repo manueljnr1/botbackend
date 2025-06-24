@@ -1,4 +1,5 @@
-# app/live_chat/agent_service.py - FIXED VERSION
+# app/live_chat/agent_service.py - FIXED ASYNC ISSUES
+
 import secrets
 import uuid
 import logging
@@ -22,7 +23,7 @@ class AgentAuthService:
     def __init__(self, db: Session):
         self.db = db
     
-    def invite_agent(self, tenant_id: int, email: str, full_name: str, invited_by_id: int) -> Dict:
+    async def invite_agent(self, tenant_id: int, email: str, full_name: str, invited_by_id: int) -> Dict:
         """Send invitation to new agent"""
         try:
             # Normalize email
@@ -36,7 +37,7 @@ class AgentAuthService:
             
             if existing_agent:
                 if existing_agent.status == AgentStatus.REVOKED:
-                    return self._reactivate_agent(existing_agent)
+                    return await self._reactivate_agent(existing_agent)
                 else:
                     raise HTTPException(
                         status_code=400, 
@@ -61,7 +62,8 @@ class AgentAuthService:
             self.db.commit()
             self.db.refresh(agent)
             
-        
+            # Send invitation email - FIXED: Now awaiting properly
+            email_sent = await self._send_invitation_email(agent)
             
             logger.info(f"Agent invited: {email} for tenant {tenant_id}")
             
@@ -72,7 +74,8 @@ class AgentAuthService:
                 "full_name": agent.full_name,
                 "invite_token": invite_token,
                 "status": agent.status,
-                "invited_at": agent.invited_at.isoformat()
+                "invited_at": agent.invited_at.isoformat(),
+                "email_sent": email_sent  # Include email status
             }
             
         except HTTPException:
@@ -82,7 +85,7 @@ class AgentAuthService:
             self.db.rollback()
             raise HTTPException(status_code=500, detail="Failed to invite agent")
     
-    def _reactivate_agent(self, agent: Agent) -> Dict:
+    async def _reactivate_agent(self, agent: Agent) -> Dict:
         """Reactivate a previously revoked agent"""
         # Generate new invite token
         agent.invite_token = secrets.token_urlsafe(32)
@@ -94,7 +97,8 @@ class AgentAuthService:
         
         self.db.commit()
         
-        
+        # Send new invitation - FIXED: Now awaiting properly
+        email_sent = await self._send_invitation_email(agent)
         
         logger.info(f"Agent reactivated: {agent.email}")
         
@@ -103,10 +107,11 @@ class AgentAuthService:
             "agent_id": agent.id,
             "email": agent.email,
             "status": "reactivated",
-            "invite_token": agent.invite_token
+            "invite_token": agent.invite_token,
+            "email_sent": email_sent
         }
     
-    async def _send_invitation_email(self, agent: Agent):
+    async def _send_invitation_email(self, agent: Agent) -> bool:
         """Send invitation email to agent using Resend"""
         try:
             # Get tenant info
@@ -403,6 +408,7 @@ class AgentAuthService:
             raise HTTPException(status_code=500, detail="Failed to update profile")
 
 
+# Rest of the classes remain the same...
 class AgentSessionService:
     def __init__(self, db: Session):
         self.db = db

@@ -1,4 +1,4 @@
-# app/live_chat/auth_router.py
+# app/live_chat/auth_router.py - FIXED ASYNC ISSUES
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -13,8 +13,6 @@ from app.live_chat.agent_service import AgentAuthService, AgentSessionService, L
 from app.live_chat.models import Agent, AgentStatus
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
-from app.core.security import verify_token
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -104,6 +102,7 @@ async def invite_agent(
         # TODO: Check if tenant has permission to add more agents (pricing limits)
         
         service = AgentAuthService(db)
+        # FIXED: Now properly awaiting the async function
         result = await service.invite_agent(
             tenant_id=tenant.id,
             email=request.email,
@@ -117,9 +116,7 @@ async def invite_agent(
         raise
     except Exception as e:
         logger.error(f"Error in invite_agent endpoint: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to invite agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to invite agent")
 
 
 @router.get("/agents", response_model=List[AgentResponse])
@@ -152,6 +149,7 @@ async def revoke_agent(
         tenant = get_tenant_from_api_key(api_key, db)
         
         service = AgentAuthService(db)
+        # FIXED: Now properly awaiting the async function
         result = await service.revoke_agent(
             tenant_id=tenant.id,
             agent_id=agent_id,
@@ -244,6 +242,7 @@ async def set_agent_password(
             )
         
         service = AgentAuthService(db)
+        # FIXED: Now properly awaiting the async function
         result = await service.set_agent_password(request.token, request.password)
         
         return {
@@ -302,25 +301,36 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="live-chat/auth/login")
 def get_current_agent(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Dependency to get current authenticated agent"""
     try:
+        from app.core.security import verify_token
+        
+        # Decode and verify JWT token
         payload = verify_token(token)
         agent_id = payload.get("sub")
         user_type = payload.get("type")
         
         if user_type != "agent":
-            raise HTTPException(status_code=403, detail="Invalid user type")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid user type"
+            )
         
+        # Get agent from database
         agent = db.query(Agent).filter(
-            Agent.id == agent_id,
+            Agent.id == int(agent_id),
             Agent.status == AgentStatus.ACTIVE,
             Agent.is_active == True
         ).first()
         
         if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found or inactive"
+            )
         
         return agent
         
     except Exception as e:
+        logger.error(f"Error verifying agent token: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
