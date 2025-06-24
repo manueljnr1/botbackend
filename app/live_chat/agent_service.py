@@ -61,8 +61,7 @@ class AgentAuthService:
             self.db.commit()
             self.db.refresh(agent)
             
-            # Send invitation email
-            self._send_invitation_email(agent)
+        
             
             logger.info(f"Agent invited: {email} for tenant {tenant_id}")
             
@@ -95,8 +94,7 @@ class AgentAuthService:
         
         self.db.commit()
         
-        # Send new invitation
-        self._send_invitation_email(agent)
+        
         
         logger.info(f"Agent reactivated: {agent.email}")
         

@@ -13,6 +13,8 @@ from app.live_chat.agent_service import AgentAuthService, AgentSessionService, L
 from app.live_chat.models import Agent, AgentStatus
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
+from app.core.security import verify_token
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -115,7 +117,9 @@ async def invite_agent(
         raise
     except Exception as e:
         logger.error(f"Error in invite_agent endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to invite agent")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to invite agent: {str(e)}")
 
 
 @router.get("/agents", response_model=List[AgentResponse])
@@ -297,10 +301,31 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="live-chat/auth/login")
 
 def get_current_agent(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Dependency to get current authenticated agent"""
-    # TODO: Implement JWT token verification for agents
-    # This should decode the JWT token and return the agent
-    # For now, this is a placeholder
-    pass
+    try:
+        payload = verify_token(token)
+        agent_id = payload.get("sub")
+        user_type = payload.get("type")
+        
+        if user_type != "agent":
+            raise HTTPException(status_code=403, detail="Invalid user type")
+        
+        agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.status == AgentStatus.ACTIVE,
+            Agent.is_active == True
+        ).first()
+        
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        return agent
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 @router.get("/profile")

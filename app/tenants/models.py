@@ -13,7 +13,10 @@ import re
 
 
 if TYPE_CHECKING:
-    from app.live_chat.models import Agent, Conversation
+    # from app.pricing.models import TenantSubscription
+    from app.live_chat.models import Agent, LiveChatConversation, LiveChatSettings
+    from app.instagram.models import InstagramIntegration
+    from app.telegram.models import TelegramIntegration
 
 class Tenant(Base):
     __tablename__ = "tenants"
@@ -80,7 +83,10 @@ class Tenant(Base):
     # Credentials and subscription
     tenant_credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, overlaps="credentials", cascade="all, delete-orphan")
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan", overlaps="tenant_credentials")
-    subscription = relationship("TenantSubscription", back_populates="tenant", uselist=False)
+    subscription = relationship("TenantSubscription", uselist=False)
+    instagram_integration = relationship("InstagramIntegration", uselist=False, cascade="all, delete-orphan")
+    telegram_integration = relationship("TelegramIntegration", uselist=False, cascade="all, delete-orphan")
+
     
 
     # Branding and customization fields
@@ -110,18 +116,26 @@ class Tenant(Base):
 
 
 
+    # Telegram Integration fields
+    telegram_bot_token = Column(String, nullable=True)
+    telegram_enabled = Column(Boolean, default=False)
+    telegram_username = Column(String, nullable=True)  # @botusername
+    telegram_webhook_url = Column(String, nullable=True)
+
+
+
+
+    
+
+
+
 
 
 
     # Live chat relationships (FIXED - no duplicates)
-    agents = relationship(
-    "Agent", 
-    back_populates="tenant", 
-    foreign_keys="Agent.tenant_id",  # ← Tell SQLAlchemy which foreign key to use
-    cascade="all, delete-orphan"
-    )
-    conversations = relationship("LiveChatConversation", back_populates="tenant", cascade="all, delete-orphan")
-    live_chat_settings = relationship("LiveChatSettings", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    agents = relationship("Agent", foreign_keys="Agent.tenant_id", cascade="all, delete-orphan")
+    conversations = relationship("LiveChatConversation", cascade="all, delete-orphan") 
+    live_chat_settings = relationship("LiveChatSettings", uselist=False, cascade="all, delete-orphan")
     
     # Self-referential relationship for impersonation
     impersonating_tenant = relationship("Tenant", remote_side=[id], foreign_keys=[impersonating_tenant_id])

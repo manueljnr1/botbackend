@@ -323,6 +323,8 @@ async def log_conversation_usage(
     return {"message": "Conversation usage logged successfully", "success": True}
 
 
+
+
 @router.post("/log-usage/integration")
 async def log_integration_usage(
     integration_type: str,

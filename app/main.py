@@ -16,9 +16,11 @@ import uvicorn
 import logging
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from datetime import datetime
 
 
 from app.chatbot.models import ChatSession, ChatMessage
+from app.pricing.models import PricingPlan, TenantSubscription 
 from app.tenants.models import Tenant
 from app.auth.models import User, TenantCredentials
 from app.database import engine, Base, get_db
@@ -35,6 +37,13 @@ from app.pricing.middleware import PricingMiddleware
 from app.slack.router import router as slack_router, get_bot_manager as get_slack_bot_manager
 from app.slack.thread_memory import SlackThreadMemory, SlackChannelContext
 from app.payments.router import router as payments_router
+from app.instagram.router import router as instagram_router
+from app.instagram.bot_manager import get_instagram_bot_manager
+from app.telegram.router import router as telegram_router
+from app.telegram.bot_manager import get_telegram_bot_manager
+from app.live_chat.auth_router import router as live_chat_auth_router
+from app.live_chat.router import router as live_chat_main_router
+
 
 from app.config import settings
 # from app.live_chat import auth_router, router as live_chat_router
@@ -145,8 +154,11 @@ app.include_router(pricing_router, prefix="/pricing", tags=["Pricing"])
 app.include_router(discord_router, prefix="/api/discord", tags=["Discord"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])  # SINGLE INCLUSION
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
-# app.include_router(auth_router.router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
-# app.include_router(live_chat_router.router, prefix="/live-chat", tags=["Live Chat"])
+app.include_router(instagram_router, prefix="/api/instagram", tags=["Instagram"])
+app.include_router(telegram_router, prefix="/api/telegram", tags=["Telegram"])
+
+app.include_router(live_chat_auth_router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
+app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"])
 
 
 
@@ -184,14 +196,54 @@ def health_check():
 
 
 
+
+
+
+
+
+@app.get("/health/live-chat")
+async def live_chat_health_check():
+    """Health check endpoint for live chat system"""
+    try:
+        from app.live_chat.websocket_manager import websocket_manager
+        
+        # Check database connectivity
+        db = next(get_db())
+        
+        # Check WebSocket manager
+        connection_stats = websocket_manager.get_connection_stats()
+        
+        return {
+            "status": "healthy",
+            "service": "live_chat",
+            "websocket_connections": connection_stats["total_connections"],
+            "active_connections": connection_stats["active_connections"],
+            "timestamp": datetime.utcnow().isoformat(),
+            "database_connected": True
+        }
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "service": "live_chat",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+
+
+
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Combined startup event"""
+    """Combined startup event - UPDATED with Telegram"""
     try:
         env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
         
-        # 1. Start Discord and Slack bots
+        # 1. Start Discord, Slack, Instagram, and Telegram bots
         try:
             discord_manager = get_discord_bot_manager()
             await discord_manager.start_all_bots()
@@ -207,7 +259,24 @@ async def startup_event():
         except Exception as e:
             logger.error(f"❌ Error starting Slack bots: {e}")
         
-        # 2. Ensure all tenants have subscriptions
+        try:
+            instagram_manager = get_instagram_bot_manager()
+            db = next(get_db())
+            await instagram_manager.initialize_bots(db)
+            logger.info("✅ All Instagram bots initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Error starting Instagram bots: {e}")
+        
+        # NEW: Telegram bot initialization
+        try:
+            telegram_manager = get_telegram_bot_manager()
+            db = next(get_db())
+            await telegram_manager.initialize_bots(db)
+            logger.info("✅ All Telegram bots initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Error starting Telegram bots: {e}")
+        
+        # 2. Ensure all tenants have subscriptions (existing code remains the same)
         try:
             from app.database import SessionLocal
             from app.tenants.models import Tenant
@@ -263,73 +332,12 @@ async def startup_event():
     except Exception as e:
         logger.error(f"💥 Error in startup event: {e}")
 
-
-
-
-# @app.on_event("startup")
-# async def startup_tasks():
-#     """Tasks to run when the application starts"""
-    
-#     # Initialize live chat settings for existing tenants
-#     from app.database import get_db
-#     from app.live_chat.agent_service import LiveChatSettingsService
-#     from app.tenants.models import Tenant
-    
-#     try:
-#         db = next(get_db())
-#         settings_service = LiveChatSettingsService(db)
-        
-#         # Get all tenants without live chat settings
-#         tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
-        
-#         for tenant in tenants:
-#             try:
-#                 # This will create default settings if they don't exist
-#                 settings_service.get_or_create_settings(tenant.id)
-#             except Exception as e:
-#                 print(f"Warning: Could not initialize live chat settings for tenant {tenant.id}: {e}")
-        
-#         print("✅ Live chat startup tasks completed")
-        
-#     except Exception as e:
-#         print(f"❌ Error in live chat startup tasks: {e}")
-
-
-
-
-# @app.get("/health/live-chat")
-# async def live_chat_health_check():
-#     """Health check endpoint for live chat system"""
-#     try:
-#         from app.live_chat.websocket_manager import websocket_manager
-        
-#         # Check database connectivity
-#         db = next(get_db())
-        
-#         # Check WebSocket manager
-#         connection_stats = websocket_manager.get_connection_stats()
-        
-#         return {
-#             "status": "healthy",
-#             "service": "live_chat",
-#             "websocket_connections": connection_stats["total_connections"],
-#             "active_connections": connection_stats["active_connections"],
-#             "timestamp": datetime.utcnow().isoformat(),
-#             "database_connected": True
-#         }
-        
-#     except Exception as e:
-#         return {
-#             "status": "unhealthy",
-#             "service": "live_chat",
-#             "error": str(e),
-#             "timestamp": datetime.utcnow().isoformat()
-#         }
-
+# 4. UPDATE YOUR EXISTING shutdown_event FUNCTION:
+# Replace your current shutdown_event with this updated version:
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop Discord and Slack bots on application shutdown"""
+    """Stop Discord, Slack, Instagram, and Telegram bots on application shutdown"""
     try:
         logger.info("🛑 Shutting down bot integrations...")
         
@@ -341,6 +349,22 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"❌ Error stopping Discord bots: {e}")
         
+        # Stop Instagram bots
+        try:
+            instagram_manager = get_instagram_bot_manager()
+            await instagram_manager.stop_all_bots()
+            logger.info("✅ All Instagram bots stopped successfully")
+        except Exception as e:
+            logger.error(f"❌ Error stopping Instagram bots: {e}")
+        
+        # NEW: Stop Telegram bots
+        try:
+            telegram_manager = get_telegram_bot_manager()
+            await telegram_manager.stop_all_bots()
+            logger.info("✅ All Telegram bots stopped successfully")
+        except Exception as e:
+            logger.error(f"❌ Error stopping Telegram bots: {e}")
+        
         # Slack bots are event-driven and don't need explicit stopping
         logger.info("✅ Slack bots shutdown completed")
         
@@ -348,6 +372,9 @@ async def shutdown_event():
         
     except Exception as e:
         logger.error(f"💥 Error in shutdown event: {e}")
+
+
+
 
 
     

@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     "image/jpeg", "image/jpg", "image/png", 
     "image/webp", "image/svg+xml"
     ]   
+
+
+    # Instagram/Meta Configuration
+    META_APP_ID: Optional[str] = None
+    META_APP_SECRET: Optional[str] = None
+    META_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
+    META_API_VERSION: str = "v18.0"
+    
+    # Instagram specific settings
+    INSTAGRAM_WEBHOOK_ENDPOINT: str = "/api/instagram/webhook"
+    INSTAGRAM_MAX_MESSAGE_LENGTH: int = 1000
+    
+    # Default verify token for Instagram webhooks (will be overridden per tenant)
+    DEFAULT_INSTAGRAM_VERIFY_TOKEN: str = "your_default_verify_token_here"
+
+
     
     def get_allowed_domains_list(self) -> list:
         """Get allowed domains as a list"""

@@ -100,7 +100,8 @@ class TenantSubscription(Base):
     
     # Relationships
     plan = relationship("PricingPlan", back_populates="subscriptions")
-    tenant = relationship("Tenant", back_populates="subscription")
+    # tenant = relationship("Tenant", back_populates="subscription")
+    tenant = relationship("Tenant")
     usage_logs = relationship("UsageLog", back_populates="subscription")
 
 
