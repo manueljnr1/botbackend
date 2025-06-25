@@ -62,18 +62,16 @@ class Settings(BaseSettings):
     ]   
 
 
-    # Instagram/Meta Configuration
-    META_APP_ID: Optional[str] = None
-    META_APP_SECRET: Optional[str] = None
-    META_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
     META_API_VERSION: str = "v18.0"
-    
-    # Instagram specific settings
     INSTAGRAM_WEBHOOK_ENDPOINT: str = "/api/instagram/webhook"
     INSTAGRAM_MAX_MESSAGE_LENGTH: int = 1000
     
-    # Default verify token for Instagram webhooks (will be overridden per tenant)
-    DEFAULT_INSTAGRAM_VERIFY_TOKEN: str = "your_default_verify_token_here"
+    # Optional: Default verify token prefix for tenant tokens
+    # DEFAULT_INSTAGRAM_VERIFY_TOKEN_PREFIX: str = "tenant_ig_"
+    
+    # # Optional: System-wide Meta App (if providing shared app option)
+    # SYSTEM_META_APP_ID: Optional[str] = None
+    # SYSTEM_META_APP_SECRET: Optional[str] = None
 
 
     

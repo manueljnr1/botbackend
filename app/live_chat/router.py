@@ -1,4 +1,4 @@
-# app/live_chat/router.py - FIXED API KEY AUTHENTICATION
+# app/live_chat/router.py - FIXED JSON SERIALIZATION
 import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query
@@ -23,6 +23,18 @@ from app.pricing.integration_helpers import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# 🔧 UTILITY FUNCTION FOR JSON SERIALIZATION
+def serialize_datetime_objects(obj):
+    """Convert datetime objects to ISO format strings for JSON serialization"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: serialize_datetime_objects(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_datetime_objects(item) for item in obj]
+    else:
+        return obj
 
 # Pydantic Models
 class StartChatRequest(BaseModel):
@@ -202,7 +214,6 @@ async def customer_websocket_endpoint(
             await websocket_manager.disconnect(connection_id)
 
 
-# 🔧 FIXED: Added API key authentication
 @router.get("/queue-status")
 async def get_queue_status(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -223,7 +234,7 @@ async def get_queue_status(
 
 
 # =============================================================================
-# AGENT ENDPOINTS (FIXED API KEY AUTHENTICATION)
+# AGENT ENDPOINTS - FIXED JSON SERIALIZATION
 # =============================================================================
 
 @router.websocket("/ws/agent/{agent_id}")
@@ -233,7 +244,7 @@ async def agent_websocket_endpoint(
     session_id: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    """WebSocket endpoint for agents"""
+    """WebSocket endpoint for agents - FIXED JSON SERIALIZATION"""
     connection_id = None
     try:
         # Verify agent and session
@@ -262,14 +273,17 @@ async def agent_websocket_endpoint(
         # Initialize message handler
         message_handler = LiveChatMessageHandler(db, websocket_manager)
         
-        # Send initial queue data
+        # Send initial queue data - FIXED: Serialize datetime objects
         queue_service = LiveChatQueueService(db)
         queue_status = queue_service.get_queue_status(agent.tenant_id)
+        
+        # 🔧 SERIALIZE DATETIME OBJECTS BEFORE SENDING
+        serialized_queue_status = serialize_datetime_objects(queue_status)
         
         initial_data = {
             "type": "initial_data",
             "data": {
-                "queue_status": queue_status,
+                "queue_status": serialized_queue_status,
                 "agent_info": {
                     "agent_id": agent.id,
                     "display_name": agent.display_name,
@@ -277,6 +291,8 @@ async def agent_websocket_endpoint(
                 }
             }
         }
+        
+        # Send initial data
         await websocket.send_json(initial_data)
         
         # Listen for messages
@@ -309,7 +325,6 @@ async def agent_websocket_endpoint(
             logger.error(f"Error updating agent session: {str(e)}")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.post("/assign-conversation")
 async def manually_assign_conversation(
     request: ManualAssignmentRequest,
@@ -351,7 +366,6 @@ async def manually_assign_conversation(
         raise HTTPException(status_code=500, detail="Failed to assign conversation")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.get("/conversations/active")
 async def get_active_conversations(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -410,7 +424,6 @@ async def get_active_conversations(
         raise HTTPException(status_code=500, detail="Failed to get conversations")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.get("/conversations/{conversation_id}/history")
 async def get_conversation_history(
     conversation_id: int,
@@ -465,7 +478,6 @@ async def get_conversation_history(
         raise HTTPException(status_code=500, detail="Failed to get history")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.post("/conversations/{conversation_id}/close")
 async def close_conversation(
     conversation_id: int,
@@ -544,7 +556,6 @@ async def close_conversation(
         raise HTTPException(status_code=500, detail="Failed to close conversation")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.post("/conversations/{conversation_id}/transfer")
 async def transfer_conversation(
     conversation_id: int,
@@ -624,10 +635,9 @@ async def transfer_conversation(
 
 
 # =============================================================================
-# ANALYTICS & REPORTING ENDPOINTS (FIXED API KEY AUTHENTICATION)
+# ANALYTICS & REPORTING ENDPOINTS
 # =============================================================================
 
-# 🔧 FIXED: Added API key authentication
 @router.get("/analytics/summary")
 async def get_live_chat_analytics(
     days: int = Query(30, ge=1, le=365),
@@ -722,10 +732,9 @@ async def get_live_chat_analytics(
 
 
 # =============================================================================
-# ADMIN & MANAGEMENT ENDPOINTS (FIXED API KEY AUTHENTICATION)
+# ADMIN & MANAGEMENT ENDPOINTS
 # =============================================================================
 
-# 🔧 FIXED: Added API key authentication
 @router.get("/status")
 async def get_live_chat_status(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -762,7 +771,6 @@ async def get_live_chat_status(
         raise HTTPException(status_code=500, detail="Failed to get status")
 
 
-# 🔧 FIXED: Added API key authentication
 @router.post("/cleanup")
 async def cleanup_expired_sessions(
     api_key: str = Header(..., alias="X-API-Key"),
