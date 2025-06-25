@@ -148,3 +148,4 @@ asyncpg
 svix==1.24.0
 python-jose
 Pillow
+resend
