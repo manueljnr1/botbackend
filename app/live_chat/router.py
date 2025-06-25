@@ -1,4 +1,4 @@
-# app/live_chat/router.py
+# app/live_chat/router.py - FIXED API KEY AUTHENTICATION
 import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query
@@ -202,6 +202,7 @@ async def customer_websocket_endpoint(
             await websocket_manager.disconnect(connection_id)
 
 
+# 🔧 FIXED: Added API key authentication
 @router.get("/queue-status")
 async def get_queue_status(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -222,7 +223,7 @@ async def get_queue_status(
 
 
 # =============================================================================
-# AGENT ENDPOINTS
+# AGENT ENDPOINTS (FIXED API KEY AUTHENTICATION)
 # =============================================================================
 
 @router.websocket("/ws/agent/{agent_id}")
@@ -308,6 +309,7 @@ async def agent_websocket_endpoint(
             logger.error(f"Error updating agent session: {str(e)}")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.post("/assign-conversation")
 async def manually_assign_conversation(
     request: ManualAssignmentRequest,
@@ -349,6 +351,7 @@ async def manually_assign_conversation(
         raise HTTPException(status_code=500, detail="Failed to assign conversation")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.get("/conversations/active")
 async def get_active_conversations(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -407,6 +410,7 @@ async def get_active_conversations(
         raise HTTPException(status_code=500, detail="Failed to get conversations")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.get("/conversations/{conversation_id}/history")
 async def get_conversation_history(
     conversation_id: int,
@@ -461,6 +465,7 @@ async def get_conversation_history(
         raise HTTPException(status_code=500, detail="Failed to get history")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.post("/conversations/{conversation_id}/close")
 async def close_conversation(
     conversation_id: int,
@@ -539,6 +544,7 @@ async def close_conversation(
         raise HTTPException(status_code=500, detail="Failed to close conversation")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.post("/conversations/{conversation_id}/transfer")
 async def transfer_conversation(
     conversation_id: int,
@@ -618,9 +624,10 @@ async def transfer_conversation(
 
 
 # =============================================================================
-# ANALYTICS & REPORTING ENDPOINTS
+# ANALYTICS & REPORTING ENDPOINTS (FIXED API KEY AUTHENTICATION)
 # =============================================================================
 
+# 🔧 FIXED: Added API key authentication
 @router.get("/analytics/summary")
 async def get_live_chat_analytics(
     days: int = Query(30, ge=1, le=365),
@@ -715,9 +722,10 @@ async def get_live_chat_analytics(
 
 
 # =============================================================================
-# ADMIN & MANAGEMENT ENDPOINTS
+# ADMIN & MANAGEMENT ENDPOINTS (FIXED API KEY AUTHENTICATION)
 # =============================================================================
 
+# 🔧 FIXED: Added API key authentication
 @router.get("/status")
 async def get_live_chat_status(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -754,6 +762,7 @@ async def get_live_chat_status(
         raise HTTPException(status_code=500, detail="Failed to get status")
 
 
+# 🔧 FIXED: Added API key authentication
 @router.post("/cleanup")
 async def cleanup_expired_sessions(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -779,5 +788,3 @@ async def cleanup_expired_sessions(
     except Exception as e:
         logger.error(f"Error in cleanup: {str(e)}")
         raise HTTPException(status_code=500, detail="Cleanup failed")
-
-

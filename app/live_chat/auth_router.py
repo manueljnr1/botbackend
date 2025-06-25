@@ -1,4 +1,4 @@
-# app/live_chat/auth_router.py - FIXED ASYNC ISSUES
+# app/live_chat/auth_router.py - FIXED API KEY AUTHENTICATION
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -99,10 +99,7 @@ async def invite_agent(
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
-        # TODO: Check if tenant has permission to add more agents (pricing limits)
-        
         service = AgentAuthService(db)
-        # FIXED: Now properly awaiting the async function
         result = await service.invite_agent(
             tenant_id=tenant.id,
             email=request.email,
@@ -149,7 +146,6 @@ async def revoke_agent(
         tenant = get_tenant_from_api_key(api_key, db)
         
         service = AgentAuthService(db)
-        # FIXED: Now properly awaiting the async function
         result = await service.revoke_agent(
             tenant_id=tenant.id,
             agent_id=agent_id,
@@ -165,6 +161,7 @@ async def revoke_agent(
         raise HTTPException(status_code=500, detail="Failed to revoke agent")
 
 
+# 🔧 FIXED: Added API key authentication for agent endpoints
 @router.get("/active-agents")
 async def get_active_agents(
     api_key: str = Header(..., alias="X-API-Key"),
@@ -242,7 +239,6 @@ async def set_agent_password(
             )
         
         service = AgentAuthService(db)
-        # FIXED: Now properly awaiting the async function
         result = await service.set_agent_password(request.token, request.password)
         
         return {

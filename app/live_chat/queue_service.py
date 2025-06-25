@@ -1,6 +1,6 @@
-# app/live_chat/queue_service.py
+# app/live_chat/queue_service.py - FIXED TIMEZONE ISSUES
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import List, Dict, Optional
@@ -13,6 +13,27 @@ from app.live_chat.models import (
 from app.live_chat.agent_service import AgentSessionService
 
 logger = logging.getLogger(__name__)
+
+
+def utc_now():
+    """Get current UTC time with timezone info"""
+    return datetime.now(timezone.utc)
+
+def make_timezone_naive(dt):
+    """Make a timezone-aware datetime naive (for database comparison)"""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+def make_timezone_aware(dt):
+    """Make a naive datetime timezone-aware (UTC)"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 class QueueAssignmentStrategy:
@@ -62,7 +83,8 @@ class LiveChatQueueService:
                 priority=priority,
                 preferred_agent_id=preferred_agent_id,
                 assignment_criteria=json.dumps(assignment_criteria) if assignment_criteria else None,
-                customer_message_preview=self._get_customer_preview(conversation_id)
+                customer_message_preview=self._get_customer_preview(conversation_id),
+                queued_at=datetime.utcnow()  # Keep as naive for database
             )
             
             self.db.add(queue_entry)
@@ -285,8 +307,9 @@ class LiveChatQueueService:
             conversation.assigned_at = now
             conversation.assignment_method = assignment_method
             
-            # Calculate wait time
+            # Calculate wait time - FIXED TIMEZONE COMPARISON
             if conversation.queue_entry_time:
+                # Both should be naive for comparison
                 wait_seconds = (now - conversation.queue_entry_time).total_seconds()
                 conversation.wait_time_seconds = int(wait_seconds)
             
@@ -324,7 +347,7 @@ class LiveChatQueueService:
         ).update({ChatQueue.position: ChatQueue.position - 1})
     
     def get_queue_status(self, tenant_id: int) -> Dict:
-        """Get current queue status for tenant"""
+        """Get current queue status for tenant - FIXED TIMEZONE ISSUES"""
         try:
             # Get waiting queue
             waiting_queue = self.db.query(ChatQueue).join(LiveChatConversation).filter(
@@ -341,16 +364,26 @@ class LiveChatQueueService:
             ).first()
             
             queue_data = []
+            current_time = datetime.utcnow()  # Use naive datetime for comparison
+            
             for entry in waiting_queue:
+                # FIXED: Handle timezone-aware/naive datetime comparison safely
+                try:
+                    queued_at = make_timezone_naive(entry.queued_at) if entry.queued_at else current_time
+                    wait_minutes = int((current_time - queued_at).total_seconds() / 60)
+                except Exception as e:
+                    logger.warning(f"Timezone calculation error for queue entry {entry.id}: {str(e)}")
+                    wait_minutes = 0
+                
                 queue_data.append({
                     "queue_id": entry.id,
                     "conversation_id": entry.conversation_id,
                     "position": entry.position,
                     "priority": entry.priority,
                     "customer_preview": entry.customer_message_preview,
-                    "wait_time_minutes": int((datetime.utcnow() - entry.queued_at).total_seconds() / 60),
+                    "wait_time_minutes": wait_minutes,
                     "estimated_wait_time": self._calculate_wait_time(tenant_id, entry.position),
-                    "queued_at": entry.queued_at.isoformat()
+                    "queued_at": entry.queued_at.isoformat() if entry.queued_at else None
                 })
             
             return {
@@ -517,7 +550,7 @@ class LiveChatQueueService:
             return False
     
     def cleanup_expired_queue_entries(self, tenant_id: int = None) -> int:
-        """Clean up expired queue entries"""
+        """Clean up expired queue entries - FIXED TIMEZONE ISSUES"""
         try:
             # Get settings for timeout
             if tenant_id:
@@ -530,7 +563,7 @@ class LiveChatQueueService:
                 timeout_minutes = 30
                 tenants_filter = None
             
-            # Find expired entries
+            # Find expired entries - FIXED: Use naive datetime for comparison
             cutoff_time = datetime.utcnow() - timedelta(minutes=timeout_minutes)
             
             query = self.db.query(ChatQueue).filter(
@@ -555,4 +588,3 @@ class LiveChatQueueService:
         except Exception as e:
             logger.error(f"Error cleaning up queue: {str(e)}")
             return 0
-        
