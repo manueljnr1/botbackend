@@ -1,4 +1,4 @@
-# app/live_chat/router.py - FIXED BEARER TOKEN AUTHENTICATION FOR AGENT ENDPOINTS
+# app/live_chat/router.py - COMPLETE TIMEZONE AND DATETIME FIXES
 
 import json
 import logging
@@ -6,7 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPExce
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -25,6 +25,38 @@ from app.pricing.integration_helpers import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# 🔧 TIMEZONE UTILITY FUNCTIONS
+def utc_now():
+    """Get current UTC time with timezone info"""
+    return datetime.now(timezone.utc)
+
+def make_timezone_naive(dt):
+    """Make a timezone-aware datetime naive (for database comparison)"""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+def make_timezone_aware(dt):
+    """Make a naive datetime timezone-aware (UTC)"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+def safe_datetime_subtract(dt1, dt2):
+    """Safely subtract two datetime objects, handling timezone issues"""
+    try:
+        # Make both naive for subtraction
+        dt1_naive = make_timezone_naive(dt1) if dt1 else datetime.utcnow()
+        dt2_naive = make_timezone_naive(dt2) if dt2 else datetime.utcnow()
+        return dt1_naive - dt2_naive
+    except Exception as e:
+        logger.warning(f"Datetime subtraction error: {str(e)}")
+        return timedelta(0)
 
 # 🔧 OAuth2 scheme for Bearer token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="live-chat/auth/login", auto_error=False)
@@ -103,24 +135,9 @@ class ChatResponse(BaseModel):
     websocket_url: str
     message: str
 
-class QueueStatusResponse(BaseModel):
-    tenant_id: int
-    queue_length: int
-    available_agents: int
-    max_queue_size: int
-    estimated_wait_time: int
-
-class ConversationSummary(BaseModel):
-    conversation_id: int
-    customer_identifier: str
-    customer_name: Optional[str]
-    status: str
-    assigned_agent_id: Optional[int]
-    agent_name: Optional[str]
-    created_at: str
-    last_activity_at: str
-    message_count: int
-    wait_time_minutes: Optional[int]
+class ManualAssignmentRequest(BaseModel):
+    queue_id: int
+    agent_id: int
 
 class ConversationTransferRequest(BaseModel):
     to_agent_id: int
@@ -131,10 +148,6 @@ class ConversationCloseRequest(BaseModel):
     reason: Optional[str] = "resolved"
     notes: Optional[str] = ""
     resolution_status: Optional[str] = "resolved"
-
-class ManualAssignmentRequest(BaseModel):
-    queue_id: int
-    agent_id: int
 
 
 # =============================================================================
@@ -375,7 +388,6 @@ async def agent_websocket_endpoint(
             logger.error(f"Error updating agent session: {str(e)}")
 
 
-# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/assign-conversation")
 async def manually_assign_conversation(
     request: ManualAssignmentRequest,
@@ -406,7 +418,7 @@ async def manually_assign_conversation(
                 "agent_name": target_agent.display_name
             }
         else:
-            raise HTTPException(status_code=400, detail="Failed to assign conversation")
+            raise HTTPException(status_code=400, detail="Failed to assign conversation - queue entry may have been processed already")
             
     except HTTPException:
         raise
@@ -415,13 +427,12 @@ async def manually_assign_conversation(
         raise HTTPException(status_code=500, detail="Failed to assign conversation")
 
 
-# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.get("/conversations/active")
 async def get_active_conversations(
     current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
-    """Get all active conversations for agent's tenant"""
+    """Get all active conversations for agent's tenant - FIXED TIMEZONE ISSUES"""
     try:
         conversations = db.query(LiveChatConversation).filter(
             LiveChatConversation.tenant_id == current_agent.tenant_id,
@@ -433,18 +444,32 @@ async def get_active_conversations(
         ).order_by(LiveChatConversation.created_at.desc()).all()
         
         conversation_list = []
+        current_time = datetime.utcnow()  # Use naive datetime
+        
         for conv in conversations:
             agent_name = None
             if conv.assigned_agent_id:
                 agent = db.query(Agent).filter(Agent.id == conv.assigned_agent_id).first()
                 agent_name = agent.display_name if agent else "Unknown Agent"
             
+            # 🔧 FIXED: Safe datetime calculations
             wait_time = None
             if conv.queue_entry_time:
                 if conv.assigned_at:
-                    wait_time = int((conv.assigned_at - conv.queue_entry_time).total_seconds() / 60)
+                    time_diff = safe_datetime_subtract(conv.assigned_at, conv.queue_entry_time)
+                    wait_time = int(time_diff.total_seconds() / 60)
                 else:
-                    wait_time = int((datetime.utcnow() - conv.queue_entry_time).total_seconds() / 60)
+                    time_diff = safe_datetime_subtract(current_time, conv.queue_entry_time)
+                    wait_time = int(time_diff.total_seconds() / 60)
+            
+            # 🔧 FIXED: Safe datetime serialization
+            try:
+                created_at = conv.created_at.isoformat() if conv.created_at else None
+                last_activity_at = conv.last_activity_at.isoformat() if conv.last_activity_at else None
+            except Exception as e:
+                logger.warning(f"Datetime serialization error: {str(e)}")
+                created_at = str(conv.created_at) if conv.created_at else None
+                last_activity_at = str(conv.last_activity_at) if conv.last_activity_at else None
             
             conversation_list.append({
                 "conversation_id": conv.id,
@@ -454,8 +479,8 @@ async def get_active_conversations(
                 "status": conv.status,
                 "assigned_agent_id": conv.assigned_agent_id,
                 "agent_name": agent_name,
-                "created_at": conv.created_at.isoformat(),
-                "last_activity_at": conv.last_activity_at.isoformat(),
+                "created_at": created_at,
+                "last_activity_at": last_activity_at,
                 "message_count": conv.message_count,
                 "wait_time_minutes": wait_time,
                 "queue_position": conv.queue_position
@@ -472,7 +497,6 @@ async def get_active_conversations(
         raise HTTPException(status_code=500, detail="Failed to get conversations")
 
 
-# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.get("/conversations/{conversation_id}/history")
 async def get_conversation_history(
     conversation_id: int,
@@ -498,12 +522,19 @@ async def get_conversation_history(
         
         message_list = []
         for msg in reversed(messages):  # Reverse to get chronological order
+            # 🔧 FIXED: Safe datetime serialization
+            try:
+                sent_at = msg.sent_at.isoformat() if msg.sent_at else None
+            except Exception as e:
+                logger.warning(f"Message datetime serialization error: {str(e)}")
+                sent_at = str(msg.sent_at) if msg.sent_at else None
+            
             message_list.append({
                 "message_id": msg.id,
                 "content": msg.content,
                 "sender_type": msg.sender_type,
                 "sender_name": msg.sender_name,
-                "sent_at": msg.sent_at.isoformat(),
+                "sent_at": sent_at,
                 "message_type": msg.message_type,
                 "is_internal": msg.is_internal,
                 "attachment_url": msg.attachment_url,
@@ -525,7 +556,6 @@ async def get_conversation_history(
         raise HTTPException(status_code=500, detail="Failed to get history")
 
 
-# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/conversations/{conversation_id}/close")
 async def close_conversation(
     conversation_id: int,
@@ -545,17 +575,18 @@ async def close_conversation(
             raise HTTPException(status_code=404, detail="Conversation not found")
         
         # Close conversation
+        current_time = datetime.utcnow()
         conversation.status = ConversationStatus.CLOSED
-        conversation.closed_at = datetime.utcnow()
+        conversation.closed_at = current_time
         conversation.closed_by = f"agent_{current_agent.id}"
         conversation.closure_reason = request.reason
         conversation.agent_notes = request.notes
         conversation.resolution_status = request.resolution_status
         
-        # Calculate duration
+        # Calculate duration - FIXED: Safe datetime calculation
         if conversation.assigned_at:
-            duration = (datetime.utcnow() - conversation.assigned_at).total_seconds()
-            conversation.conversation_duration_seconds = int(duration)
+            duration_delta = safe_datetime_subtract(current_time, conversation.assigned_at)
+            conversation.conversation_duration_seconds = int(duration_delta.total_seconds())
         
         # Update agent session if assigned
         if conversation.assigned_agent_id:
@@ -602,7 +633,6 @@ async def close_conversation(
         raise HTTPException(status_code=500, detail="Failed to close conversation")
 
 
-# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/conversations/{conversation_id}/transfer")
 async def transfer_conversation(
     conversation_id: int,
