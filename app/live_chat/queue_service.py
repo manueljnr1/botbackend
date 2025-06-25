@@ -1,4 +1,4 @@
-# app/live_chat/queue_service.py - FIXED TIMEZONE ISSUES
+# app/live_chat/queue_service.py - COMPLETE TIMEZONE FIX
 import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
@@ -16,24 +16,33 @@ logger = logging.getLogger(__name__)
 
 
 def utc_now():
-    """Get current UTC time with timezone info"""
-    return datetime.now(timezone.utc)
+    """Get current UTC time - ALWAYS NAIVE for database consistency"""
+    return datetime.utcnow()
 
-def make_timezone_naive(dt):
-    """Make a timezone-aware datetime naive (for database comparison)"""
+def ensure_naive_datetime(dt):
+    """Ensure datetime is naive (no timezone) for database operations"""
     if dt is None:
         return None
-    if dt.tzinfo is not None:
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        # Convert timezone-aware to naive UTC
+        if dt.tzinfo != timezone.utc:
+            dt = dt.astimezone(timezone.utc)
         return dt.replace(tzinfo=None)
     return dt
 
-def make_timezone_aware(dt):
-    """Make a naive datetime timezone-aware (UTC)"""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
+def safe_datetime_subtract(dt1, dt2):
+    """Safely subtract two datetimes, ensuring both are naive"""
+    if dt1 is None or dt2 is None:
+        return timedelta(0)
+    
+    dt1_naive = ensure_naive_datetime(dt1)
+    dt2_naive = ensure_naive_datetime(dt2)
+    
+    try:
+        return dt1_naive - dt2_naive
+    except Exception as e:
+        logger.warning(f"Datetime subtraction error: {e}, using default timedelta")
+        return timedelta(0)
 
 
 class QueueAssignmentStrategy:
@@ -75,7 +84,7 @@ class LiveChatQueueService:
             # Get next position in queue
             next_position = self._get_next_queue_position(conversation.tenant_id, priority)
             
-            # Create queue entry
+            # Create queue entry - FIXED: Always use naive datetime
             queue_entry = ChatQueue(
                 tenant_id=conversation.tenant_id,
                 conversation_id=conversation_id,
@@ -84,15 +93,15 @@ class LiveChatQueueService:
                 preferred_agent_id=preferred_agent_id,
                 assignment_criteria=json.dumps(assignment_criteria) if assignment_criteria else None,
                 customer_message_preview=self._get_customer_preview(conversation_id),
-                queued_at=datetime.utcnow()  # Keep as naive for database
+                queued_at=utc_now()  # Always naive
             )
             
             self.db.add(queue_entry)
             
-            # Update conversation status
+            # Update conversation status - FIXED: Always use naive datetime
             conversation.status = ConversationStatus.QUEUED
             conversation.queue_position = next_position
-            conversation.queue_entry_time = datetime.utcnow()
+            conversation.queue_entry_time = utc_now()  # Always naive
             
             self.db.commit()
             self.db.refresh(queue_entry)
@@ -114,6 +123,128 @@ class LiveChatQueueService:
             logger.error(f"Error adding to queue: {str(e)}")
             self.db.rollback()
             raise
+    
+    def assign_conversation(self, queue_id: int, agent_id: int, assignment_method: str = "auto") -> bool:
+        """Assign a queued conversation to an agent - COMPLETE TIMEZONE FIX"""
+        try:
+            # Get queue entry
+            queue_entry = self.db.query(ChatQueue).filter(
+                ChatQueue.id == queue_id,
+                ChatQueue.status == "waiting"
+            ).first()
+            
+            if not queue_entry:
+                logger.error(f"Queue entry {queue_id} not found or not waiting")
+                return False
+            
+            # Get conversation
+            conversation = queue_entry.conversation
+            if not conversation:
+                logger.error(f"Conversation not found for queue {queue_id}")
+                return False
+            
+            # Verify agent availability
+            agent_session = self.db.query(AgentSession).filter(
+                AgentSession.agent_id == agent_id,
+                AgentSession.logout_at.is_(None),
+                AgentSession.active_conversations < AgentSession.max_concurrent_chats
+            ).first()
+            
+            if not agent_session:
+                logger.error(f"Agent {agent_id} not available for assignment")
+                return False
+            
+            # FIXED: All datetime operations use naive datetimes
+            now = utc_now()  # Always naive
+            
+            # Update conversation
+            conversation.status = ConversationStatus.ASSIGNED
+            conversation.assigned_agent_id = agent_id
+            conversation.assigned_at = now
+            conversation.assignment_method = assignment_method
+            
+            # FIXED: Calculate wait time safely
+            if conversation.queue_entry_time:
+                wait_delta = safe_datetime_subtract(now, conversation.queue_entry_time)
+                conversation.wait_time_seconds = int(wait_delta.total_seconds())
+            
+            # Update queue entry
+            queue_entry.status = "assigned"
+            queue_entry.assigned_at = now
+            
+            # Update agent session
+            agent_session.active_conversations += 1
+            
+            # Remove from queue position (update other positions)
+            self._remove_from_queue_positions(queue_entry)
+            
+            self.db.commit()
+            
+            logger.info(f"Conversation {conversation.id} assigned to agent {agent_id}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error assigning conversation: {str(e)}")
+            self.db.rollback()
+            return False
+    
+    def get_queue_status(self, tenant_id: int) -> Dict:
+        """Get current queue status for tenant - COMPLETE TIMEZONE FIX"""
+        try:
+            # Get waiting queue
+            waiting_queue = self.db.query(ChatQueue).join(LiveChatConversation).filter(
+                ChatQueue.tenant_id == tenant_id,
+                ChatQueue.status == "waiting"
+            ).order_by(ChatQueue.position.asc()).all()
+            
+            # Get available agents
+            available_agents = self._get_available_agents(tenant_id)
+            
+            # Get settings
+            settings = self.db.query(LiveChatSettings).filter(
+                LiveChatSettings.tenant_id == tenant_id
+            ).first()
+            
+            queue_data = []
+            current_time = utc_now()  # Always naive
+            
+            for entry in waiting_queue:
+                # FIXED: Safe datetime calculation
+                try:
+                    if entry.queued_at:
+                        wait_delta = safe_datetime_subtract(current_time, entry.queued_at)
+                        wait_minutes = int(wait_delta.total_seconds() / 60)
+                    else:
+                        wait_minutes = 0
+                except Exception as e:
+                    logger.warning(f"Wait time calculation error for queue entry {entry.id}: {str(e)}")
+                    wait_minutes = 0
+                
+                queue_data.append({
+                    "queue_id": entry.id,
+                    "conversation_id": entry.conversation_id,
+                    "position": entry.position,
+                    "priority": entry.priority,
+                    "customer_preview": entry.customer_message_preview,
+                    "wait_time_minutes": wait_minutes,
+                    "estimated_wait_time": self._calculate_wait_time(tenant_id, entry.position),
+                    "queued_at": entry.queued_at.isoformat() if entry.queued_at else None
+                })
+            
+            return {
+                "tenant_id": tenant_id,
+                "queue_length": len(waiting_queue),
+                "available_agents": len(available_agents),
+                "max_queue_size": settings.max_queue_size if settings else 50,
+                "max_wait_time": settings.max_wait_time_minutes if settings else 30,
+                "queue": queue_data,
+                "agents": available_agents
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting queue status: {str(e)}")
+            return {"error": str(e)}
     
     def _get_next_queue_position(self, tenant_id: int, priority: int) -> int:
         """Get the next available position in queue based on priority"""
@@ -268,75 +399,6 @@ class LiveChatQueueService:
             # Last assigned agent not in available list
             return available_agents[0]
     
-    def assign_conversation(self, queue_id: int, agent_id: int, assignment_method: str = "auto") -> bool:
-        """Assign a queued conversation to an agent"""
-        try:
-            # Get queue entry
-            queue_entry = self.db.query(ChatQueue).filter(
-                ChatQueue.id == queue_id,
-                ChatQueue.status == "waiting"
-            ).first()
-            
-            if not queue_entry:
-                logger.error(f"Queue entry {queue_id} not found or not waiting")
-                return False
-            
-            # Get conversation
-            conversation = queue_entry.conversation
-            if not conversation:
-                logger.error(f"Conversation not found for queue {queue_id}")
-                return False
-            
-            # Verify agent availability
-            agent_session = self.db.query(AgentSession).filter(
-                AgentSession.agent_id == agent_id,
-                AgentSession.logout_at.is_(None),
-                AgentSession.active_conversations < AgentSession.max_concurrent_chats
-            ).first()
-            
-            if not agent_session:
-                logger.error(f"Agent {agent_id} not available for assignment")
-                return False
-            
-            # Perform assignment
-            now = datetime.utcnow()
-            
-            # Update conversation
-            conversation.status = ConversationStatus.ASSIGNED
-            conversation.assigned_agent_id = agent_id
-            conversation.assigned_at = now
-            conversation.assignment_method = assignment_method
-            
-            # Calculate wait time - FIXED TIMEZONE COMPARISON
-            if conversation.queue_entry_time:
-                # Both should be naive for comparison
-                wait_seconds = (now - conversation.queue_entry_time).total_seconds()
-                conversation.wait_time_seconds = int(wait_seconds)
-            
-            # Update queue entry
-            queue_entry.status = "assigned"
-            queue_entry.assigned_at = now
-            
-            # Update agent session
-            agent_session.active_conversations += 1
-            
-            # Remove from queue position (update other positions)
-            self._remove_from_queue_positions(queue_entry)
-            
-            self.db.commit()
-            
-            logger.info(f"Conversation {conversation.id} assigned to agent {agent_id}")
-            
-            # TODO: Send real-time notification to agent
-            # TODO: Send notification to customer about agent joining
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error assigning conversation: {str(e)}")
-            self.db.rollback()
-            return False
-    
     def _remove_from_queue_positions(self, queue_entry: ChatQueue):
         """Remove from queue and update positions of remaining entries"""
         # Update positions of entries that come after
@@ -345,60 +407,6 @@ class LiveChatQueueService:
             ChatQueue.position > queue_entry.position,
             ChatQueue.status == "waiting"
         ).update({ChatQueue.position: ChatQueue.position - 1})
-    
-    def get_queue_status(self, tenant_id: int) -> Dict:
-        """Get current queue status for tenant - FIXED TIMEZONE ISSUES"""
-        try:
-            # Get waiting queue
-            waiting_queue = self.db.query(ChatQueue).join(LiveChatConversation).filter(
-                ChatQueue.tenant_id == tenant_id,
-                ChatQueue.status == "waiting"
-            ).order_by(ChatQueue.position.asc()).all()
-            
-            # Get available agents
-            available_agents = self._get_available_agents(tenant_id)
-            
-            # Get settings
-            settings = self.db.query(LiveChatSettings).filter(
-                LiveChatSettings.tenant_id == tenant_id
-            ).first()
-            
-            queue_data = []
-            current_time = datetime.utcnow()  # Use naive datetime for comparison
-            
-            for entry in waiting_queue:
-                # FIXED: Handle timezone-aware/naive datetime comparison safely
-                try:
-                    queued_at = make_timezone_naive(entry.queued_at) if entry.queued_at else current_time
-                    wait_minutes = int((current_time - queued_at).total_seconds() / 60)
-                except Exception as e:
-                    logger.warning(f"Timezone calculation error for queue entry {entry.id}: {str(e)}")
-                    wait_minutes = 0
-                
-                queue_data.append({
-                    "queue_id": entry.id,
-                    "conversation_id": entry.conversation_id,
-                    "position": entry.position,
-                    "priority": entry.priority,
-                    "customer_preview": entry.customer_message_preview,
-                    "wait_time_minutes": wait_minutes,
-                    "estimated_wait_time": self._calculate_wait_time(tenant_id, entry.position),
-                    "queued_at": entry.queued_at.isoformat() if entry.queued_at else None
-                })
-            
-            return {
-                "tenant_id": tenant_id,
-                "queue_length": len(waiting_queue),
-                "available_agents": len(available_agents),
-                "max_queue_size": settings.max_queue_size if settings else 50,
-                "max_wait_time": settings.max_wait_time_minutes if settings else 30,
-                "queue": queue_data,
-                "agents": available_agents
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting queue status: {str(e)}")
-            return {"error": str(e)}
     
     def _calculate_wait_time(self, tenant_id: int, position: int) -> int:
         """Calculate estimated wait time in minutes"""
@@ -410,7 +418,6 @@ class LiveChatQueueService:
                 return 30  # Default when no agents available
             
             # Simple calculation: assume 5 minutes per conversation ahead
-            # This could be made more sophisticated with historical data
             conversations_ahead = max(0, position - available_agents)
             estimated_minutes = conversations_ahead * 5
             
@@ -441,15 +448,18 @@ class LiveChatQueueService:
             if not queue_entry:
                 return False
             
+            # FIXED: Use naive datetime
+            now = utc_now()
+            
             # Update queue entry
             queue_entry.status = "abandoned"
             queue_entry.abandon_reason = reason
-            queue_entry.removed_at = datetime.utcnow()
+            queue_entry.removed_at = now
             
             # Update conversation
             conversation = queue_entry.conversation
             conversation.status = ConversationStatus.ABANDONED
-            conversation.closed_at = datetime.utcnow()
+            conversation.closed_at = now
             conversation.closed_by = "customer"
             conversation.closure_reason = reason
             
@@ -489,10 +499,13 @@ class LiveChatQueueService:
                 # Put back in queue if target not available
                 return self._requeue_conversation(conversation_id, reason="transfer_unavailable")
             
+            # FIXED: Use naive datetime
+            now = utc_now()
+            
             # Update conversation
             conversation.previous_agent_id = from_agent_id
             conversation.assigned_agent_id = to_agent_id
-            conversation.assigned_at = datetime.utcnow()
+            conversation.assigned_at = now
             conversation.assignment_method = "transfer"
             
             # Update agent sessions
@@ -550,7 +563,7 @@ class LiveChatQueueService:
             return False
     
     def cleanup_expired_queue_entries(self, tenant_id: int = None) -> int:
-        """Clean up expired queue entries - FIXED TIMEZONE ISSUES"""
+        """Clean up expired queue entries - COMPLETE TIMEZONE FIX"""
         try:
             # Get settings for timeout
             if tenant_id:
@@ -563,8 +576,8 @@ class LiveChatQueueService:
                 timeout_minutes = 30
                 tenants_filter = None
             
-            # Find expired entries - FIXED: Use naive datetime for comparison
-            cutoff_time = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+            # FIXED: Use naive datetime for comparison
+            cutoff_time = utc_now() - timedelta(minutes=timeout_minutes)
             
             query = self.db.query(ChatQueue).filter(
                 ChatQueue.status == "waiting",
