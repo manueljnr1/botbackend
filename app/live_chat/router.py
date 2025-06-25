@@ -1,7 +1,9 @@
-# app/live_chat/router.py - FIXED JSON SERIALIZATION
+# app/live_chat/router.py - FIXED BEARER TOKEN AUTHENTICATION FOR AGENT ENDPOINTS
+
 import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
@@ -11,7 +13,7 @@ from app.database import get_db
 from app.live_chat.websocket_manager import websocket_manager, LiveChatMessageHandler
 from app.live_chat.queue_service import LiveChatQueueService
 from app.live_chat.agent_service import AgentSessionService
-from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType
+from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType, AgentStatus
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
 
@@ -24,6 +26,9 @@ from app.pricing.integration_helpers import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# 🔧 OAuth2 scheme for Bearer token authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="live-chat/auth/login", auto_error=False)
+
 # 🔧 UTILITY FUNCTION FOR JSON SERIALIZATION
 def serialize_datetime_objects(obj):
     """Convert datetime objects to ISO format strings for JSON serialization"""
@@ -35,6 +40,51 @@ def serialize_datetime_objects(obj):
         return [serialize_datetime_objects(item) for item in obj]
     else:
         return obj
+
+# 🔧 AGENT AUTHENTICATION DEPENDENCY
+def get_current_agent(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Dependency to get current authenticated agent"""
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token required"
+        )
+    
+    try:
+        from app.core.security import verify_token
+        
+        # Decode and verify JWT token
+        payload = verify_token(token)
+        agent_id = payload.get("sub")
+        user_type = payload.get("type")
+        
+        if user_type != "agent":
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid user type - agent token required"
+            )
+        
+        # Get agent from database
+        agent = db.query(Agent).filter(
+            Agent.id == int(agent_id),
+            Agent.status == AgentStatus.ACTIVE,
+            Agent.is_active == True
+        ).first()
+        
+        if not agent:
+            raise HTTPException(
+                status_code=404,
+                detail="Agent not found or inactive"
+            )
+        
+        return agent
+        
+    except Exception as e:
+        logger.error(f"Error verifying agent token: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Could not validate credentials"
+        )
 
 # Pydantic Models
 class StartChatRequest(BaseModel):
@@ -88,7 +138,7 @@ class ManualAssignmentRequest(BaseModel):
 
 
 # =============================================================================
-# CUSTOMER ENDPOINTS
+# CUSTOMER ENDPOINTS (API KEY AUTHENTICATION)
 # =============================================================================
 
 @router.post("/start-chat", response_model=ChatResponse)
@@ -234,7 +284,7 @@ async def get_queue_status(
 
 
 # =============================================================================
-# AGENT ENDPOINTS - FIXED JSON SERIALIZATION
+# AGENT ENDPOINTS (BEARER TOKEN AUTHENTICATION)
 # =============================================================================
 
 @router.websocket("/ws/agent/{agent_id}")
@@ -325,25 +375,24 @@ async def agent_websocket_endpoint(
             logger.error(f"Error updating agent session: {str(e)}")
 
 
+# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/assign-conversation")
 async def manually_assign_conversation(
     request: ManualAssignmentRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
     """Manually assign a queued conversation to an agent"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Verify agent belongs to tenant
-        agent = db.query(Agent).filter(
+        # Verify agent belongs to same tenant as the target agent
+        target_agent = db.query(Agent).filter(
             Agent.id == request.agent_id,
-            Agent.tenant_id == tenant.id,
+            Agent.tenant_id == current_agent.tenant_id,
             Agent.status == "active"
         ).first()
         
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+        if not target_agent:
+            raise HTTPException(status_code=404, detail="Target agent not found")
         
         # Assign conversation
         queue_service = LiveChatQueueService(db)
@@ -352,9 +401,9 @@ async def manually_assign_conversation(
         if success:
             return {
                 "success": True,
-                "message": f"Conversation assigned to {agent.display_name}",
+                "message": f"Conversation assigned to {target_agent.display_name}",
                 "agent_id": request.agent_id,
-                "agent_name": agent.display_name
+                "agent_name": target_agent.display_name
             }
         else:
             raise HTTPException(status_code=400, detail="Failed to assign conversation")
@@ -366,17 +415,16 @@ async def manually_assign_conversation(
         raise HTTPException(status_code=500, detail="Failed to assign conversation")
 
 
+# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.get("/conversations/active")
 async def get_active_conversations(
-    api_key: str = Header(..., alias="X-API-Key"),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
-    """Get all active conversations for tenant"""
+    """Get all active conversations for agent's tenant"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
         conversations = db.query(LiveChatConversation).filter(
-            LiveChatConversation.tenant_id == tenant.id,
+            LiveChatConversation.tenant_id == current_agent.tenant_id,
             LiveChatConversation.status.in_([
                 ConversationStatus.QUEUED,
                 ConversationStatus.ASSIGNED,
@@ -424,21 +472,20 @@ async def get_active_conversations(
         raise HTTPException(status_code=500, detail="Failed to get conversations")
 
 
+# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.get("/conversations/{conversation_id}/history")
 async def get_conversation_history(
     conversation_id: int,
+    current_agent: Agent = Depends(get_current_agent),
     limit: int = Query(50, ge=1, le=200),
-    api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
     """Get message history for a conversation"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Verify conversation belongs to tenant
+        # Verify conversation belongs to agent's tenant
         conversation = db.query(LiveChatConversation).filter(
             LiveChatConversation.id == conversation_id,
-            LiveChatConversation.tenant_id == tenant.id
+            LiveChatConversation.tenant_id == current_agent.tenant_id
         ).first()
         
         if not conversation:
@@ -478,21 +525,20 @@ async def get_conversation_history(
         raise HTTPException(status_code=500, detail="Failed to get history")
 
 
+# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/conversations/{conversation_id}/close")
 async def close_conversation(
     conversation_id: int,
     request: ConversationCloseRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
     """Close a conversation"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Verify conversation belongs to tenant
+        # Verify conversation belongs to agent's tenant
         conversation = db.query(LiveChatConversation).filter(
             LiveChatConversation.id == conversation_id,
-            LiveChatConversation.tenant_id == tenant.id
+            LiveChatConversation.tenant_id == current_agent.tenant_id
         ).first()
         
         if not conversation:
@@ -501,7 +547,7 @@ async def close_conversation(
         # Close conversation
         conversation.status = ConversationStatus.CLOSED
         conversation.closed_at = datetime.utcnow()
-        conversation.closed_by = "admin"
+        conversation.closed_by = f"agent_{current_agent.id}"
         conversation.closure_reason = request.reason
         conversation.agent_notes = request.notes
         conversation.resolution_status = request.resolution_status
@@ -530,7 +576,7 @@ async def close_conversation(
             message_type="conversation_closed",
             data={
                 "conversation_id": conversation_id,
-                "closed_by": "admin",
+                "closed_by": f"agent_{current_agent.id}",
                 "reason": conversation.closure_reason,
                 "closed_at": conversation.closed_at.isoformat()
             },
@@ -539,7 +585,7 @@ async def close_conversation(
         
         await websocket_manager.send_to_conversation(str(conversation_id), close_notification)
         
-        logger.info(f"Conversation {conversation_id} closed by admin")
+        logger.info(f"Conversation {conversation_id} closed by agent {current_agent.id}")
         
         return {
             "success": True,
@@ -556,21 +602,20 @@ async def close_conversation(
         raise HTTPException(status_code=500, detail="Failed to close conversation")
 
 
+# 🔧 FIXED: Changed from API Key to Bearer Token authentication
 @router.post("/conversations/{conversation_id}/transfer")
 async def transfer_conversation(
     conversation_id: int,
     request: ConversationTransferRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
     """Transfer conversation to another agent"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
         # Verify conversation and agents
         conversation = db.query(LiveChatConversation).filter(
             LiveChatConversation.id == conversation_id,
-            LiveChatConversation.tenant_id == tenant.id
+            LiveChatConversation.tenant_id == current_agent.tenant_id
         ).first()
         
         if not conversation:
@@ -578,7 +623,7 @@ async def transfer_conversation(
         
         to_agent = db.query(Agent).filter(
             Agent.id == request.to_agent_id,
-            Agent.tenant_id == tenant.id,
+            Agent.tenant_id == current_agent.tenant_id,
             Agent.status == "active"
         ).first()
         
@@ -596,19 +641,14 @@ async def transfer_conversation(
         
         if success:
             # Add transfer note as system message
-            from_agent_name = "System"
-            if conversation.assigned_agent_id:
-                from_agent = db.query(Agent).filter(Agent.id == conversation.assigned_agent_id).first()
-                from_agent_name = from_agent.display_name if from_agent else "Agent"
-            
             transfer_message = LiveChatMessage(
                 conversation_id=conversation_id,
-                content=f"Conversation transferred from {from_agent_name} to {to_agent.display_name}. Reason: {request.reason}",
+                content=f"Conversation transferred from {current_agent.display_name} to {to_agent.display_name}. Reason: {request.reason}",
                 message_type=MessageType.SYSTEM,
                 sender_type=SenderType.SYSTEM,
                 system_event_type="transfer",
                 system_event_data=json.dumps({
-                    "from_agent_id": conversation.assigned_agent_id,
+                    "from_agent_id": current_agent.id,
                     "to_agent_id": request.to_agent_id,
                     "reason": request.reason,
                     "notes": request.notes
@@ -635,7 +675,7 @@ async def transfer_conversation(
 
 
 # =============================================================================
-# ANALYTICS & REPORTING ENDPOINTS
+# ADMIN ENDPOINTS (API KEY AUTHENTICATION)
 # =============================================================================
 
 @router.get("/analytics/summary")
@@ -730,10 +770,6 @@ async def get_live_chat_analytics(
         logger.error(f"Error getting live chat analytics: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get analytics")
 
-
-# =============================================================================
-# ADMIN & MANAGEMENT ENDPOINTS
-# =============================================================================
 
 @router.get("/status")
 async def get_live_chat_status(
