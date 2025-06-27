@@ -16,6 +16,8 @@ from app.auth.router import get_current_user, get_admin_user
 from app.core.security import get_password_hash
 from app.tenants.api_key_service import EnhancedAPIKeyResetService, get_enhanced_api_key_reset_service
 
+from app.tenants.secure_id_service import get_secure_tenant_id_service, SecureTenantIDService
+
 router = APIRouter()
 
 # Initialize logger
@@ -186,6 +188,64 @@ class MigrationFixResponse(BaseModel):
     initial_audit: Dict[str, Any]
     final_audit: Dict[str, Any]
     error: Optional[str] = None
+
+
+
+
+
+
+class TenantIDSecurityAuditResponse(BaseModel):
+    success: bool
+    audit_timestamp: Optional[str] = None
+    summary: Dict[str, Any]
+    secure_tenants: List[Dict[str, Any]]
+    insecure_tenants: List[Dict[str, Any]]
+    recommendations: List[str]
+    next_steps: List[str] = []
+    error: Optional[str] = None
+
+class TenantIDResetRequest(BaseModel):
+    reason: Optional[str] = None
+
+class TenantIDResetResponse(BaseModel):
+    success: bool
+    message: str
+    old_tenant_id: Optional[int] = None
+    new_tenant_id: Optional[int] = None
+    tenant_name: Optional[str] = None
+    business_name: Optional[str] = None
+    tenant_email: Optional[str] = None
+    reason: Optional[str] = None
+    timestamp: Optional[str] = None
+    error: Optional[str] = None
+
+class BulkTenantIDResetRequest(BaseModel):
+    dry_run: bool = True
+    batch_size: int = 10
+    reason: Optional[str] = None
+
+class BulkTenantIDResetResponse(BaseModel):
+    success: bool
+    message: str
+    total_tenants: int
+    reset_count: int
+    failed_count: int
+    successful_resets: List[Dict[str, Any]]
+    failed_resets: List[Dict[str, Any]]
+    dry_run: bool
+    error: Optional[str] = None
+
+class TenantIDMigrationPreview(BaseModel):
+    success: bool
+    preview_type: str
+    total_insecure_tenants: int
+    would_reset_count: int
+    preview_resets: List[Dict[str, Any]]
+    estimated_time_minutes: Optional[float] = None
+    warning: str
+    next_step: str
+    error: Optional[str] = None
+
 
 
 
@@ -1551,4 +1611,501 @@ async def admin_preview_api_key_fixes(
         return {
             "success": False,
             "error": f"Preview failed: {str(e)}"
+        }
+  
+
+
+
+
+
+@router.get("/tenant-security/audit", response_model=TenantIDSecurityAuditResponse)
+async def audit_tenant_id_security(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to audit tenant ID security
+    Shows which tenants have insecure sequential IDs vs secure random IDs
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Initialize secure ID service
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Run security audit
+        audit_result = secure_id_service.audit_tenant_id_security()
+        
+        # Log admin access
+        logger.info(
+            f"🔍 TENANT ID SECURITY AUDIT: "
+            f"Admin: {admin_identifier} | "
+            f"Total tenants: {audit_result.get('summary', {}).get('total_tenants', 0)} | "
+            f"Insecure: {audit_result.get('summary', {}).get('insecure_tenants', 0)} | "
+            f"Security: {audit_result.get('summary', {}).get('security_percentage', 0)}%"
+        )
+        
+        if audit_result["success"]:
+            return TenantIDSecurityAuditResponse(**audit_result)
+        else:
+            return TenantIDSecurityAuditResponse(
+                success=False,
+                summary={},
+                secure_tenants=[],
+                insecure_tenants=[],
+                recommendations=[],
+                error=audit_result.get("error")
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Tenant ID security audit failed: {str(e)}")
+        return TenantIDSecurityAuditResponse(
+            success=False,
+            summary={},
+            secure_tenants=[],
+            insecure_tenants=[],
+            recommendations=[],
+            error=f"Security audit failed: {str(e)}"
+        )
+
+@router.post("/tenant-security/{tenant_id}/reset-id", response_model=TenantIDResetResponse)
+async def reset_single_tenant_id(
+    tenant_id: int,
+    reset_request: TenantIDResetRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to reset a single tenant's ID to a secure random ID
+    ⚠️ WARNING: This updates ALL foreign key references
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Security check - get tenant info first
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        logger.warning(
+            f"🚨 CRITICAL: Admin {admin_identifier} is resetting tenant ID for "
+            f"{tenant.name} (current ID: {tenant_id}). This modifies ALL foreign keys!"
+        )
+        
+        # Initialize secure ID service
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Perform the ID reset
+        result = secure_id_service.reset_tenant_id(
+            old_tenant_id=tenant_id,
+            reason=reset_request.reason or f"Admin {admin_identifier} security upgrade"
+        )
+        
+        if result["success"]:
+            logger.info(
+                f"✅ Tenant ID reset successful: "
+                f"{result['old_tenant_id']} → {result['new_tenant_id']} | "
+                f"Tenant: {result['tenant_name']} | "
+                f"Admin: {admin_identifier}"
+            )
+        else:
+            logger.error(
+                f"❌ Tenant ID reset failed for {tenant_id}: {result.get('error')}"
+            )
+        
+        return TenantIDResetResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Admin tenant ID reset failed: {str(e)}")
+        return TenantIDResetResponse(
+            success=False,
+            error=f"Tenant ID reset failed: {str(e)}",
+            old_tenant_id=tenant_id
+        )
+
+@router.get("/tenant-security/preview-reset", response_model=TenantIDMigrationPreview)
+async def preview_tenant_id_migration(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to preview what would happen in a bulk tenant ID reset
+    Shows which tenants would be affected without making changes
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Initialize secure ID service
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Find insecure tenant IDs
+        insecure_tenants = secure_id_service.find_insecure_tenant_ids()
+        
+        if not insecure_tenants:
+            return TenantIDMigrationPreview(
+                success=True,
+                preview_type="no_action_needed",
+                total_insecure_tenants=0,
+                would_reset_count=0,
+                preview_resets=[],
+                warning="All tenant IDs are already secure. No migration needed.",
+                next_step="No action required - your system is secure."
+            )
+        
+        # Preview what would be reset
+        preview_resets = []
+        for tenant_info in insecure_tenants:
+            try:
+                new_id = secure_id_service.generate_unique_tenant_id()
+                preview_resets.append({
+                    "current_tenant_id": tenant_info["tenant_id"],
+                    "new_tenant_id": new_id,
+                    "tenant_name": tenant_info["tenant_name"],
+                    "business_name": tenant_info["business_name"],
+                    "email": tenant_info["email"],
+                    "risk_level": tenant_info["security_risk"],
+                    "would_update_tables": [
+                        "tenants", "users", "tenant_credentials", "knowledge_bases", 
+                        "faqs", "chat_sessions", "agents", "live_chat_conversations",
+                        "tenant_subscriptions", "instagram_integrations", "telegram_integrations"
+                    ]
+                })
+            except Exception as e:
+                preview_resets.append({
+                    "current_tenant_id": tenant_info["tenant_id"],
+                    "new_tenant_id": None,
+                    "tenant_name": tenant_info["tenant_name"],
+                    "error": f"Could not generate ID: {str(e)}"
+                })
+        
+        # Estimate time (rough calculation: 2-5 seconds per tenant)
+        estimated_minutes = (len(insecure_tenants) * 3.5) / 60
+        
+        logger.info(
+            f"🔍 Tenant ID Migration Preview: "
+            f"Admin: {admin_identifier} | "
+            f"Would reset: {len(insecure_tenants)} tenants | "
+            f"Estimated time: {estimated_minutes:.1f} minutes"
+        )
+        
+        return TenantIDMigrationPreview(
+            success=True,
+            preview_type="migration_needed",
+            total_insecure_tenants=len(insecure_tenants),
+            would_reset_count=len([r for r in preview_resets if r.get("new_tenant_id")]),
+            preview_resets=preview_resets,
+            estimated_time_minutes=round(estimated_minutes, 2),
+            warning="⚠️ This operation will update ALL foreign key references in the database. Ensure you have a backup!",
+            next_step="Use POST /admin/tenant-security/bulk-reset with dry_run: false to apply these changes"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Tenant ID migration preview failed: {str(e)}")
+        return TenantIDMigrationPreview(
+            success=False,
+            preview_type="error",
+            total_insecure_tenants=0,
+            would_reset_count=0,
+            preview_resets=[],
+            warning="Preview failed due to an error",
+            next_step="Check logs and try again",
+            error=f"Preview failed: {str(e)}"
+        )
+
+@router.post("/tenant-security/bulk-reset", response_model=BulkTenantIDResetResponse)
+async def bulk_reset_tenant_ids(
+    bulk_request: BulkTenantIDResetRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to bulk reset all insecure tenant IDs
+    ⚠️ DANGER: This operation modifies ALL foreign key references
+    🔒 REQUIRES: Database backup before running with dry_run=false
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        # Critical security warning for actual changes
+        if not bulk_request.dry_run:
+            logger.critical(
+                f"🚨🚨🚨 CRITICAL DATABASE OPERATION: "
+                f"Admin {admin_identifier} is performing BULK TENANT ID RESET! "
+                f"This will modify ALL foreign key references in the database!"
+            )
+        else:
+            logger.info(
+                f"🔍 Bulk tenant ID reset preview: Admin {admin_identifier} (dry_run=true)"
+            )
+        
+        # Initialize secure ID service
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Perform bulk reset
+        result = secure_id_service.bulk_reset_insecure_ids(
+            dry_run=bulk_request.dry_run,
+            batch_size=bulk_request.batch_size
+        )
+        
+        # Enhanced logging based on result
+        if result["success"]:
+            action_type = "DRY RUN PREVIEW" if bulk_request.dry_run else "ACTUAL RESET"
+            logger.info(
+                f"✅ Bulk tenant ID reset {action_type} completed: "
+                f"Admin: {admin_identifier} | "
+                f"Total: {result['total_tenants']} | "
+                f"Reset: {result['reset_count']} | "
+                f"Failed: {result['failed_count']} | "
+                f"Reason: {bulk_request.reason or 'Security upgrade'}"
+            )
+            
+            # Add audit info to result
+            result.update({
+                "admin_who_performed": admin_identifier,
+                "operation_reason": bulk_request.reason or "Bulk security upgrade"
+            })
+        else:
+            logger.error(
+                f"❌ Bulk tenant ID reset failed: "
+                f"Admin: {admin_identifier} | "
+                f"Error: {result.get('error')}"
+            )
+        
+        return BulkTenantIDResetResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"❌ Bulk tenant ID reset failed: {str(e)}")
+        return BulkTenantIDResetResponse(
+            success=False,
+            message=f"Bulk reset failed: {str(e)}",
+            total_tenants=0,
+            reset_count=0,
+            failed_count=0,
+            successful_resets=[],
+            failed_resets=[],
+            dry_run=bulk_request.dry_run,
+            error=str(e)
+        )
+
+@router.get("/tenant-security/status")
+async def get_tenant_security_status(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to get quick tenant ID security status
+    Lightweight version of the full audit
+    """
+    try:
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Quick counts
+        total_tenants = db.query(Tenant).count()
+        active_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
+        
+        # Quick security check
+        insecure_tenants = secure_id_service.find_insecure_tenant_ids()
+        insecure_count = len(insecure_tenants)
+        secure_count = total_tenants - insecure_count
+        
+        # Security percentage
+        security_percentage = (secure_count / total_tenants * 100) if total_tenants > 0 else 100
+        
+        # Status determination
+        if insecure_count == 0:
+            status = "secure"
+            message = "All tenant IDs are secure"
+            priority = "low"
+        elif insecure_count <= 5:
+            status = "minor_issues"
+            message = f"{insecure_count} tenants need ID security upgrade"
+            priority = "medium"
+        else:
+            status = "needs_attention"
+            message = f"{insecure_count} tenants have insecure sequential IDs"
+            priority = "high"
+        
+        # Risk assessment
+        high_risk_tenants = [t for t in insecure_tenants if t["tenant_id"] < 1000]
+        
+        return {
+            "success": True,
+            "status": status,
+            "priority": priority,
+            "message": message,
+            "summary": {
+                "total_tenants": total_tenants,
+                "active_tenants": active_tenants,
+                "secure_tenants": secure_count,
+                "insecure_tenants": insecure_count,
+                "security_percentage": round(security_percentage, 2),
+                "high_risk_tenants": len(high_risk_tenants)
+            },
+            "recommendations": [
+                "All tenant IDs are secure" if insecure_count == 0 else f"Upgrade {insecure_count} insecure tenant IDs",
+                "Run full audit for detailed analysis" if insecure_count > 0 else None,
+                "Use preview mode before applying changes" if insecure_count > 0 else None
+            ],
+            "next_actions": [
+                "GET /admin/tenant-security/audit - Full security audit",
+                "GET /admin/tenant-security/preview-reset - Preview changes",
+                "POST /admin/tenant-security/bulk-reset - Apply security upgrade"
+            ] if insecure_count > 0 else [],
+            "security_score": {
+                "score": round(security_percentage),
+                "grade": "A" if security_percentage >= 95 else "B" if security_percentage >= 80 else "C" if security_percentage >= 60 else "D",
+                "description": "Excellent" if security_percentage >= 95 else "Good" if security_percentage >= 80 else "Fair" if security_percentage >= 60 else "Poor"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Tenant security status check failed: {str(e)}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": f"Status check failed: {str(e)}",
+            "summary": {},
+            "recommendations": ["Contact system administrator"],
+            "next_actions": []
+        }
+
+@router.get("/tenant-security/insecure-tenants")
+async def list_insecure_tenants(
+    limit: int = Query(50, description="Maximum number of results"),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to list tenants with insecure sequential IDs
+    Useful for targeted security upgrades
+    """
+    try:
+        admin_identifier = getattr(current_user, 'username', None) or getattr(current_user, 'email', f'admin_{current_user.id}')
+        
+        secure_id_service = get_secure_tenant_id_service(db)
+        insecure_tenants = secure_id_service.find_insecure_tenant_ids()
+        
+        # Apply limit
+        limited_tenants = insecure_tenants[:limit] if limit > 0 else insecure_tenants
+        
+        # Add additional security context
+        for tenant in limited_tenants:
+            tenant_id = tenant["tenant_id"]
+            
+            # Risk assessment
+            if tenant_id < 100:
+                tenant["risk_level"] = "critical"
+                tenant["risk_description"] = "Extremely predictable ID"
+            elif tenant_id < 1000:
+                tenant["risk_level"] = "high"
+                tenant["risk_description"] = "Highly predictable ID"
+            elif tenant_id < 10000:
+                tenant["risk_level"] = "medium"
+                tenant["risk_description"] = "Moderately predictable ID"
+            else:
+                tenant["risk_level"] = "low"
+                tenant["risk_description"] = "Somewhat predictable ID"
+            
+            # Security recommendations
+            tenant["recommended_action"] = "Immediate ID reset required"
+            tenant["can_be_reset"] = True
+        
+        logger.info(
+            f"📋 Insecure tenants list accessed: "
+            f"Admin: {admin_identifier} | "
+            f"Found: {len(insecure_tenants)} | "
+            f"Returned: {len(limited_tenants)}"
+        )
+        
+        return {
+            "success": True,
+            "total_insecure": len(insecure_tenants),
+            "returned_count": len(limited_tenants),
+            "limit_applied": limit,
+            "tenants": limited_tenants,
+            "security_summary": {
+                "critical_risk": len([t for t in insecure_tenants if t["tenant_id"] < 100]),
+                "high_risk": len([t for t in insecure_tenants if 100 <= t["tenant_id"] < 1000]),
+                "medium_risk": len([t for t in insecure_tenants if 1000 <= t["tenant_id"] < 10000]),
+                "low_risk": len([t for t in insecure_tenants if t["tenant_id"] >= 10000])
+            },
+            "recommendations": [
+                "Reset critical and high-risk tenant IDs immediately",
+                "Schedule bulk reset for all insecure IDs",
+                "Consider implementing additional security measures for low-ID tenants"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to list insecure tenants: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Failed to list insecure tenants: {str(e)}",
+            "tenants": []
+        }
+
+@router.post("/tenant-security/generate-test-id")
+async def generate_test_secure_id(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_admin_user)
+):
+    """
+    Admin endpoint to test secure ID generation
+    Useful for verifying the system works before bulk operations
+    """
+    try:
+        secure_id_service = get_secure_tenant_id_service(db)
+        
+        # Generate multiple test IDs
+        test_ids = []
+        generation_times = []
+        
+        for i in range(5):
+            import time
+            start_time = time.time()
+            
+            test_id = secure_id_service.generate_unique_tenant_id()
+            
+            end_time = time.time()
+            generation_time = (end_time - start_time) * 1000  # Convert to milliseconds
+            
+            test_ids.append({
+                "test_number": i + 1,
+                "generated_id": test_id,
+                "is_9_digits": 100000000 <= test_id <= 999999999,
+                "is_unique": secure_id_service.is_id_available(test_id),
+                "generation_time_ms": round(generation_time, 2)
+            })
+            generation_times.append(generation_time)
+        
+        avg_generation_time = sum(generation_times) / len(generation_times)
+        
+        # Validation summary
+        all_valid = all(t["is_9_digits"] and t["is_unique"] for t in test_ids)
+        
+        return {
+            "success": True,
+            "test_results": {
+                "all_ids_valid": all_valid,
+                "generated_count": len(test_ids),
+                "average_generation_time_ms": round(avg_generation_time, 2),
+                "system_performance": "excellent" if avg_generation_time < 10 else "good" if avg_generation_time < 50 else "slow"
+            },
+            "test_ids": test_ids,
+            "validation": {
+                "format_valid": all(t["is_9_digits"] for t in test_ids),
+                "uniqueness_valid": all(t["is_unique"] for t in test_ids),
+                "performance_acceptable": avg_generation_time < 100
+            },
+            "recommendation": "System ready for bulk operations" if all_valid and avg_generation_time < 100 else "Review system performance before bulk operations"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Secure ID generation test failed: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Test failed: {str(e)}",
+            "recommendation": "Fix issues before proceeding with bulk operations"
         }
