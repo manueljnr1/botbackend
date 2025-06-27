@@ -3,6 +3,8 @@
 import os
 import logging
 from typing import Dict, Optional, List
+import httpx
+from datetime import datetime
 import resend
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
@@ -399,6 +401,114 @@ class ResendEmailService:
         </body>
         </html>
         """
+
+
+    async def send_conversation_transcript(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        plain_content: str,
+        conversation_id: int,
+        agent_name: str,
+        cc_emails: Optional[List[str]] = None,
+        bcc_emails: Optional[List[str]] = None
+    ) -> Dict[str, any]:
+        """
+        Send conversation transcript email
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject line
+            html_content: HTML version of transcript
+            plain_content: Plain text version of transcript
+            conversation_id: ID of the conversation
+            agent_name: Name of agent sending the transcript
+            cc_emails: Optional CC recipients
+            bcc_emails: Optional BCC recipients
+        """
+        if not self.enabled:
+            return {
+                "success": False,
+                "error": "Email service not configured"
+            }
+        
+        try:
+            # Prepare email payload
+            email_data = {
+                "from": self.from_email,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_content,
+                "text": plain_content,
+                "tags": [
+                    {"name": "type", "value": "conversation_transcript"},
+                    {"name": "conversation_id", "value": str(conversation_id)},
+                    {"name": "agent", "value": agent_name}
+                ]
+            }
+            
+            # Add CC/BCC if provided
+            if cc_emails:
+                email_data["cc"] = cc_emails
+            
+            if bcc_emails:
+                email_data["bcc"] = bcc_emails
+            
+            # Send email via Resend API
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/emails",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=email_data,
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"✅ Transcript email sent successfully to {to_email}, ID: {result.get('id')}")
+                    
+                    return {
+                        "success": True,
+                        "email_id": result.get("id"),
+                        "to_email": to_email,
+                        "subject": subject,
+                        "conversation_id": conversation_id,
+                        "sent_at": datetime.utcnow().isoformat()
+                    }
+                else:
+                    error_detail = response.text
+                    logger.error(f"❌ Failed to send transcript email: {response.status_code} - {error_detail}")
+                    
+                    return {
+                        "success": False,
+                        "error": f"Email send failed: {response.status_code}",
+                        "details": error_detail
+                    }
+                    
+        except httpx.TimeoutException:
+            logger.error("❌ Email send timeout")
+            return {
+                "success": False,
+                "error": "Email send timeout"
+            }
+        except httpx.RequestError as e:
+            logger.error(f"❌ Email send request error: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Request error: {str(e)}"
+            }
+        except Exception as e:
+            logger.error(f"❌ Unexpected error sending transcript email: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}"
+            }
+
+
 
 # Create the email service instance
 email_service = ResendEmailService()

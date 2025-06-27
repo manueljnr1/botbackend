@@ -43,7 +43,8 @@ from app.telegram.router import router as telegram_router
 from app.telegram.bot_manager import get_telegram_bot_manager
 from app.live_chat.auth_router import router as live_chat_auth_router
 from app.live_chat.router import router as live_chat_main_router
-
+from app.live_chat.customer_detection_config import CustomerDetectionMiddleware
+from app.live_chat.transcript_router import router as transcript_router
 
 from app.config import settings
 # from app.live_chat import auth_router, router as live_chat_router
@@ -159,8 +160,8 @@ app.include_router(telegram_router, prefix="/api/telegram", tags=["Telegram"])
 
 app.include_router(live_chat_auth_router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
 app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"])
-
-
+app.add_middleware(CustomerDetectionMiddleware, enabled=True)
+app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
 
 
 # Initialize WhatsApp router

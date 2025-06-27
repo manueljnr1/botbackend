@@ -37,6 +37,7 @@ class AgentLoginResponse(BaseModel):
     email: str
     status: str
     expires_in: int
+    session_id: Optional[str] = None
 
 class AgentProfileUpdate(BaseModel):
     display_name: Optional[str] = None
@@ -252,7 +253,6 @@ async def set_agent_password(
         logger.error(f"Error setting agent password: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to set password")
 
-
 @router.post("/login", response_model=AgentLoginResponse)
 async def agent_login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -264,18 +264,28 @@ async def agent_login(
         service = AgentAuthService(db)
         result = service.authenticate_agent(form_data.username, form_data.password)
         
+        print(f"🔍 DEBUG: Authentication result: {result}")
+        
         # Create agent session
         session_service = AgentSessionService(db)
         session_data = {
             "tenant_id": result["tenant_id"],
             "ip_address": request.client.host if request else None,
             "user_agent": request.headers.get("user-agent") if request else None,
-            "device_type": "unknown",  # Could be enhanced with user-agent parsing
+            "device_type": "unknown",
             "browser": "unknown"
         }
         
+        print(f"🔍 DEBUG: Creating session with data: {session_data}")
+        
         session = session_service.create_session(result["agent_id"], session_data)
+        
+        print(f"🔍 DEBUG: Session created successfully: {session}")
+        print(f"🔍 DEBUG: Session ID from returned object: {session.session_id}")
+        
         result["session_id"] = session.session_id
+        
+        print(f"🔍 DEBUG: Final result being returned: {result}")
         
         logger.info(f"Agent login successful: {result['email']}")
         
@@ -285,8 +295,8 @@ async def agent_login(
         raise
     except Exception as e:
         logger.error(f"Error in agent login: {str(e)}")
+        print(f"🚨 DEBUG: Login error: {str(e)}")
         raise HTTPException(status_code=500, detail="Login failed")
-
 
 # =============================================================================
 # AUTHENTICATED AGENT ENDPOINTS

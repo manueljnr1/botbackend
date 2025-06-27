@@ -446,14 +446,20 @@ class AgentSessionService:
     def create_session(self, agent_id: int, session_data: Dict) -> AgentSession:
         """Create new agent session"""
         try:
+            print(f"🔍 DEBUG: Starting session creation for agent_id: {agent_id}")
+            print(f"🔍 DEBUG: Session data: {session_data}")
+            
             # End any existing active sessions
             self._end_active_sessions(agent_id)
             
             # Create new session
+            session_id = str(uuid.uuid4())
+            print(f"🔍 DEBUG: Generated session_id: {session_id}")
+            
             session = AgentSession(
                 agent_id=agent_id,
                 tenant_id=session_data.get('tenant_id'),
-                session_id=str(uuid.uuid4()),
+                session_id=session_id,
                 status=AgentStatus.ACTIVE,
                 ip_address=session_data.get('ip_address'),
                 user_agent=session_data.get('user_agent'),
@@ -461,6 +467,8 @@ class AgentSessionService:
                 browser=session_data.get('browser'),
                 login_at=datetime.utcnow()  # Keep as naive for database
             )
+            
+            print(f"🔍 DEBUG: Session object created with ID: {session.session_id}")
             
             self.db.add(session)
             
@@ -470,13 +478,17 @@ class AgentSessionService:
                 agent.is_online = True
                 agent.last_seen = datetime.utcnow()
             
+            print(f"🔍 DEBUG: About to commit session to database...")
             self.db.commit()
             self.db.refresh(session)
+            
+            print(f"🔍 DEBUG: Session committed and refreshed. Final session_id: {session.session_id}")
             
             logger.info(f"Agent session created: {agent_id}")
             return session
             
         except Exception as e:
+            print(f"🚨 DEBUG: Error in create_session: {str(e)}")
             logger.error(f"Error creating agent session: {str(e)}")
             self.db.rollback()
             raise HTTPException(status_code=500, detail="Failed to create session")

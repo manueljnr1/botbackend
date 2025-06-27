@@ -13,6 +13,7 @@ from app.live_chat.models import (
     ConversationStatus, MessageType, SenderType
 )
 from app.live_chat.queue_service import LiveChatQueueService
+from app.live_chat.email_transcript_service import EmailTranscriptService
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +378,7 @@ class LiveChatMessageHandler:
         self.queue_service = LiveChatQueueService(db)
     
     async def handle_message(self, connection_id: str, message_data: dict):
-        """Handle incoming WebSocket message"""
+        """Handle incoming WebSocket message - UPDATED VERSION"""
         try:
             message_type = message_data.get("type")
             data = message_data.get("data", {})
@@ -401,8 +402,20 @@ class LiveChatMessageHandler:
                 await self._handle_get_history(connection_id, data)
             elif message_type == "ping":
                 await self._handle_ping(connection_id)
+            
+            # ✨ ADD THESE NEW TRANSCRIPT MESSAGE TYPES:
+            elif message_type == "send_full_transcript":
+                await self._handle_send_full_transcript(connection_id, data)
+            elif message_type == "send_selected_messages":
+                await self._handle_send_selected_messages(connection_id, data)
+            elif message_type == "get_transcript_preview":
+                await self._handle_get_transcript_preview(connection_id, data)
+            elif message_type == "get_message_selection":
+                await self._handle_get_message_selection(connection_id, data)
+            
             else:
                 logger.warning(f"Unknown message type: {message_type}")
+                await self._send_error(connection_id, f"Unknown message type: {message_type}")
                 
         except Exception as e:
             logger.error(f"Error handling message from {connection_id}: {str(e)}")
@@ -759,6 +772,322 @@ class LiveChatMessageHandler:
                 data={"message": error_message}
             )
             await connection.send_message(error_msg)
+
+
+
+
+    async def _handle_send_full_transcript(self, connection_id: str, data: dict):
+        """Handle request to send full conversation transcript"""
+        try:
+            conversation_id = data.get("conversation_id")
+            recipient_email = data.get("recipient_email")
+            
+            if not conversation_id or not recipient_email:
+                await self._send_error(connection_id, "Missing conversation_id or recipient_email")
+                return
+            
+            connection = self.websocket_manager.connections.get(connection_id)
+            if not connection or connection.connection_type != ConnectionType.AGENT:
+                await self._send_error(connection_id, "Invalid agent connection")
+                return
+            
+            agent_id = int(connection.user_id)
+            
+            # Verify agent has access to conversation
+            from app.live_chat.models import LiveChatConversation, Agent
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == conversation_id,
+                LiveChatConversation.tenant_id == connection.tenant_id
+            ).first()
+            
+            if not conversation:
+                await self._send_error(connection_id, "Conversation not found or access denied")
+                return
+            
+            # Send status update
+            await self._send_transcript_status(connection_id, "processing", "Generating transcript...")
+            
+            # Initialize transcript service
+            transcript_service = EmailTranscriptService(self.db)
+            
+            # Send transcript
+            result = await transcript_service.send_conversation_transcript(
+                conversation_id=conversation_id,
+                agent_id=agent_id,
+                recipient_email=recipient_email,
+                subject=data.get("subject"),
+                include_agent_notes=data.get("include_agent_notes", True),
+                include_system_messages=data.get("include_system_messages", False)
+            )
+            
+            # Send result back to agent
+            response_data = {
+                "conversation_id": conversation_id,
+                "recipient_email": recipient_email,
+                "transcript_type": "full"
+            }
+            
+            if result["success"]:
+                response_data.update({
+                    "success": True,
+                    "message": result["message"],
+                    "email_id": result.get("email_id"),
+                    "message_count": result.get("message_count"),
+                    "sent_at": result.get("sent_at")
+                })
+            else:
+                response_data.update({
+                    "success": False,
+                    "error": result["error"]
+                })
+            
+            response_msg = WebSocketMessage(
+                message_type="transcript_sent",
+                data=response_data,
+                conversation_id=str(conversation_id)
+            )
+            
+            await connection.send_message(response_msg)
+            
+            logger.info(f"Full transcript processed for agent {agent_id}")
+            
+        except Exception as e:
+            logger.error(f"Error sending full transcript: {str(e)}")
+            await self._send_error(connection_id, "Failed to send transcript")
+
+    async def _handle_send_selected_messages(self, connection_id: str, data: dict):
+        """Handle request to send selected messages"""
+        try:
+            conversation_id = data.get("conversation_id")
+            message_ids = data.get("message_ids", [])
+            recipient_email = data.get("recipient_email")
+            
+            if not conversation_id or not message_ids or not recipient_email:
+                await self._send_error(connection_id, "Missing required fields")
+                return
+            
+            connection = self.websocket_manager.connections.get(connection_id)
+            if not connection or connection.connection_type != ConnectionType.AGENT:
+                await self._send_error(connection_id, "Invalid agent connection")
+                return
+            
+            agent_id = int(connection.user_id)
+            
+            # Send status update
+            await self._send_transcript_status(connection_id, "processing", f"Sending {len(message_ids)} selected messages...")
+            
+            # Initialize transcript service
+            transcript_service = EmailTranscriptService(self.db)
+            
+            # Send selected messages
+            result = await transcript_service.send_selected_messages(
+                conversation_id=conversation_id,
+                agent_id=agent_id,
+                message_ids=message_ids,
+                recipient_email=recipient_email,
+                subject=data.get("subject"),
+                additional_notes=data.get("additional_notes")
+            )
+            
+            # Send result back to agent
+            response_data = {
+                "conversation_id": conversation_id,
+                "recipient_email": recipient_email,
+                "transcript_type": "selected_messages",
+                "selected_count": len(message_ids)
+            }
+            
+            if result["success"]:
+                response_data.update({
+                    "success": True,
+                    "message": result["message"],
+                    "email_id": result.get("email_id"),
+                    "message_count": result.get("message_count")
+                })
+            else:
+                response_data.update({
+                    "success": False,
+                    "error": result["error"]
+                })
+            
+            response_msg = WebSocketMessage(
+                message_type="transcript_sent",
+                data=response_data,
+                conversation_id=str(conversation_id)
+            )
+            
+            await connection.send_message(response_msg)
+            
+            logger.info(f"Selected messages processed for agent {agent_id}")
+            
+        except Exception as e:
+            logger.error(f"Error sending selected messages: {str(e)}")
+            await self._send_error(connection_id, "Failed to send selected messages")
+
+    async def _handle_get_transcript_preview(self, connection_id: str, data: dict):
+        """Handle request for transcript preview"""
+        try:
+            conversation_id = data.get("conversation_id")
+            include_agent_notes = data.get("include_agent_notes", True)
+            include_system_messages = data.get("include_system_messages", False)
+            
+            if not conversation_id:
+                await self._send_error(connection_id, "Missing conversation_id")
+                return
+            
+            connection = self.websocket_manager.connections.get(connection_id)
+            if not connection or connection.connection_type != ConnectionType.AGENT:
+                await self._send_error(connection_id, "Invalid agent connection")
+                return
+            
+            agent_id = int(connection.user_id)
+            
+            # Get conversation and verify access
+            from app.live_chat.models import LiveChatConversation
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == conversation_id,
+                LiveChatConversation.tenant_id == connection.tenant_id
+            ).first()
+            
+            if not conversation:
+                await self._send_error(connection_id, "Access denied or conversation not found")
+                return
+            
+            # Initialize transcript service
+            transcript_service = EmailTranscriptService(self.db)
+            
+            # Get formatted messages
+            messages = await transcript_service._get_formatted_messages(
+                conversation_id, 
+                include_system_messages
+            )
+            
+            # Generate preview data
+            preview_data = {
+                "conversation_id": conversation_id,
+                "message_count": len(messages),
+                "participants": list(set(msg["sender_name"] for msg in messages if msg["sender_name"])),
+                "date_range": {
+                    "start": messages[0]["sent_at"].isoformat() if messages else None,
+                    "end": messages[-1]["sent_at"].isoformat() if messages else None
+                },
+                "estimated_size": sum(len(msg["content"]) for msg in messages if msg["content"]),
+                "includes_attachments": any(msg.get("attachment_url") for msg in messages),
+                "includes_agent_notes": include_agent_notes and bool(conversation.agent_notes),
+                "includes_system_messages": include_system_messages,
+                "sample_messages": messages[:3] if messages else []
+            }
+            
+            response_msg = WebSocketMessage(
+                message_type="transcript_preview",
+                data={
+                    "success": True,
+                    "preview": preview_data
+                },
+                conversation_id=str(conversation_id)
+            )
+            
+            await connection.send_message(response_msg)
+            
+        except Exception as e:
+            logger.error(f"Error getting transcript preview: {str(e)}")
+            await self._send_error(connection_id, "Failed to get transcript preview")
+
+    async def _handle_get_message_selection(self, connection_id: str, data: dict):
+        """Handle request for message selection interface data"""
+        try:
+            conversation_id = data.get("conversation_id")
+            filters = data.get("filters", {})
+            
+            if not conversation_id:
+                await self._send_error(connection_id, "Missing conversation_id")
+                return
+            
+            connection = self.websocket_manager.connections.get(connection_id)
+            if not connection or connection.connection_type != ConnectionType.AGENT:
+                await self._send_error(connection_id, "Invalid agent connection")
+                return
+            
+            # Get messages with filters
+            from app.live_chat.models import LiveChatMessage, SenderType, LiveChatConversation
+            from sqlalchemy import and_
+            
+            # Verify access
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == conversation_id,
+                LiveChatConversation.tenant_id == connection.tenant_id
+            ).first()
+            
+            if not conversation:
+                await self._send_error(connection_id, "Access denied")
+                return
+            
+            # Build query
+            query = self.db.query(LiveChatMessage).filter(
+                LiveChatMessage.conversation_id == conversation_id
+            )
+            
+            # Apply filters
+            sender_type = filters.get("sender_type")
+            if sender_type:
+                query = query.filter(LiveChatMessage.sender_type == sender_type)
+            
+            include_system = filters.get("include_system", False)
+            if not include_system:
+                query = query.filter(LiveChatMessage.sender_type != SenderType.SYSTEM)
+            
+            # Get messages
+            messages = query.order_by(LiveChatMessage.sent_at.asc()).limit(200).all()
+            
+            # Format for selection interface
+            formatted_messages = []
+            for msg in messages:
+                formatted_messages.append({
+                    "message_id": msg.id,
+                    "content": msg.content,
+                    "sender_type": msg.sender_type,
+                    "sender_name": msg.sender_name or ("Agent" if msg.sender_type == SenderType.AGENT else "Customer"),
+                    "sent_at": msg.sent_at.isoformat(),
+                    "message_type": msg.message_type,
+                    "is_internal": msg.is_internal,
+                    "has_attachment": bool(msg.attachment_url),
+                    "attachment_name": msg.attachment_name,
+                    "character_count": len(msg.content) if msg.content else 0,
+                    "preview": msg.content[:100] + "..." if msg.content and len(msg.content) > 100 else msg.content
+                })
+            
+            response_msg = WebSocketMessage(
+                message_type="message_selection_data",
+                data={
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "messages": formatted_messages,
+                    "total_count": len(formatted_messages),
+                    "filters_applied": filters
+                },
+                conversation_id=str(conversation_id)
+            )
+            
+            await connection.send_message(response_msg)
+            
+        except Exception as e:
+            logger.error(f"Error getting message selection data: {str(e)}")
+            await self._send_error(connection_id, "Failed to get message selection data")
+
+    async def _send_transcript_status(self, connection_id: str, status: str, message: str):
+        """Send transcript status update to connection"""
+        connection = self.websocket_manager.connections.get(connection_id)
+        if connection:
+            status_msg = WebSocketMessage(
+                message_type="transcript_status",
+                data={
+                    "status": status,
+                    "message": message
+                }
+            )
+            await connection.send_message(status_msg)
+
+
 
 
 # Global WebSocket manager instance

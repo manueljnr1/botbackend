@@ -2,20 +2,27 @@
 
 import json
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import and_, desc
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+
 
 from app.database import get_db
 from app.live_chat.websocket_manager import websocket_manager, LiveChatMessageHandler
 from app.live_chat.queue_service import LiveChatQueueService
 from app.live_chat.agent_service import AgentSessionService
-from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType, AgentStatus
+from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType, AgentStatus, ChatQueue, AgentSession
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
+from app.live_chat.customer_detection_service import CustomerDetectionService
+
+
 
 # 🔥 PRICING INTEGRATION
 from app.pricing.integration_helpers import (
@@ -149,6 +156,21 @@ class ConversationCloseRequest(BaseModel):
     notes: Optional[str] = ""
     resolution_status: Optional[str] = "resolved"
 
+
+class BulkAssignmentRequest(BaseModel):
+    assignments: List[ManualAssignmentRequest]
+
+
+class CustomerDetectionResponse(BaseModel):
+    success: bool
+    customer_profile: Dict[str, Any]
+    current_session: Dict[str, Any]
+    geolocation: Dict[str, Any]
+    device_info: Dict[str, Any]
+    visitor_history: Dict[str, Any]
+    preferences: Dict[str, Any]
+    routing_suggestions: Dict[str, Any]
+    privacy_compliance: Dict[str, Any]
 
 # =============================================================================
 # CUSTOMER ENDPOINTS (API KEY AUTHENTICATION)
@@ -291,6 +313,8 @@ async def get_queue_status(
         
         return status
         
+    except HTTPException:
+        raise  # ← Let HTTPException pass through with original status code
     except Exception as e:
         logger.error(f"Error getting queue status: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get queue status")
@@ -394,37 +418,215 @@ async def manually_assign_conversation(
     current_agent: Agent = Depends(get_current_agent),
     db: Session = Depends(get_db)
 ):
-    """Manually assign a queued conversation to an agent"""
+    """Agent manually assigns a queued conversation to another agent"""
     try:
-        # Verify agent belongs to same tenant as the target agent
+        # Verify queue entry exists and belongs to same tenant
+        queue_entry = db.query(ChatQueue).filter(
+            ChatQueue.id == request.queue_id,
+            ChatQueue.tenant_id == current_agent.tenant_id,
+            ChatQueue.status == "waiting"
+        ).first()
+        
+        if not queue_entry:
+            raise HTTPException(status_code=404, detail="Queue entry not found or already processed")
+        
+        # Verify target agent exists and belongs to same tenant
         target_agent = db.query(Agent).filter(
             Agent.id == request.agent_id,
             Agent.tenant_id == current_agent.tenant_id,
-            Agent.status == "active"
+            Agent.status == AgentStatus.ACTIVE,  # Use enum instead of string
+            Agent.is_active == True
         ).first()
         
         if not target_agent:
-            raise HTTPException(status_code=404, detail="Target agent not found")
+            raise HTTPException(status_code=404, detail="Target agent not found or inactive")
+        
+        # Optional: Check if current agent has permission to assign
+        # You could add a permission field to Agent model later
+        # if not current_agent.can_assign_conversations:
+        #     raise HTTPException(status_code=403, detail="Permission denied")
         
         # Assign conversation
         queue_service = LiveChatQueueService(db)
-        success = queue_service.assign_conversation(request.queue_id, request.agent_id, "manual")
+        success = queue_service.assign_conversation(
+            request.queue_id, 
+            request.agent_id, 
+            f"manual_by_agent_{current_agent.id}"
+        )
         
         if success:
+            logger.info(f"Conversation {request.queue_id} assigned to agent {request.agent_id} by agent {current_agent.id}")
             return {
                 "success": True,
                 "message": f"Conversation assigned to {target_agent.display_name}",
                 "agent_id": request.agent_id,
-                "agent_name": target_agent.display_name
+                "agent_name": target_agent.display_name,
+                "queue_id": request.queue_id,
+                "assigned_by": current_agent.display_name
             }
         else:
-            raise HTTPException(status_code=400, detail="Failed to assign conversation - queue entry may have been processed already")
+            raise HTTPException(
+                status_code=400, 
+                detail="Assignment failed - queue entry may have been processed or agent unavailable"
+            )
             
+    except HTTPException:
+        raise  # Let HTTPException pass through with original status code
+    except Exception as e:
+        logger.error(f"Error in agent assign conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to assign conversation")
+
+
+
+
+@router.post("/admin/assign-conversation")
+async def admin_assign_conversation(
+    request: ManualAssignmentRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Admin/Tenant manually assigns a queued conversation to an agent"""
+    try:
+        # Get tenant from API key
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Verify queue entry exists and belongs to tenant
+        queue_entry = db.query(ChatQueue).filter(
+            ChatQueue.id == request.queue_id,
+            ChatQueue.tenant_id == tenant.id,
+            ChatQueue.status == "waiting"
+        ).first()
+        
+        if not queue_entry:
+            raise HTTPException(
+                status_code=404, 
+                detail="Queue entry not found, already processed, or doesn't belong to your tenant"
+            )
+        
+        # Verify target agent exists, belongs to tenant, and is available
+        target_agent = db.query(Agent).filter(
+            Agent.id == request.agent_id,
+            Agent.tenant_id == tenant.id,
+            Agent.status == AgentStatus.ACTIVE,
+            Agent.is_active == True
+        ).first()
+        
+        if not target_agent:
+            raise HTTPException(
+                status_code=404, 
+                detail="Target agent not found, inactive, or doesn't belong to your tenant"
+            )
+        
+        # Optional: Check if agent is available (not at max capacity)
+        agent_session = db.query(AgentSession).filter(
+            AgentSession.agent_id == request.agent_id,
+            AgentSession.logout_at.is_(None),
+            AgentSession.is_accepting_chats == True
+        ).first()
+        
+        if agent_session and agent_session.active_conversations >= agent_session.max_concurrent_chats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Agent {target_agent.display_name} is at maximum capacity ({agent_session.max_concurrent_chats} conversations)"
+            )
+        
+        # Get conversation details for logging
+        conversation = db.query(LiveChatConversation).filter(
+            LiveChatConversation.id == queue_entry.conversation_id
+        ).first()
+        
+        # Assign conversation
+        queue_service = LiveChatQueueService(db)
+        success = queue_service.assign_conversation(
+            request.queue_id, 
+            request.agent_id, 
+            "manual_admin"
+        )
+        
+        if success:
+            logger.info(f"Admin assigned conversation {queue_entry.conversation_id} (queue {request.queue_id}) to agent {request.agent_id}")
+            
+            return {
+                "success": True,
+                "message": f"Conversation assigned to {target_agent.display_name}",
+                "conversation_id": queue_entry.conversation_id,
+                "queue_id": request.queue_id,
+                "agent_id": request.agent_id,
+                "agent_name": target_agent.display_name,
+                "customer_identifier": conversation.customer_identifier if conversation else None,
+                "assigned_by": "admin",
+                "assignment_method": "manual_admin"
+            }
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Assignment failed - queue entry may have been processed by another agent or system error occurred"
+            )
+            
+    except HTTPException:
+        raise  # Let HTTPException pass through with original status code
+    except Exception as e:
+        logger.error(f"Error in admin assign conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to assign conversation")
+
+
+
+@router.get("/admin/assignable-agents")
+async def get_assignable_agents(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get list of agents available for manual assignment"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Get active agents with their current load
+        agents = db.query(Agent).filter(
+            Agent.tenant_id == tenant.id,
+            Agent.status == AgentStatus.ACTIVE,
+            Agent.is_active == True
+        ).all()
+        
+        assignable_agents = []
+        for agent in agents:
+            # Get current session info
+            session = db.query(AgentSession).filter(
+                AgentSession.agent_id == agent.id,
+                AgentSession.logout_at.is_(None)
+            ).first()
+            
+            is_online = session is not None
+            current_load = session.active_conversations if session else 0
+            max_capacity = session.max_concurrent_chats if session else agent.max_concurrent_chats
+            is_available = is_online and (current_load < max_capacity) and (session.is_accepting_chats if session else True)
+            
+            assignable_agents.append({
+                "agent_id": agent.id,
+                "display_name": agent.display_name,
+                "email": agent.email,
+                "is_online": is_online,
+                "is_available": is_available,
+                "current_conversations": current_load,
+                "max_concurrent_chats": max_capacity,
+                "utilization_percent": round((current_load / max_capacity * 100) if max_capacity > 0 else 0, 1)
+            })
+        
+        # Sort by availability and utilization
+        assignable_agents.sort(key=lambda x: (not x["is_available"], x["utilization_percent"]))
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "total_agents": len(assignable_agents),
+            "available_agents": sum(1 for a in assignable_agents if a["is_available"]),
+            "agents": assignable_agents
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error assigning conversation: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to assign conversation")
+        logger.error(f"Error getting assignable agents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get agents")
 
 
 @router.get("/conversations/active")
@@ -862,3 +1064,608 @@ async def cleanup_expired_sessions(
     except Exception as e:
         logger.error(f"Error in cleanup: {str(e)}")
         raise HTTPException(status_code=500, detail="Cleanup failed")
+    
+
+
+
+
+
+
+
+# =============================================================================
+# CUSTOMER DETECTION ENDPOINTS
+# =============================================================================
+
+
+
+@router.post("/detect-customer")
+async def detect_customer_profile(
+    request: Request,
+    customer_identifier: Optional[str] = None,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Comprehensive customer detection and profiling
+    Returns geolocation, device info, visitor history, and routing suggestions
+    """
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Initialize customer detection service
+        detection_service = CustomerDetectionService(db)
+        
+        # Perform comprehensive customer detection
+        customer_data = await detection_service.detect_customer(
+            request=request,
+            tenant_id=tenant.id,
+            customer_identifier=customer_identifier
+        )
+        
+        # Log successful detection (privacy-conscious)
+        logger.info(f"Customer detection completed for tenant {tenant.id}")
+        
+        return {
+            "success": True,
+            **customer_data,
+            "detection_timestamp": datetime.utcnow().isoformat(),
+            "tenant_id": tenant.id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in customer detection: {str(e)}")
+        raise HTTPException(status_code=500, detail="Customer detection failed")
+
+
+@router.get("/customer-profile/{customer_identifier}")
+async def get_customer_profile(
+    customer_identifier: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get existing customer profile and history"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Get customer profile
+        from app.live_chat.customer_detection_service import CustomerProfile
+        customer_profile = db.query(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerProfile.customer_identifier == customer_identifier
+            )
+        ).first()
+        
+        if not customer_profile:
+            raise HTTPException(status_code=404, detail="Customer profile not found")
+        
+        # Get recent conversations
+        recent_conversations = db.query(LiveChatConversation).filter(
+            and_(
+                LiveChatConversation.tenant_id == tenant.id,
+                LiveChatConversation.customer_identifier == customer_identifier
+            )
+        ).order_by(desc(LiveChatConversation.created_at)).limit(20).all()
+        
+        # Get customer devices
+        from app.live_chat.customer_detection_service import CustomerDevice
+        devices = db.query(CustomerDevice).filter(
+            CustomerDevice.customer_profile_id == customer_profile.id
+        ).all()
+        
+        # Get customer preferences
+        from app.live_chat.customer_detection_service import CustomerPreferences
+        preferences = db.query(CustomerPreferences).filter(
+            CustomerPreferences.customer_profile_id == customer_profile.id
+        ).first()
+        
+        # Format response
+        profile_data = {
+            "customer_profile": {
+                "id": customer_profile.id,
+                "identifier": customer_profile.customer_identifier,
+                "first_seen": customer_profile.first_seen.isoformat() if customer_profile.first_seen else None,
+                "last_seen": customer_profile.last_seen.isoformat() if customer_profile.last_seen else None,
+                "total_conversations": customer_profile.total_conversations,
+                "total_sessions": customer_profile.total_sessions,
+                "customer_satisfaction_avg": customer_profile.customer_satisfaction_avg,
+                "preferred_language": customer_profile.preferred_language,
+                "time_zone": customer_profile.time_zone
+            },
+            "conversations": [
+                {
+                    "id": conv.id,
+                    "created_at": conv.created_at.isoformat(),
+                    "status": conv.status,
+                    "resolution_status": conv.resolution_status,
+                    "customer_satisfaction": conv.customer_satisfaction,
+                    "agent_id": conv.assigned_agent_id,
+                    "duration_minutes": conv.conversation_duration_seconds // 60 if conv.conversation_duration_seconds else None,
+                    "message_count": conv.message_count
+                } for conv in recent_conversations
+            ],
+            "devices": [
+                {
+                    "device_type": device.device_type,
+                    "browser_name": device.browser_name,
+                    "operating_system": device.operating_system,
+                    "first_seen": device.first_seen.isoformat() if device.first_seen else None,
+                    "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+                    "total_sessions": device.total_sessions
+                } for device in devices
+            ],
+            "preferences": {
+                "preferred_language": preferences.preferred_language if preferences else "en",
+                "communication_style": preferences.preferred_communication_style if preferences else None,
+                "accessibility_required": preferences.requires_accessibility_features if preferences else False,
+                "privacy_preferences": {
+                    "data_retention": preferences.data_retention_preference if preferences else "standard",
+                    "email_notifications": preferences.email_notifications if preferences else False,
+                    "marketing_consent": customer_profile.marketing_consent
+                }
+            } if preferences else {}
+        }
+        
+        return {
+            "success": True,
+            **profile_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting customer profile: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get customer profile")
+
+
+@router.post("/update-customer-preferences/{customer_identifier}")
+async def update_customer_preferences(
+    customer_identifier: str,
+    preferences_data: Dict[str, Any],
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Update customer preferences and privacy settings"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Get or create customer profile
+        from app.live_chat.customer_detection_service import CustomerProfile, CustomerPreferences
+        customer_profile = db.query(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerProfile.customer_identifier == customer_identifier
+            )
+        ).first()
+        
+        if not customer_profile:
+            # Create new customer profile
+            customer_profile = CustomerProfile(
+                tenant_id=tenant.id,
+                customer_identifier=customer_identifier,
+                first_seen=datetime.utcnow(),
+                last_seen=datetime.utcnow()
+            )
+            db.add(customer_profile)
+            db.commit()
+            db.refresh(customer_profile)
+        
+        # Get or create preferences
+        preferences = db.query(CustomerPreferences).filter(
+            CustomerPreferences.customer_profile_id == customer_profile.id
+        ).first()
+        
+        if not preferences:
+            preferences = CustomerPreferences(
+                customer_profile_id=customer_profile.id
+            )
+            db.add(preferences)
+        
+        # Update preferences
+        if "preferred_language" in preferences_data:
+            preferences.preferred_language = preferences_data["preferred_language"]
+            customer_profile.preferred_language = preferences_data["preferred_language"]
+        
+        if "communication_style" in preferences_data:
+            preferences.preferred_communication_style = preferences_data["communication_style"]
+        
+        if "accessibility_features" in preferences_data:
+            preferences.requires_accessibility_features = preferences_data["accessibility_features"]
+        
+        if "email_notifications" in preferences_data:
+            preferences.email_notifications = preferences_data["email_notifications"]
+        
+        if "data_retention" in preferences_data:
+            preferences.data_retention_preference = preferences_data["data_retention"]
+        
+        if "marketing_consent" in preferences_data:
+            customer_profile.marketing_consent = preferences_data["marketing_consent"]
+            customer_profile.last_consent_update = datetime.utcnow()
+        
+        if "data_collection_consent" in preferences_data:
+            customer_profile.data_collection_consent = preferences_data["data_collection_consent"]
+            customer_profile.last_consent_update = datetime.utcnow()
+        
+        preferences.updated_at = datetime.utcnow()
+        customer_profile.updated_at = datetime.utcnow()
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Customer preferences updated successfully",
+            "customer_id": customer_profile.id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating customer preferences: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update preferences")
+
+
+@router.get("/agent-routing-suggestions/{customer_identifier}")
+async def get_agent_routing_suggestions(
+    customer_identifier: str,
+    current_agent: Agent = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    """Get intelligent agent routing suggestions for a customer"""
+    try:
+        detection_service = CustomerDetectionService(db)
+        
+        # Get customer profile
+        from app.live_chat.customer_detection_service import CustomerProfile
+        customer_profile = db.query(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == current_agent.tenant_id,
+                CustomerProfile.customer_identifier == customer_identifier
+            )
+        ).first()
+        
+        if not customer_profile:
+            return {
+                "success": True,
+                "routing_suggestions": {
+                    "recommended_agents": [],
+                    "routing_criteria": ["New customer - no history available"],
+                    "priority_score": 1.0,
+                    "special_considerations": ["First-time visitor"]
+                }
+            }
+        
+        # Get recent conversation history for context
+        recent_conversations = db.query(LiveChatConversation).filter(
+            and_(
+                LiveChatConversation.tenant_id == current_agent.tenant_id,
+                LiveChatConversation.customer_identifier == customer_identifier
+            )
+        ).order_by(desc(LiveChatConversation.created_at)).limit(5).all()
+        
+        # Build visitor history context
+        visitor_history = {
+            "is_returning": True,
+            "previous_conversations": [
+                {
+                    "agent_id": conv.assigned_agent_id,
+                    "satisfaction": conv.customer_satisfaction,
+                    "resolution_status": conv.resolution_status,
+                    "created_at": conv.created_at
+                } for conv in recent_conversations
+            ]
+        }
+        
+        # Generate routing suggestions
+        routing_suggestions = await detection_service._get_routing_suggestions(
+            tenant_id=current_agent.tenant_id,
+            geolocation={"country": "Unknown"},  # Would be filled from recent session
+            device_info={"device_type": "unknown"},
+            visitor_history=visitor_history
+        )
+        
+        # Get available agents with their current load
+        available_agents = db.query(Agent).filter(
+            and_(
+                Agent.tenant_id == current_agent.tenant_id,
+                Agent.status == AgentStatus.ACTIVE,
+                Agent.is_active == True
+            )
+        ).all()
+        
+        agent_recommendations = []
+        for agent in available_agents:
+            # Get current session
+            session = db.query(AgentSession).filter(
+                and_(
+                    AgentSession.agent_id == agent.id,
+                    AgentSession.logout_at.is_(None)
+                )
+            ).first()
+            
+            if session and session.active_conversations < session.max_concurrent_chats:
+                # Check if this agent has history with customer
+                agent_history_count = len([
+                    conv for conv in recent_conversations 
+                    if conv.assigned_agent_id == agent.id
+                ])
+                
+                recommendation_reason = "Available agent"
+                priority = 0.5
+                
+                if agent_history_count > 0:
+                    avg_satisfaction = sum([
+                        conv.customer_satisfaction or 0 
+                        for conv in recent_conversations 
+                        if conv.assigned_agent_id == agent.id and conv.customer_satisfaction
+                    ]) / agent_history_count if agent_history_count > 0 else 0
+                    
+                    if avg_satisfaction > 4:
+                        recommendation_reason = f"Previous successful interactions (avg rating: {avg_satisfaction:.1f})"
+                        priority = 0.9
+                    elif avg_satisfaction > 3:
+                        recommendation_reason = f"Previous interactions (avg rating: {avg_satisfaction:.1f})"
+                        priority = 0.7
+                
+                agent_recommendations.append({
+                    "agent_id": agent.id,
+                    "agent_name": agent.display_name,
+                    "reason": recommendation_reason,
+                    "priority": priority,
+                    "current_load": session.active_conversations,
+                    "max_capacity": session.max_concurrent_chats,
+                    "previous_interactions": agent_history_count
+                })
+        
+        # Sort by priority
+        agent_recommendations.sort(key=lambda x: x["priority"], reverse=True)
+        
+        routing_suggestions["recommended_agents"] = agent_recommendations[:5]
+        
+        return {
+            "success": True,
+            "customer_identifier": customer_identifier,
+            "routing_suggestions": routing_suggestions,
+            "customer_context": {
+                "is_returning": True,
+                "total_conversations": customer_profile.total_conversations,
+                "avg_satisfaction": customer_profile.customer_satisfaction_avg,
+                "preferred_language": customer_profile.preferred_language
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting routing suggestions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get routing suggestions")
+
+
+@router.get("/customer-analytics")
+async def get_customer_analytics(
+    days: int = Query(30, ge=1, le=365),
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get customer analytics and insights for the tenant"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        from_date = datetime.utcnow() - timedelta(days=days)
+        
+        # Get customer profiles stats
+        from app.live_chat.customer_detection_service import CustomerProfile, CustomerSession
+        
+        total_customers = db.query(CustomerProfile).filter(
+            CustomerProfile.tenant_id == tenant.id
+        ).count()
+        
+        new_customers = db.query(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerProfile.first_seen >= from_date
+            )
+        ).count()
+        
+        returning_customers = db.query(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerProfile.total_conversations > 1
+            )
+        ).count()
+        
+        # Geographic distribution
+        from sqlalchemy import func
+        geographic_data = db.query(
+            CustomerSession.country,
+            func.count(CustomerSession.id).label('count')
+        ).join(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerSession.started_at >= from_date,
+                CustomerSession.country.isnot(None)
+            )
+        ).group_by(CustomerSession.country).order_by(desc('count')).limit(10).all()
+        
+        # Device type distribution
+        device_data = db.query(
+            CustomerSession.user_agent,
+            func.count(CustomerSession.id).label('count')
+        ).join(CustomerProfile).filter(
+            and_(
+                CustomerProfile.tenant_id == tenant.id,
+                CustomerSession.started_at >= from_date
+            )
+        ).group_by(CustomerSession.user_agent).all()
+        
+        # Analyze device types
+        device_counts = {"mobile": 0, "desktop": 0, "tablet": 0, "unknown": 0}
+        for session_ua, count in device_data:
+            if session_ua:
+                try:
+                    from user_agents import parse as parse_user_agent
+                    parsed_ua = parse_user_agent(session_ua)
+                    if parsed_ua.is_mobile:
+                        device_counts["mobile"] += count
+                    elif parsed_ua.is_tablet:
+                        device_counts["tablet"] += count
+                    elif parsed_ua.is_pc:
+                        device_counts["desktop"] += count
+                    else:
+                        device_counts["unknown"] += count
+                except:
+                    device_counts["unknown"] += count
+        
+        # Customer satisfaction trends
+        satisfaction_data = db.query(
+            func.avg(LiveChatConversation.customer_satisfaction).label('avg_satisfaction'),
+            func.count(LiveChatConversation.id).label('total_rated')
+        ).filter(
+            and_(
+                LiveChatConversation.tenant_id == tenant.id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.customer_satisfaction.isnot(None)
+            )
+        ).first()
+        
+        return {
+            "success": True,
+            "period_days": days,
+            "customer_metrics": {
+                "total_customers": total_customers,
+                "new_customers": new_customers,
+                "returning_customers": returning_customers,
+                "return_rate": round((returning_customers / total_customers * 100) if total_customers > 0 else 0, 2)
+            },
+            "geographic_distribution": [
+                {"country": country, "count": count}
+                for country, count in geographic_data
+            ],
+            "device_distribution": device_counts,
+            "satisfaction_metrics": {
+                "average_satisfaction": round(satisfaction_data.avg_satisfaction or 0, 2),
+                "total_rated_conversations": satisfaction_data.total_rated or 0
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting customer analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get customer analytics")
+
+
+# =============================================================================
+# ENHANCED START CHAT WITH AUTOMATIC DETECTION
+# =============================================================================
+
+@router.post("/start-chat-with-detection", response_model=ChatResponse)
+async def start_live_chat_with_detection(
+    request: StartChatRequest,
+    http_request: Request,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Enhanced start chat endpoint with automatic customer detection
+    Includes geolocation, device fingerprinting, and visitor recognition
+    """
+    try:
+        # 🔒 PRICING CHECK
+        tenant = get_tenant_from_api_key(api_key, db)
+        check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+        # Initialize customer detection service
+        detection_service = CustomerDetectionService(db)
+        
+        # Perform comprehensive customer detection
+        customer_data = await detection_service.detect_customer(
+            request=http_request,
+            tenant_id=tenant.id,
+            customer_identifier=request.customer_identifier
+        )
+        
+        # Create conversation with enhanced customer data
+        conversation = LiveChatConversation(
+            tenant_id=tenant.id,
+            customer_identifier=request.customer_identifier,
+            customer_name=request.customer_name,
+            customer_email=request.customer_email,
+            chatbot_session_id=request.chatbot_session_id,
+            handoff_reason="manual" if not request.handoff_context else "triggered",
+            handoff_context=json.dumps(request.handoff_context) if request.handoff_context else None,
+            original_question=request.initial_message,
+            status=ConversationStatus.QUEUED,
+            
+            # Enhanced customer data from detection
+            customer_ip=customer_data["geolocation"]["ip_address"],
+            customer_user_agent=customer_data["device_info"]["user_agent"]
+        )
+        
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        
+        # Add to queue with intelligent routing
+        queue_service = LiveChatQueueService(db)
+        
+        # Determine priority based on customer data
+        priority = 1  # Normal priority
+        if customer_data["visitor_history"]["is_returning"]:
+            if customer_data["visitor_history"].get("conversation_outcomes", {}).get("abandoned", 0) > 1:
+                priority = 2  # Higher priority for customers with abandonment history
+        
+        queue_result = queue_service.add_to_queue(
+            conversation_id=conversation.id,
+            priority=priority,
+            assignment_criteria={
+                "source": "customer_request_with_detection",
+                "customer_type": "returning" if customer_data["visitor_history"]["is_returning"] else "new",
+                "device_type": customer_data["device_info"]["device_type"],
+                "geographic_region": customer_data["geolocation"].get("country", "unknown")
+            }
+        )
+        
+        # 📊 PRICING TRACK
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=request.customer_identifier,
+            platform="live_chat_enhanced",
+            db=db
+        )
+        
+        # Generate WebSocket URL
+        websocket_url = f"/live-chat/ws/customer/{conversation.id}?customer_id={request.customer_identifier}&tenant_id={tenant.id}"
+        
+        # Enhanced response with customer insights
+        response_message = "Chat started!"
+        if customer_data["visitor_history"]["is_returning"]:
+            response_message += " Welcome back! We have your previous conversation history."
+        
+        logger.info(f"Enhanced live chat started: conversation {conversation.id} for tenant {tenant.id}")
+        
+        return {
+            "success": True,
+            "conversation_id": conversation.id,
+            "queue_position": queue_result.get("position"),
+            "estimated_wait_time": queue_result.get("estimated_wait_time"),
+            "websocket_url": websocket_url,
+            "message": response_message,
+            
+            # Additional customer insights for the frontend
+            "customer_insights": {
+                "is_returning_visitor": customer_data["visitor_history"]["is_returning"],
+                "device_type": customer_data["device_info"]["device_type"],
+                "location": customer_data["geolocation"].get("city", "Unknown"),
+                "preferred_language": customer_data["customer_profile"].get("preferred_language", "en"),
+                "routing_priority": "high" if priority > 1 else "normal"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting enhanced live chat: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to start chat")
+        

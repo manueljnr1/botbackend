@@ -1,68 +1,40 @@
-# app/live_chat/queue_service.py - COMPLETE TIMEZONE FIX
+# app/live_chat/enhanced_queue_service.py
+# Enhanced version of queue_service.py with smart routing integration
+
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
+from collections import defaultdict
 
 from app.live_chat.models import (
     LiveChatConversation, ChatQueue, Agent, AgentSession, 
     ConversationStatus, AgentStatus, LiveChatSettings
 )
-from app.live_chat.agent_service import AgentSessionService
+from app.live_chat.agent_tags_router import (
+    AgentTag, ConversationTagging, AgentTagPerformance, SmartRoutingLog
+)
+from app.live_chat.smart_routing_service import SmartRoutingService
+
 
 logger = logging.getLogger(__name__)
 
 
-def utc_now():
-    """Get current UTC time - ALWAYS NAIVE for database consistency"""
-    return datetime.utcnow()
-
-def ensure_naive_datetime(dt):
-    """Ensure datetime is naive (no timezone) for database operations"""
-    if dt is None:
-        return None
-    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-        # Convert timezone-aware to naive UTC
-        if dt.tzinfo != timezone.utc:
-            dt = dt.astimezone(timezone.utc)
-        return dt.replace(tzinfo=None)
-    return dt
-
-def safe_datetime_subtract(dt1, dt2):
-    """Safely subtract two datetimes, ensuring both are naive"""
-    if dt1 is None or dt2 is None:
-        return timedelta(0)
-    
-    dt1_naive = ensure_naive_datetime(dt1)
-    dt2_naive = ensure_naive_datetime(dt2)
-    
-    try:
-        return dt1_naive - dt2_naive
-    except Exception as e:
-        logger.warning(f"Datetime subtraction error: {e}, using default timedelta")
-        return timedelta(0)
-
-
-class QueueAssignmentStrategy:
-    """Different strategies for assigning conversations to agents"""
-    
-    ROUND_ROBIN = "round_robin"
-    LEAST_BUSY = "least_busy"
-    SKILLS_BASED = "skills_based"
-    SPECIFIC_AGENT = "specific_agent"
-    RANDOM = "random"
-
-
 class LiveChatQueueService:
-    def __init__(self, db: Session):
-        self.db = db
-        self.session_service = AgentSessionService(db)
+    """Enhanced queue service with intelligent routing using agent tags"""
     
-    def add_to_queue(self, conversation_id: int, priority: int = 1, 
-                    preferred_agent_id: int = None, assignment_criteria: Dict = None) -> Dict:
-        """Add a conversation to the chat queue"""
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.smart_routing = SmartRoutingService(db)
+    
+    async def add_to_queue_with_smart_routing(self, conversation_id: int, priority: int = 1,
+                                           preferred_agent_id: int = None, 
+                                           assignment_criteria: Dict = None) -> Dict:
+        """
+        Add conversation to queue with intelligent routing analysis
+        """
         try:
             # Get conversation details
             conversation = self.db.query(LiveChatConversation).filter(
@@ -72,532 +44,590 @@ class LiveChatQueueService:
             if not conversation:
                 raise ValueError(f"Conversation {conversation_id} not found")
             
-            # Check if already in queue
-            existing_queue = self.db.query(ChatQueue).filter(
-                ChatQueue.conversation_id == conversation_id
-            ).first()
-            
-            if existing_queue:
-                logger.warning(f"Conversation {conversation_id} already in queue")
-                return self._get_queue_status(existing_queue)
-            
-            # Get next position in queue
-            next_position = self._get_next_queue_position(conversation.tenant_id, priority)
-            
-            # Create queue entry - FIXED: Always use naive datetime
-            queue_entry = ChatQueue(
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation_id,
-                position=next_position,
-                priority=priority,
-                preferred_agent_id=preferred_agent_id,
-                assignment_criteria=json.dumps(assignment_criteria) if assignment_criteria else None,
-                customer_message_preview=self._get_customer_preview(conversation_id),
-                queued_at=utc_now()  # Always naive
+            # First add to regular queue
+            queue_result = self.add_to_queue(
+                conversation_id, priority, preferred_agent_id, assignment_criteria
             )
             
-            self.db.add(queue_entry)
+            if not queue_result.get("success"):
+                return queue_result
             
-            # Update conversation status - FIXED: Always use naive datetime
-            conversation.status = ConversationStatus.QUEUED
-            conversation.queue_position = next_position
-            conversation.queue_entry_time = utc_now()  # Always naive
+            # Try intelligent routing
+            routing_result = await self.smart_routing.find_best_agent(conversation_id)
             
-            self.db.commit()
-            self.db.refresh(queue_entry)
+            if routing_result.get("success") and routing_result.get("agent_id"):
+                # Smart routing found a good match - try immediate assignment
+                best_agent_id = routing_result["agent_id"]
+                
+                logger.info(f"Smart routing suggests agent {best_agent_id} for conversation {conversation_id}")
+                
+                # Check if the suggested agent is actually available
+                if await self._verify_agent_availability(best_agent_id, conversation.tenant_id):
+                    # Get the queue entry that was just created
+                    queue_entry = self.db.query(ChatQueue).filter(
+                        ChatQueue.conversation_id == conversation_id,
+                        ChatQueue.status == "waiting"
+                    ).first()
+                    
+                    if queue_entry:
+                        # Attempt immediate assignment
+                        assignment_success = self.assign_conversation(
+                            queue_entry.id, 
+                            best_agent_id, 
+                            "smart_routing"
+                        )
+                        
+                        if assignment_success:
+                            queue_result.update({
+                                "immediately_assigned": True,
+                                "assigned_agent_id": best_agent_id,
+                                "routing_method": "smart_tags",
+                                "routing_confidence": routing_result.get("confidence", 0.0),
+                                "detected_tags": routing_result.get("detected_tags", []),
+                                "routing_reasoning": routing_result.get("reasoning", [])
+                            })
+                            
+                            logger.info(f"Conversation {conversation_id} immediately assigned via smart routing")
+                        else:
+                            # Assignment failed, update queue with routing info
+                            queue_result.update({
+                                "immediately_assigned": False,
+                                "smart_routing_available": True,
+                                "suggested_agent_id": best_agent_id,
+                                "routing_confidence": routing_result.get("confidence", 0.0),
+                                "estimated_wait_time": self._calculate_smart_wait_time(
+                                    conversation.tenant_id, queue_result.get("position", 1), best_agent_id
+                                )
+                            })
+                    else:
+                        logger.warning(f"Queue entry not found for conversation {conversation_id}")
+                else:
+                    logger.info(f"Suggested agent {best_agent_id} not available, keeping in queue")
+                    queue_result.update({
+                        "immediately_assigned": False,
+                        "smart_routing_available": True,
+                        "suggested_agent_unavailable": True,
+                        "routing_confidence": routing_result.get("confidence", 0.0)
+                    })
+            else:
+                # Smart routing didn't find a good match or failed
+                logger.info(f"Smart routing failed or no good match for conversation {conversation_id}")
+                queue_result.update({
+                    "immediately_assigned": False,
+                    "smart_routing_available": False,
+                    "routing_error": routing_result.get("error"),
+                    "fallback_method": "traditional_queue"
+                })
             
-            # Try immediate assignment if agents available
-            assigned = self._try_immediate_assignment(queue_entry)
-            
-            logger.info(f"Conversation {conversation_id} added to queue at position {next_position}")
-            
-            return {
-                "success": True,
-                "queue_id": queue_entry.id,
-                "position": next_position,
-                "estimated_wait_time": self._calculate_wait_time(conversation.tenant_id, next_position),
-                "immediately_assigned": assigned
-            }
+            return queue_result
             
         except Exception as e:
-            logger.error(f"Error adding to queue: {str(e)}")
-            self.db.rollback()
-            raise
+            logger.error(f"Error in enhanced queue service: {str(e)}")
+            return {"success": False, "error": str(e)}
     
-    def assign_conversation(self, queue_id: int, agent_id: int, assignment_method: str = "auto") -> bool:
-        """Assign a queued conversation to an agent - COMPLETE TIMEZONE FIX"""
+    async def _verify_agent_availability(self, agent_id: int, tenant_id: int) -> bool:
+        """Verify that the suggested agent is actually available for assignment"""
         try:
-            # Get queue entry
-            queue_entry = self.db.query(ChatQueue).filter(
-                ChatQueue.id == queue_id,
-                ChatQueue.status == "waiting"
-            ).first()
-            
-            if not queue_entry:
-                logger.error(f"Queue entry {queue_id} not found or not waiting")
-                return False
-            
-            # Get conversation
-            conversation = queue_entry.conversation
-            if not conversation:
-                logger.error(f"Conversation not found for queue {queue_id}")
-                return False
-            
-            # Verify agent availability
             agent_session = self.db.query(AgentSession).filter(
                 AgentSession.agent_id == agent_id,
                 AgentSession.logout_at.is_(None),
+                AgentSession.is_accepting_chats == True,
                 AgentSession.active_conversations < AgentSession.max_concurrent_chats
             ).first()
             
             if not agent_session:
-                logger.error(f"Agent {agent_id} not available for assignment")
                 return False
             
-            # FIXED: All datetime operations use naive datetimes
-            now = utc_now()  # Always naive
+            # Verify agent belongs to the correct tenant
+            agent = self.db.query(Agent).filter(
+                Agent.id == agent_id,
+                Agent.tenant_id == tenant_id,
+                Agent.status == AgentStatus.ACTIVE,
+                Agent.is_active == True
+            ).first()
             
-            # Update conversation
-            conversation.status = ConversationStatus.ASSIGNED
-            conversation.assigned_agent_id = agent_id
-            conversation.assigned_at = now
-            conversation.assignment_method = assignment_method
-            
-            # FIXED: Calculate wait time safely
-            if conversation.queue_entry_time:
-                wait_delta = safe_datetime_subtract(now, conversation.queue_entry_time)
-                conversation.wait_time_seconds = int(wait_delta.total_seconds())
-            
-            # Update queue entry
-            queue_entry.status = "assigned"
-            queue_entry.assigned_at = now
-            
-            # Update agent session
-            agent_session.active_conversations += 1
-            
-            # Remove from queue position (update other positions)
-            self._remove_from_queue_positions(queue_entry)
-            
-            self.db.commit()
-            
-            logger.info(f"Conversation {conversation.id} assigned to agent {agent_id}")
-            
-            return True
+            return agent is not None
             
         except Exception as e:
-            logger.error(f"Error assigning conversation: {str(e)}")
-            self.db.rollback()
+            logger.error(f"Error verifying agent availability: {str(e)}")
             return False
     
-    def get_queue_status(self, tenant_id: int) -> Dict:
-        """Get current queue status for tenant - COMPLETE TIMEZONE FIX"""
+    def _calculate_smart_wait_time(self, tenant_id: int, position: int, suggested_agent_id: int = None) -> int:
+        """Calculate wait time considering smart routing predictions"""
         try:
-            # Get waiting queue
+            base_wait_time = self._calculate_wait_time(tenant_id, position)
+            
+            if suggested_agent_id:
+                # Check suggested agent's current load
+                agent_session = self.db.query(AgentSession).filter(
+                    AgentSession.agent_id == suggested_agent_id,
+                    AgentSession.logout_at.is_(None)
+                ).first()
+                
+                if agent_session:
+                    # If agent has low load, reduce wait time
+                    load_factor = agent_session.active_conversations / agent_session.max_concurrent_chats
+                    if load_factor < 0.5:
+                        base_wait_time = max(1, int(base_wait_time * 0.7))  # 30% reduction
+                    elif load_factor < 0.8:
+                        base_wait_time = max(1, int(base_wait_time * 0.85))  # 15% reduction
+            
+            return base_wait_time
+            
+        except Exception as e:
+            logger.error(f"Error calculating smart wait time: {str(e)}")
+            return self._calculate_wait_time(tenant_id, position)
+    
+    async def smart_reassignment(self, tenant_id: int) -> Dict[str, Any]:
+        """
+        Periodically reassess queue and optimize assignments based on agent tags
+        """
+        try:
+            # Get current queue
             waiting_queue = self.db.query(ChatQueue).join(LiveChatConversation).filter(
                 ChatQueue.tenant_id == tenant_id,
                 ChatQueue.status == "waiting"
-            ).order_by(ChatQueue.position.asc()).all()
+            ).order_by(ChatQueue.priority.desc(), ChatQueue.position.asc()).all()
+            
+            if not waiting_queue:
+                return {
+                    "success": True,
+                    "message": "No conversations in queue",
+                    "reassignments": 0
+                }
             
             # Get available agents
-            available_agents = self._get_available_agents(tenant_id)
+            available_agents = await self.smart_routing._get_available_agents(tenant_id)
             
-            # Get settings
-            settings = self.db.query(LiveChatSettings).filter(
-                LiveChatSettings.tenant_id == tenant_id
-            ).first()
+            if not available_agents:
+                return {
+                    "success": True,
+                    "message": "No agents available for reassignment",
+                    "reassignments": 0
+                }
             
-            queue_data = []
-            current_time = utc_now()  # Always naive
+            reassignments = []
             
-            for entry in waiting_queue:
-                # FIXED: Safe datetime calculation
+            # Process each conversation in queue
+            for queue_entry in waiting_queue:
                 try:
-                    if entry.queued_at:
-                        wait_delta = safe_datetime_subtract(current_time, entry.queued_at)
-                        wait_minutes = int(wait_delta.total_seconds() / 60)
-                    else:
-                        wait_minutes = 0
-                except Exception as e:
-                    logger.warning(f"Wait time calculation error for queue entry {entry.id}: {str(e)}")
-                    wait_minutes = 0
+                    conversation = queue_entry.conversation
+                    
+                    # Skip if conversation has been waiting less than 5 minutes
+                    if queue_entry.queued_at:
+                        wait_time = datetime.utcnow() - queue_entry.queued_at
+                        if wait_time.total_seconds() < 300:  # 5 minutes
+                            continue
+                    
+                    # Get smart routing recommendation
+                    routing_result = await self.smart_routing.find_best_agent(conversation.id)
+                    
+                    if (routing_result.get("success") and 
+                        routing_result.get("agent_id") and 
+                        routing_result.get("confidence", 0) >= 0.7):  # High confidence only
+                        
+                        suggested_agent_id = routing_result["agent_id"]
+                        
+                        # Verify agent is still available
+                        if await self._verify_agent_availability(suggested_agent_id, tenant_id):
+                            # Attempt assignment
+                            if self.assign_conversation(queue_entry.id, suggested_agent_id, "smart_reassignment"):
+                                reassignments.append({
+                                    "conversation_id": conversation.id,
+                                    "queue_id": queue_entry.id,
+                                    "agent_id": suggested_agent_id,
+                                    "confidence": routing_result.get("confidence"),
+                                    "wait_time_minutes": int(wait_time.total_seconds() / 60) if queue_entry.queued_at else 0,
+                                    "detected_tags": [tag.get("tag_name") for tag in routing_result.get("detected_tags", [])]
+                                })
+                                
+                                logger.info(f"Smart reassignment: conversation {conversation.id} to agent {suggested_agent_id}")
                 
-                queue_data.append({
-                    "queue_id": entry.id,
-                    "conversation_id": entry.conversation_id,
-                    "position": entry.position,
-                    "priority": entry.priority,
-                    "customer_preview": entry.customer_message_preview,
-                    "wait_time_minutes": wait_minutes,
-                    "estimated_wait_time": self._calculate_wait_time(tenant_id, entry.position),
-                    "queued_at": entry.queued_at.isoformat() if entry.queued_at else None
-                })
+                except Exception as e:
+                    logger.error(f"Error processing queue entry {queue_entry.id}: {str(e)}")
+                    continue
             
             return {
-                "tenant_id": tenant_id,
-                "queue_length": len(waiting_queue),
-                "available_agents": len(available_agents),
-                "max_queue_size": settings.max_queue_size if settings else 50,
-                "max_wait_time": settings.max_wait_time_minutes if settings else 30,
-                "queue": queue_data,
-                "agents": available_agents
+                "success": True,
+                "message": f"Smart reassignment completed",
+                "reassignments": len(reassignments),
+                "details": reassignments,
+                "processed_conversations": len(waiting_queue)
             }
             
         except Exception as e:
-            logger.error(f"Error getting queue status: {str(e)}")
+            logger.error(f"Error in smart reassignment: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def get_enhanced_queue_status(self, tenant_id: int) -> Dict:
+        """Get queue status with smart routing insights"""
+        try:
+            # Get base queue status
+            base_status = self.get_queue_status(tenant_id)
+            
+            if "error" in base_status:
+                return base_status
+            
+            # Add smart routing insights
+            enhanced_queue = []
+            
+            for queue_item in base_status.get("queue", []):
+                conversation_id = queue_item["conversation_id"]
+                
+                # Get conversation tags
+                conversation_tags = self.db.query(ConversationTagging).join(AgentTag).filter(
+                    ConversationTagging.conversation_id == conversation_id
+                ).all()
+                
+                # Get routing recommendation
+                try:
+                    routing_result = await self.smart_routing.find_best_agent(conversation_id)
+                    
+                    enhanced_item = {
+                        **queue_item,
+                        "detected_tags": [
+                            {
+                                "name": tag.tag.name,
+                                "display_name": tag.tag.display_name,
+                                "confidence": tag.confidence_score,
+                                "category": tag.tag.category
+                            } for tag in conversation_tags
+                        ],
+                        "routing_suggestion": {
+                            "has_suggestion": routing_result.get("success", False),
+                            "agent_id": routing_result.get("agent_id"),
+                            "confidence": routing_result.get("confidence", 0.0),
+                            "reasoning": routing_result.get("reasoning", [])[:3],  # Top 3 reasons
+                            "method": routing_result.get("routing_method", "unknown")
+                        },
+                        "priority_indicators": self._get_priority_indicators(conversation_id)
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Error getting routing suggestion for conversation {conversation_id}: {str(e)}")
+                    enhanced_item = {
+                        **queue_item,
+                        "detected_tags": [],
+                        "routing_suggestion": {"has_suggestion": False, "error": str(e)},
+                        "priority_indicators": []
+                    }
+                
+                enhanced_queue.append(enhanced_item)
+            
+            # Add smart routing statistics
+            routing_stats = await self._get_routing_statistics(tenant_id)
+            
+            base_status.update({
+                "enhanced_queue": enhanced_queue,
+                "smart_routing_stats": routing_stats,
+                "capabilities": {
+                    "smart_routing_enabled": True,
+                    "tag_based_routing": True,
+                    "auto_reassignment": True
+                }
+            })
+            
+            return base_status
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced queue status: {str(e)}")
             return {"error": str(e)}
     
-    def _get_next_queue_position(self, tenant_id: int, priority: int) -> int:
-        """Get the next available position in queue based on priority"""
-        # Get current queue for tenant
-        queue = self.db.query(ChatQueue).filter(
-            ChatQueue.tenant_id == tenant_id,
-            ChatQueue.status == "waiting"
-        ).order_by(ChatQueue.priority.desc(), ChatQueue.position.asc()).all()
+    def _get_priority_indicators(self, conversation_id: int) -> List[str]:
+        """Get priority indicators for a conversation"""
+        indicators = []
         
-        if not queue:
-            return 1
-        
-        # Find insertion position based on priority
-        position = 1
-        for entry in queue:
-            if priority > entry.priority:
-                # Higher priority, insert before this entry
-                break
-            position += 1
-        
-        # Update positions of entries that come after
-        self.db.query(ChatQueue).filter(
-            ChatQueue.tenant_id == tenant_id,
-            ChatQueue.position >= position,
-            ChatQueue.status == "waiting"
-        ).update({ChatQueue.position: ChatQueue.position + 1})
-        
-        return position
-    
-    def _get_customer_preview(self, conversation_id: int) -> str:
-        """Get a preview of the customer's first message"""
-        from app.live_chat.models import LiveChatMessage
-        
-        first_message = self.db.query(LiveChatMessage).filter(
-            LiveChatMessage.conversation_id == conversation_id,
-            LiveChatMessage.sender_type == "customer"
-        ).order_by(LiveChatMessage.sent_at.asc()).first()
-        
-        if first_message:
-            content = first_message.content
-            return content[:100] + "..." if len(content) > 100 else content
-        
-        return "Customer is waiting to chat"
-    
-    def _try_immediate_assignment(self, queue_entry: ChatQueue) -> bool:
-        """Try to immediately assign conversation if agents available"""
-        try:
-            # Get available agents
-            available_agents = self._get_available_agents(queue_entry.tenant_id)
-            
-            if not available_agents:
-                return False
-            
-            # Select best agent based on assignment strategy
-            selected_agent = self._select_agent(queue_entry, available_agents)
-            
-            if selected_agent:
-                return self.assign_conversation(queue_entry.id, selected_agent["agent_id"])
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error in immediate assignment: {str(e)}")
-            return False
-    
-    def _get_available_agents(self, tenant_id: int) -> List[Dict]:
-        """Get list of available agents for assignment"""
-        try:
-            # Query active agent sessions
-            active_sessions = self.db.query(AgentSession).join(Agent).filter(
-                Agent.tenant_id == tenant_id,
-                Agent.status == AgentStatus.ACTIVE,
-                Agent.is_online == True,
-                AgentSession.logout_at.is_(None),
-                AgentSession.status.in_([AgentStatus.ACTIVE, AgentStatus.BUSY]),
-                AgentSession.is_accepting_chats == True,
-                AgentSession.active_conversations < AgentSession.max_concurrent_chats
-            ).all()
-            
-            available_agents = []
-            for session in active_sessions:
-                agent = session.agent
-                available_agents.append({
-                    "agent_id": agent.id,
-                    "session_id": session.session_id,
-                    "display_name": agent.display_name,
-                    "active_conversations": session.active_conversations,
-                    "max_concurrent_chats": session.max_concurrent_chats,
-                    "average_response_time": agent.average_response_time or 0,
-                    "total_conversations": agent.total_conversations,
-                    "last_activity": session.last_activity
-                })
-            
-            return available_agents
-            
-        except Exception as e:
-            logger.error(f"Error getting available agents: {str(e)}")
-            return []
-    
-    def _select_agent(self, queue_entry: ChatQueue, available_agents: List[Dict]) -> Optional[Dict]:
-        """Select the best agent based on assignment strategy"""
-        if not available_agents:
-            return None
-        
-        # Get tenant settings for assignment method
-        settings = self.db.query(LiveChatSettings).filter(
-            LiveChatSettings.tenant_id == queue_entry.tenant_id
-        ).first()
-        
-        assignment_method = settings.assignment_method if settings else QueueAssignmentStrategy.ROUND_ROBIN
-        
-        # Preferred agent check first
-        if queue_entry.preferred_agent_id:
-            preferred_agent = next(
-                (agent for agent in available_agents if agent["agent_id"] == queue_entry.preferred_agent_id),
-                None
-            )
-            if preferred_agent:
-                return preferred_agent
-        
-        # Apply assignment strategy
-        if assignment_method == QueueAssignmentStrategy.LEAST_BUSY:
-            return min(available_agents, key=lambda x: x["active_conversations"])
-        
-        elif assignment_method == QueueAssignmentStrategy.ROUND_ROBIN:
-            # Simple round-robin based on last assignment
-            return self._round_robin_selection(queue_entry.tenant_id, available_agents)
-        
-        else:
-            # Default to least busy
-            return min(available_agents, key=lambda x: x["active_conversations"])
-    
-    def _round_robin_selection(self, tenant_id: int, available_agents: List[Dict]) -> Dict:
-        """Round-robin agent selection"""
-        # Get the last assigned agent
-        last_assignment = self.db.query(LiveChatConversation).filter(
-            LiveChatConversation.tenant_id == tenant_id,
-            LiveChatConversation.assigned_agent_id.isnot(None)
-        ).order_by(LiveChatConversation.assigned_at.desc()).first()
-        
-        if not last_assignment:
-            return available_agents[0]
-        
-        # Find next agent in rotation
-        agent_ids = [agent["agent_id"] for agent in available_agents]
-        
-        try:
-            last_index = agent_ids.index(last_assignment.assigned_agent_id)
-            next_index = (last_index + 1) % len(available_agents)
-            return available_agents[next_index]
-        except ValueError:
-            # Last assigned agent not in available list
-            return available_agents[0]
-    
-    def _remove_from_queue_positions(self, queue_entry: ChatQueue):
-        """Remove from queue and update positions of remaining entries"""
-        # Update positions of entries that come after
-        self.db.query(ChatQueue).filter(
-            ChatQueue.tenant_id == queue_entry.tenant_id,
-            ChatQueue.position > queue_entry.position,
-            ChatQueue.status == "waiting"
-        ).update({ChatQueue.position: ChatQueue.position - 1})
-    
-    def _calculate_wait_time(self, tenant_id: int, position: int) -> int:
-        """Calculate estimated wait time in minutes"""
-        try:
-            # Get available agents
-            available_agents = len(self._get_available_agents(tenant_id))
-            
-            if available_agents == 0:
-                return 30  # Default when no agents available
-            
-            # Simple calculation: assume 5 minutes per conversation ahead
-            conversations_ahead = max(0, position - available_agents)
-            estimated_minutes = conversations_ahead * 5
-            
-            return max(1, estimated_minutes)
-            
-        except Exception:
-            return 15  # Default fallback
-    
-    def _get_queue_status(self, queue_entry: ChatQueue) -> Dict:
-        """Get status for a specific queue entry"""
-        return {
-            "success": True,
-            "queue_id": queue_entry.id,
-            "position": queue_entry.position,
-            "status": queue_entry.status,
-            "estimated_wait_time": self._calculate_wait_time(queue_entry.tenant_id, queue_entry.position)
-        }
-    
-    def abandon_conversation(self, conversation_id: int, reason: str = "customer_left") -> bool:
-        """Remove conversation from queue (customer abandoned)"""
-        try:
-            # Find queue entry
-            queue_entry = self.db.query(ChatQueue).filter(
-                ChatQueue.conversation_id == conversation_id,
-                ChatQueue.status == "waiting"
-            ).first()
-            
-            if not queue_entry:
-                return False
-            
-            # FIXED: Use naive datetime
-            now = utc_now()
-            
-            # Update queue entry
-            queue_entry.status = "abandoned"
-            queue_entry.abandon_reason = reason
-            queue_entry.removed_at = now
-            
-            # Update conversation
-            conversation = queue_entry.conversation
-            conversation.status = ConversationStatus.ABANDONED
-            conversation.closed_at = now
-            conversation.closed_by = "customer"
-            conversation.closure_reason = reason
-            
-            # Remove from queue positions
-            self._remove_from_queue_positions(queue_entry)
-            
-            self.db.commit()
-            
-            logger.info(f"Conversation {conversation_id} abandoned: {reason}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error abandoning conversation: {str(e)}")
-            self.db.rollback()
-            return False
-    
-    def transfer_conversation(self, conversation_id: int, from_agent_id: int, 
-                            to_agent_id: int, reason: str = "transfer") -> bool:
-        """Transfer conversation from one agent to another"""
-        try:
-            conversation = self.db.query(LiveChatConversation).filter(
-                LiveChatConversation.id == conversation_id,
-                LiveChatConversation.assigned_agent_id == from_agent_id
-            ).first()
-            
-            if not conversation:
-                return False
-            
-            # Check if target agent is available
-            target_session = self.db.query(AgentSession).filter(
-                AgentSession.agent_id == to_agent_id,
-                AgentSession.logout_at.is_(None),
-                AgentSession.active_conversations < AgentSession.max_concurrent_chats
-            ).first()
-            
-            if not target_session:
-                # Put back in queue if target not available
-                return self._requeue_conversation(conversation_id, reason="transfer_unavailable")
-            
-            # FIXED: Use naive datetime
-            now = utc_now()
-            
-            # Update conversation
-            conversation.previous_agent_id = from_agent_id
-            conversation.assigned_agent_id = to_agent_id
-            conversation.assigned_at = now
-            conversation.assignment_method = "transfer"
-            
-            # Update agent sessions
-            from_session = self.db.query(AgentSession).filter(
-                AgentSession.agent_id == from_agent_id,
-                AgentSession.logout_at.is_(None)
-            ).first()
-            
-            if from_session:
-                from_session.active_conversations = max(0, from_session.active_conversations - 1)
-            
-            target_session.active_conversations += 1
-            
-            self.db.commit()
-            
-            logger.info(f"Conversation {conversation_id} transferred from {from_agent_id} to {to_agent_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error transferring conversation: {str(e)}")
-            self.db.rollback()
-            return False
-    
-    def _requeue_conversation(self, conversation_id: int, reason: str = "requeue") -> bool:
-        """Put a conversation back in the queue"""
         try:
             conversation = self.db.query(LiveChatConversation).filter(
                 LiveChatConversation.id == conversation_id
             ).first()
             
             if not conversation:
-                return False
+                return indicators
             
-            # Remove current assignment
-            if conversation.assigned_agent_id:
-                agent_session = self.db.query(AgentSession).filter(
-                    AgentSession.agent_id == conversation.assigned_agent_id,
-                    AgentSession.logout_at.is_(None)
-                ).first()
+            # Check wait time
+            if conversation.queue_entry_time:
+                wait_minutes = (datetime.utcnow() - conversation.queue_entry_time).total_seconds() / 60
+                if wait_minutes > 20:
+                    indicators.append("long_wait")
+                elif wait_minutes > 10:
+                    indicators.append("moderate_wait")
+            
+            # Check for urgency keywords in original message
+            if conversation.original_question:
+                urgency_keywords = ["urgent", "emergency", "critical", "broken", "not working"]
+                message_lower = conversation.original_question.lower()
                 
-                if agent_session:
-                    agent_session.active_conversations = max(0, agent_session.active_conversations - 1)
+                for keyword in urgency_keywords:
+                    if keyword in message_lower:
+                        indicators.append("urgent_keywords")
+                        break
             
-            conversation.assigned_agent_id = None
-            conversation.assigned_at = None
+            # Check customer history
+            if conversation.customer_identifier:
+                recent_abandoned = self.db.query(LiveChatConversation).filter(
+                    and_(
+                        LiveChatConversation.tenant_id == conversation.tenant_id,
+                        LiveChatConversation.customer_identifier == conversation.customer_identifier,
+                        LiveChatConversation.status == ConversationStatus.ABANDONED,
+                        LiveChatConversation.created_at >= datetime.utcnow() - timedelta(days=7)
+                    )
+                ).count()
+                
+                if recent_abandoned > 0:
+                    indicators.append("abandonment_risk")
             
-            # Add back to queue
-            result = self.add_to_queue(conversation_id, priority=2)  # Higher priority for requeue
+            # Check for high-value customer indicators
+            conversation_tags = self.db.query(ConversationTagging).join(AgentTag).filter(
+                and_(
+                    ConversationTagging.conversation_id == conversation_id,
+                    AgentTag.category.in_(["billing", "sales", "enterprise"])
+                )
+            ).count()
             
-            logger.info(f"Conversation {conversation_id} requeued: {reason}")
-            return result.get("success", False)
+            if conversation_tags > 0:
+                indicators.append("high_value")
             
         except Exception as e:
-            logger.error(f"Error requeuing conversation: {str(e)}")
-            return False
+            logger.error(f"Error getting priority indicators: {str(e)}")
+        
+        return indicators
     
-    def cleanup_expired_queue_entries(self, tenant_id: int = None) -> int:
-        """Clean up expired queue entries - COMPLETE TIMEZONE FIX"""
+    async def _get_routing_statistics(self, tenant_id: int) -> Dict[str, Any]:
+        """Get routing performance statistics"""
         try:
-            # Get settings for timeout
-            if tenant_id:
-                settings = self.db.query(LiveChatSettings).filter(
-                    LiveChatSettings.tenant_id == tenant_id
-                ).first()
-                timeout_minutes = settings.max_wait_time_minutes if settings else 30
-                tenants_filter = [tenant_id]
-            else:
-                timeout_minutes = 30
-                tenants_filter = None
+            # Get statistics for last 24 hours
+            since = datetime.utcnow() - timedelta(hours=24)
             
-            # FIXED: Use naive datetime for comparison
-            cutoff_time = utc_now() - timedelta(minutes=timeout_minutes)
+            routing_logs = self.db.query(SmartRoutingLog).filter(
+                and_(
+                    SmartRoutingLog.tenant_id == tenant_id,
+                    SmartRoutingLog.routed_at >= since
+                )
+            ).all()
             
-            query = self.db.query(ChatQueue).filter(
-                ChatQueue.status == "waiting",
-                ChatQueue.queued_at < cutoff_time
-            )
+            if not routing_logs:
+                return {
+                    "period": "24_hours",
+                    "total_routes": 0,
+                    "smart_routes": 0,
+                    "success_rate": 0.0,
+                    "avg_confidence": 0.0
+                }
             
-            if tenants_filter:
-                query = query.filter(ChatQueue.tenant_id.in_(tenants_filter))
+            total_routes = len(routing_logs)
+            smart_routes = len([log for log in routing_logs if log.routing_method == "smart_tags"])
             
-            expired_entries = query.all()
+            # Calculate success metrics
+            completed_conversations = [
+                log for log in routing_logs 
+                if log.customer_satisfaction is not None
+            ]
             
-            # Process each expired entry
-            cleaned_count = 0
-            for entry in expired_entries:
-                if self.abandon_conversation(entry.conversation_id, "timeout"):
-                    cleaned_count += 1
+            avg_satisfaction = 0.0
+            if completed_conversations:
+                avg_satisfaction = sum(
+                    log.customer_satisfaction for log in completed_conversations
+                ) / len(completed_conversations)
             
-            logger.info(f"Cleaned up {cleaned_count} expired queue entries")
-            return cleaned_count
+            avg_confidence = sum(log.confidence_score for log in routing_logs) / total_routes
+            
+            # Tag effectiveness
+            tag_usage = {}
+            for log in routing_logs:
+                if log.detected_tags:
+                    for tag_data in log.detected_tags:
+                        tag_name = tag_data.get("tag_name", "unknown")
+                        if tag_name not in tag_usage:
+                            tag_usage[tag_name] = 0
+                        tag_usage[tag_name] += 1
+            
+            return {
+                "period": "24_hours",
+                "total_routes": total_routes,
+                "smart_routes": smart_routes,
+                "smart_routing_percentage": round((smart_routes / total_routes) * 100, 1),
+                "avg_confidence": round(avg_confidence, 3),
+                "avg_satisfaction": round(avg_satisfaction, 2),
+                "completed_conversations": len(completed_conversations),
+                "most_used_tags": sorted(
+                    tag_usage.items(), 
+                    key=lambda x: x[1], 
+                    reverse=True
+                )[:5]
+            }
             
         except Exception as e:
-            logger.error(f"Error cleaning up queue: {str(e)}")
-            return 0
+            logger.error(f"Error getting routing statistics: {str(e)}")
+            return {"error": str(e)}
+    
+    async def get_agent_workload_optimization(self, tenant_id: int) -> Dict[str, Any]:
+        """Analyze and suggest workload optimization based on agent tags"""
+        try:
+            # Get all active agents with their tags and current load
+            agents_data = await self.smart_routing._get_available_agents(tenant_id)
+            
+            # Get current queue with tag analysis
+            waiting_queue = self.db.query(ChatQueue).join(LiveChatConversation).filter(
+                ChatQueue.tenant_id == tenant_id,
+                ChatQueue.status == "waiting"
+            ).all()
+            
+            # Analyze queue demand by tag category
+            queue_demand = {}
+            for queue_entry in waiting_queue:
+                conversation_tags = self.db.query(ConversationTagging).join(AgentTag).filter(
+                    ConversationTagging.conversation_id == queue_entry.conversation_id
+                ).all()
+                
+                for tag_record in conversation_tags:
+                    category = tag_record.tag.category
+                    if category not in queue_demand:
+                        queue_demand[category] = 0
+                    queue_demand[category] += 1
+            
+            # Analyze agent capacity by category
+            agent_capacity = {}
+            agent_utilization = []
+            
+            for agent in agents_data:
+                agent_categories = set()
+                
+                for tag in agent["tags"]:
+                    category = tag["category"]
+                    agent_categories.add(category)
+                    
+                    if category not in agent_capacity:
+                        agent_capacity[category] = {"agents": 0, "total_capacity": 0, "current_load": 0}
+                    
+                    # Add agent capacity for this category
+                    tag_capacity = tag.get("max_concurrent", 2)
+                    agent_capacity[category]["total_capacity"] += tag_capacity
+                    agent_capacity[category]["current_load"] += agent["current_load"]
+                
+                # Count unique agents per category
+                for category in agent_categories:
+                    agent_capacity[category]["agents"] += 1
+                
+                # Calculate individual agent utilization
+                max_capacity = agent["max_capacity"]
+                utilization = (agent["current_load"] / max_capacity) * 100 if max_capacity > 0 else 0
+                
+                agent_utilization.append({
+                    "agent_id": agent["agent_id"],
+                    "agent_name": agent["display_name"],
+                    "current_load": agent["current_load"],
+                    "max_capacity": max_capacity,
+                    "utilization_percent": round(utilization, 1),
+                    "specializations": agent["specializations"],
+                    "can_take_more": agent["current_load"] < max_capacity
+                })
+            
+            # Identify bottlenecks and opportunities
+            bottlenecks = []
+            opportunities = []
+            
+            for category, demand in queue_demand.items():
+                capacity_info = agent_capacity.get(category, {"agents": 0, "total_capacity": 0})
+                
+                if capacity_info["agents"] == 0:
+                    bottlenecks.append({
+                        "category": category,
+                        "issue": "no_specialized_agents",
+                        "demand": demand,
+                        "suggestion": f"Train agents in {category} skills or hire specialist"
+                    })
+                elif demand > capacity_info["total_capacity"]:
+                    bottlenecks.append({
+                        "category": category,
+                        "issue": "insufficient_capacity",
+                        "demand": demand,
+                        "capacity": capacity_info["total_capacity"],
+                        "suggestion": f"Increase {category} capacity or improve efficiency"
+                    })
+            
+            # Find underutilized agents who could help
+            underutilized = [
+                agent for agent in agent_utilization 
+                if agent["utilization_percent"] < 50 and agent["can_take_more"]
+            ]
+            
+            if underutilized:
+                opportunities.append({
+                    "type": "underutilized_agents",
+                    "agents": underutilized,
+                    "suggestion": "Consider cross-training these agents for high-demand categories"
+                })
+            
+            return {
+                "success": True,
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+                "queue_demand": queue_demand,
+                "agent_capacity": agent_capacity,
+                "agent_utilization": sorted(agent_utilization, key=lambda x: x["utilization_percent"], reverse=True),
+                "bottlenecks": bottlenecks,
+                "opportunities": opportunities,
+                "recommendations": self._generate_optimization_recommendations(
+                    queue_demand, agent_capacity, agent_utilization
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing workload optimization: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def _generate_optimization_recommendations(self, queue_demand: Dict, 
+                                            agent_capacity: Dict, 
+                                            agent_utilization: List) -> List[Dict]:
+        """Generate actionable optimization recommendations"""
+        recommendations = []
+        
+        try:
+            # Check for high-demand categories with low capacity
+            for category, demand in queue_demand.items():
+                capacity_info = agent_capacity.get(category, {"agents": 0, "total_capacity": 0})
+                
+                if demand > 0 and capacity_info["agents"] < 2:
+                    recommendations.append({
+                        "priority": "high",
+                        "type": "staffing",
+                        "category": category,
+                        "action": f"Assign more agents to {category} category",
+                        "impact": "Reduce wait times for this category",
+                        "current_agents": capacity_info["agents"],
+                        "recommended_agents": max(2, capacity_info["agents"] + 1)
+                    })
+            
+            # Check for overall utilization balance
+            high_util_agents = [a for a in agent_utilization if a["utilization_percent"] > 80]
+            low_util_agents = [a for a in agent_utilization if a["utilization_percent"] < 30]
+            
+            if high_util_agents and low_util_agents:
+                recommendations.append({
+                    "priority": "medium",
+                    "type": "load_balancing",
+                    "action": "Redistribute workload between agents",
+                    "impact": "Better utilization and reduced burnout",
+                    "overloaded_agents": len(high_util_agents),
+                    "underutilized_agents": len(low_util_agents)
+                })
+            
+            # Suggest cross-training opportunities
+            if low_util_agents:
+                high_demand_categories = sorted(queue_demand.items(), key=lambda x: x[1], reverse=True)[:3]
+                
+                for category, demand in high_demand_categories:
+                    if demand > 0:
+                        recommendations.append({
+                            "priority": "low",
+                            "type": "training",
+                            "action": f"Cross-train underutilized agents in {category}",
+                            "impact": "Increase flexibility and reduce bottlenecks",
+                            "category": category,
+                            "available_agents": [a["agent_name"] for a in low_util_agents[:3]]
+                        })
+            
+        except Exception as e:
+            logger.error(f"Error generating recommendations: {str(e)}")
+        
+        return recommendations

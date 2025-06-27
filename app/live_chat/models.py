@@ -1,11 +1,24 @@
 # app/live_chat/models.py - FIXED VERSION
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, JSON, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 from datetime import datetime
 from enum import Enum
 
+
+
+
+
+agent_tags_association = Table(
+    'agent_tags_association',
+    Base.metadata,
+    Column('agent_id', Integer, ForeignKey('agents.id'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('agent_tags.id'), primary_key=True),
+    Column('proficiency_level', Integer, default=3),  # 1-5 scale
+    Column('assigned_at', DateTime, default=datetime.utcnow),
+    Column('assigned_by', Integer, ForeignKey('agents.id'), nullable=True)
+)
 
 class ConversationStatus(str, Enum):
     QUEUED = "queued"
@@ -89,44 +102,24 @@ class Agent(Base):
     
     # 🔧 FIXED RELATIONSHIPS - No more overlaps!
     # Primary tenant relationship
-    tenant = relationship(
-    "Tenant", 
-    foreign_keys=[tenant_id]
-    )
-    
-    # Who invited this agent (different relationship, no back_populates to avoid confusion)
-    invited_by_user = relationship(
-        "Tenant", 
-        foreign_keys=[invited_by]
-    )
-    
-    # Conversations this agent is currently assigned to
-    assigned_conversations = relationship(
-        "LiveChatConversation",
-        foreign_keys="LiveChatConversation.assigned_agent_id",
-        back_populates="assigned_agent"
-    )
-    
-    # Conversations this agent was previously assigned to (for transfers)
-    previous_conversations = relationship(
-        "LiveChatConversation",
-        foreign_keys="LiveChatConversation.previous_agent_id",
-        back_populates="previous_agent"
-    )
-    
-    # Agent sessions
-    sessions = relationship(
-        "AgentSession", 
-        back_populates="agent", 
-        cascade="all, delete-orphan"
-    )
-    
-    # Messages sent by this agent
-    messages = relationship(
-        "LiveChatMessage", 
-        back_populates="agent"
-    )
-    
+    tenant = relationship("Tenant", foreign_keys=[tenant_id])
+    invited_by_user = relationship("Tenant", foreign_keys=[invited_by])
+    assigned_conversations = relationship("LiveChatConversation", foreign_keys="LiveChatConversation.assigned_agent_id", back_populates="assigned_agent")
+    previous_conversations = relationship("LiveChatConversation", foreign_keys="LiveChatConversation.previous_agent_id", back_populates="previous_agent")
+    sessions = relationship("AgentSession", back_populates="agent", cascade="all, delete-orphan")
+    messages = relationship("LiveChatMessage", back_populates="agent")
+    tags = relationship("AgentTag", secondary=agent_tags_association, foreign_keys=[agent_tags_association.c.agent_id, agent_tags_association.c.tag_id], back_populates="agents")
+    tag_performances = relationship("AgentTagPerformance", back_populates="agent", cascade="all, delete-orphan")
+
+
+
+    # Specialization settings
+    primary_specialization = Column(String(50), nullable=True)  # Main area of expertise
+    secondary_specializations = Column(JSON, nullable=True)  # Additional skills
+    skill_level = Column(Integer, default=3)  # Overall skill level 1-5
+    accepts_overflow = Column(Boolean, default=True)  # Take non-specialized conversations when needed
+
+
     def __repr__(self):
         return f"<Agent {self.full_name} ({self.email})>"
 
@@ -474,3 +467,298 @@ class LiveChatSettings(Base):
     
     # 🔧 FIXED RELATIONSHIP
     tenant = relationship("Tenant")
+
+
+class CustomerProfile(Base):
+    """Customer profile for tracking returning visitors"""
+    __tablename__ = "customer_profiles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    customer_identifier = Column(String, nullable=False, index=True)
+    
+    # Basic Information
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+    total_conversations = Column(Integer, default=0)
+    total_sessions = Column(Integer, default=0)
+    
+    # Preferences
+    preferred_language = Column(String, nullable=True)
+    time_zone = Column(String, nullable=True)
+    preferred_contact_method = Column(String, nullable=True)
+    
+    # Analytics
+    customer_satisfaction_avg = Column(Float, nullable=True)
+    average_session_duration = Column(Integer, nullable=True)  # seconds
+    total_messages_sent = Column(Integer, default=0)
+    
+    # Privacy & Compliance
+    data_collection_consent = Column(Boolean, default=False)
+    marketing_consent = Column(Boolean, default=False)
+    last_consent_update = Column(DateTime, nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class CustomerSession(Base):
+    """Individual customer session tracking"""
+    __tablename__ = "customer_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    customer_profile_id = Column(Integer, ForeignKey("customer_profiles.id"), nullable=False)
+    session_id = Column(String, unique=True, nullable=False)
+    
+    # Session Details
+    started_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    
+    # Technical Details
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    device_fingerprint = Column(String, nullable=True)
+    
+    # Geolocation
+    country = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    
+    # Activity
+    page_views = Column(Integer, default=0)
+    conversations_started = Column(Integer, default=0)
+
+class CustomerDevice(Base):
+    """Device information for fingerprinting"""
+    __tablename__ = "customer_devices"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    customer_profile_id = Column(Integer, ForeignKey("customer_profiles.id"), nullable=False)
+    device_fingerprint = Column(String, nullable=False, index=True)
+    
+    # Device Details
+    device_type = Column(String, nullable=True)  # mobile, tablet, desktop
+    browser_name = Column(String, nullable=True)
+    browser_version = Column(String, nullable=True)
+    operating_system = Column(String, nullable=True)
+    screen_resolution = Column(String, nullable=True)
+    
+    # Capabilities
+    supports_websockets = Column(Boolean, default=True)
+    supports_file_upload = Column(Boolean, default=True)
+    supports_notifications = Column(Boolean, default=False)
+    
+    # Tracking
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+    total_sessions = Column(Integer, default=1)
+
+class CustomerPreferences(Base):
+    """Customer preferences and settings"""
+    __tablename__ = "customer_preferences"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    customer_profile_id = Column(Integer, ForeignKey("customer_profiles.id"), nullable=False)
+    
+    # Communication Preferences
+    preferred_language = Column(String, default="en")
+    preferred_agent_gender = Column(String, nullable=True)
+    preferred_communication_style = Column(String, nullable=True)  # formal, casual, technical
+    
+    # Notification Preferences
+    email_notifications = Column(Boolean, default=False)
+    sms_notifications = Column(Boolean, default=False)
+    browser_notifications = Column(Boolean, default=False)
+    
+    # Accessibility
+    requires_accessibility_features = Column(Boolean, default=False)
+    accessibility_preferences = Column(JSON, nullable=True)
+    
+    # Privacy
+    data_retention_preference = Column(String, default="standard")  # minimal, standard, extended
+    third_party_sharing_consent = Column(Boolean, default=False)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+
+class AgentTag(Base):
+    """Tags for agent skills and specializations"""
+    __tablename__ = "agent_tags"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    
+    # Tag Information
+    name = Column(String(50), nullable=False, index=True)  # e.g., "billing", "refunds"
+    display_name = Column(String(100), nullable=False)  # e.g., "Billing & Payments"
+    category = Column(String(50), nullable=False, index=True)  # e.g., "financial", "technical", "general"
+    description = Column(Text, nullable=True)
+    
+    # Visual Properties
+    color = Column(String(7), default="#6366f1")  # Hex color code
+    icon = Column(String(50), nullable=True)  # Icon identifier
+    
+    # Priority and Routing
+    priority_weight = Column(Float, default=1.0)  # Higher = more important for routing
+    is_active = Column(Boolean, default=True)
+    
+    # Auto-assignment Rules
+    keywords = Column(JSON, nullable=True)  # Keywords that trigger this tag
+    routing_rules = Column(JSON, nullable=True)  # Complex routing logic
+    
+    # Statistics
+    total_conversations = Column(Integer, default=0)
+    success_rate = Column(Float, default=0.0)
+    average_satisfaction = Column(Float, default=0.0)
+    
+    # Metadata
+    created_by = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    created_by_agent = relationship("Agent", foreign_keys=[created_by])
+    
+    # Many-to-many with agents
+    agents = relationship("Agent", secondary=agent_tags_association, foreign_keys=[agent_tags_association.c.agent_id, agent_tags_association.c.tag_id], back_populates="tags")
+    
+    def __repr__(self):
+        return f"<AgentTag {self.name} ({self.category})>"
+
+
+class ConversationTagging(Base):
+    """Track which tags were identified for conversations"""
+    __tablename__ = "conversation_tagging"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("live_chat_conversations.id"), nullable=False)
+    tag_id = Column(Integer, ForeignKey("agent_tags.id"), nullable=False)
+    
+    # Detection Information
+    confidence_score = Column(Float, default=0.0)  # 0.0 - 1.0
+    detection_method = Column(String(50), nullable=False)  # "keyword", "ml", "manual"
+    detected_keywords = Column(JSON, nullable=True)
+    
+    # Context
+    message_text = Column(Text, nullable=True)  # Text that triggered detection
+    message_id = Column(Integer, ForeignKey("live_chat_messages.id"), nullable=True)
+    
+    # Assignment Impact
+    influenced_routing = Column(Boolean, default=False)
+    routing_weight = Column(Float, default=0.0)
+    
+    # Validation
+    human_verified = Column(Boolean, default=False)
+    verified_by = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    
+    # Timestamps
+    detected_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    conversation = relationship("LiveChatConversation")
+    tag = relationship("AgentTag")
+    message = relationship("LiveChatMessage")
+    verified_by_agent = relationship("Agent", foreign_keys=[verified_by])
+
+
+class AgentTagPerformance(Base):
+    """Track agent performance for specific tags"""
+    __tablename__ = "agent_tag_performance"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    tag_id = Column(Integer, ForeignKey("agent_tags.id"), nullable=False)
+    
+    # Performance Metrics
+    total_conversations = Column(Integer, default=0)
+    successful_resolutions = Column(Integer, default=0)
+    average_resolution_time = Column(Float, default=0.0)  # in minutes
+    customer_satisfaction_avg = Column(Float, default=0.0)
+    
+    # Time-based Performance
+    conversations_last_30_days = Column(Integer, default=0)
+    satisfaction_last_30_days = Column(Float, default=0.0)
+    
+    # Skill Development
+    proficiency_level = Column(Integer, default=3)  # 1-5 scale
+    improvement_trend = Column(Float, default=0.0)  # positive = improving
+    
+    # Training and Certification
+    certified = Column(Boolean, default=False)
+    certification_date = Column(DateTime, nullable=True)
+    last_training_date = Column(DateTime, nullable=True)
+    
+    # Availability
+    is_available_for_tag = Column(Boolean, default=True)
+    max_concurrent_for_tag = Column(Integer, default=2)
+    current_active_conversations = Column(Integer, default=0)
+    
+    # Metadata
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_conversation_date = Column(DateTime, nullable=True)
+    
+    # Relationships
+    agent = relationship("Agent")
+    tag = relationship("AgentTag")
+    
+    # Unique constraint
+    __table_args__ = (
+        {"extend_existing": True},
+    )
+
+
+class SmartRoutingLog(Base):
+    """Log smart routing decisions for analysis and improvement"""
+    __tablename__ = "smart_routing_log"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("live_chat_conversations.id"), nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    
+    # Routing Decision
+    assigned_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    routing_method = Column(String(50), nullable=False)  # "smart_tags", "fallback", "manual"
+    confidence_score = Column(Float, default=0.0)
+    
+    # Detected Tags and Context
+    detected_tags = Column(JSON, nullable=True)  # [{tag_id, confidence, keywords}]
+    customer_context = Column(JSON, nullable=True)  # Previous history, location, etc.
+    available_agents = Column(JSON, nullable=True)  # Agents considered
+    
+    # Routing Logic
+    scoring_breakdown = Column(JSON, nullable=True)  # How scores were calculated
+    fallback_reason = Column(String(200), nullable=True)
+    alternative_agents = Column(JSON, nullable=True)  # Other good options
+    
+    # Outcome Tracking
+    customer_satisfaction = Column(Integer, nullable=True)  # 1-5 rating
+    resolution_time_minutes = Column(Integer, nullable=True)
+    was_transferred = Column(Boolean, default=False)
+    transfer_reason = Column(String(200), nullable=True)
+    
+    # Analysis
+    routing_accuracy = Column(Float, nullable=True)  # Calculated post-conversation
+    success_factors = Column(JSON, nullable=True)
+    improvement_suggestions = Column(JSON, nullable=True)
+    
+    # Timestamps
+    routed_at = Column(DateTime, default=datetime.utcnow)
+    conversation_ended_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    conversation = relationship("LiveChatConversation")
+    assigned_agent = relationship("Agent")
+    tenant = relationship("Tenant")
+
+
+
+
+
+
+

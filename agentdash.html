@@ -1,0 +1,1556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Dashboard - Live Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            min-height: 100vh;
+        }
+
+        .dashboard {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: white;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #6d28d9, #a855f7);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .production-notice {
+            background: #eff6ff;
+            border: 1px solid #93c5fd;
+            padding: 10px;
+            margin: 15px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #1d4ed8;
+        }
+
+        .agent-info {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .agent-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.online { 
+            background: #22c55e; 
+            animation: none;
+        }
+        .status-indicator.busy { background: #f59e0b; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .login-section {
+            padding: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #6d28d9;
+        }
+
+        .form-group input:disabled {
+            background: #f9fafb;
+            color: #6b7280;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #6d28d9, #a855f7);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+            width: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+            width: auto;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+        }
+
+        .btn-success {
+            background: #059669;
+        }
+
+        .btn-warning {
+            background: #d97706;
+        }
+
+        .btn-danger {
+            background: #dc2626;
+        }
+
+        .queue-section {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .section-header {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .queue-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .queue-item:hover {
+            background: #f8fafc;
+        }
+
+        .queue-item.active {
+            background: #ede9fe;
+            border-left: 4px solid #6d28d9;
+        }
+
+        .customer-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .customer-preview {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .queue-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .priority-high {
+            border-left: 4px solid #ef4444;
+        }
+
+        .chat-area {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .conversation-info h3 {
+            margin-bottom: 5px;
+        }
+
+        .conversation-meta {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .chat-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8fafc;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .message.agent {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #6b7280;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .message.customer .message-avatar {
+            background: #3b82f6;
+        }
+
+        .message.agent .message-avatar {
+            background: #6d28d9;
+        }
+
+        .message.system .message-avatar {
+            background: #f59e0b;
+        }
+
+        .message-content {
+            flex: 1;
+            max-width: 70%;
+        }
+
+        .message-bubble {
+            padding: 12px 16px;
+            border-radius: 16px;
+            margin-bottom: 4px;
+        }
+
+        .message.customer .message-bubble {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .message.agent .message-bubble {
+            background: #6d28d9;
+            color: white;
+        }
+
+        .message.system .message-bubble {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #f59e0b;
+        }
+
+        .message-info {
+            font-size: 12px;
+            color: #6b7280;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .input-container {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 20px;
+            resize: none;
+            max-height: 100px;
+            min-height: 44px;
+        }
+
+        .send-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .no-conversation {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #6b7280;
+            text-align: center;
+        }
+
+        .no-conversation h3 {
+            margin-bottom: 10px;
+            color: #374151;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #6d28d9;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #6b7280;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 16px;
+            margin: 10px 0;
+            max-width: 80px;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            background: #9ca3af;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .modal h3 {
+            margin-bottom: 20px;
+            color: #374151;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .hidden { display: none; }
+
+        .debug-panel {
+            background: #1f2937;
+            color: #f9fafb;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            border-top: 1px solid #374151;
+        }
+
+        .debug-panel h4 {
+            margin-bottom: 10px;
+            color: #d1d5db;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+
+        .log-entry.error { color: #fca5a5; }
+        .log-entry.success { color: #86efac; }
+        .log-entry.info { color: #93c5fd; }
+        .log-entry.warning { color: #fcd34d; }
+
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 280px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: 50vh;
+            }
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="header">
+                <h1>Agent Dashboard</h1>
+            </div>
+
+            <div class="production-notice">
+                🚀 <strong>Production Environment</strong><br>
+                Backend: https://botbackend-qtbf.onrender.com<br>
+                WebSocket: wss://botbackend-qtbf.onrender.com
+            </div>
+
+            <!-- Login Section -->
+            <div class="login-section" id="loginSection">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="agentEmail" placeholder="agent@company.com" />
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="agentPassword" placeholder="••••••••" />
+                </div>
+                <div class="form-group">
+                    <label>Server URL</label>
+                    <input type="text" id="serverUrl" value="https://botbackend-qtbf.onrender.com" disabled />
+                </div>
+                <button class="btn" onclick="loginAgent()">Login</button>
+            </div>
+
+            <!-- Agent Info -->
+            <div class="agent-info hidden" id="agentInfo">
+                <div class="agent-status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <div>
+                        <div id="agentName">Agent Name</div>
+                        <div style="font-size: 12px; color: #6b7280;" id="agentEmail2"></div>
+                    </div>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="activeChats">0</div>
+                        <div class="stat-label">Active</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="queueLength">0</div>
+                        <div class="stat-label">Queue</div>
+                    </div>
+                </div>
+
+                <button class="btn btn-sm btn-danger" onclick="logout()">Logout</button>
+            </div>
+
+            <!-- Queue Section -->
+            <div class="queue-section hidden" id="queueSection">
+                <div class="section-header">
+                    <span>Queue</span>
+                    <button class="btn btn-sm" onclick="refreshQueue()">Refresh</button>
+                </div>
+                <div id="queueList">
+                    <!-- Queue items will be populated here -->
+                </div>
+
+                <div class="section-header">
+                    <span>Active Conversations</span>
+                </div>
+                <div id="activeConversations">
+                    <!-- Active conversations will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- No Conversation State -->
+            <div class="no-conversation" id="noConversation">
+                <h3>Welcome to Agent Dashboard</h3>
+                <p>Select a conversation from the queue to get started</p>
+                <br>
+                <button class="btn" onclick="refreshQueue()">Refresh Queue</button>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="chat-area hidden" id="chatArea">
+                <div class="chat-header">
+                    <div class="conversation-info">
+                        <h3 id="conversationTitle">Customer Name</h3>
+                        <div class="conversation-meta" id="conversationMeta">
+                            Email • Started at time
+                        </div>
+                    </div>
+                    <div class="chat-actions">
+                        <button class="btn btn-sm btn-warning" onclick="showTransferModal()">Transfer</button>
+                        <button class="btn btn-sm btn-danger" onclick="showCloseModal()">Close</button>
+                    </div>
+                </div>
+
+                <div class="messages-area" id="messagesArea">
+                    <!-- Messages will be populated here -->
+                </div>
+
+                <div class="input-area">
+                    <div class="input-container">
+                        <textarea 
+                            class="message-input" 
+                            id="messageInput" 
+                            placeholder="Type your message..." 
+                            onkeydown="handleKeyPress(event)"
+                            oninput="handleTyping()"
+                        ></textarea>
+                        <button class="btn send-btn" onclick="sendMessage()">→</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transfer Modal -->
+    <div class="modal" id="transferModal">
+        <div class="modal-content">
+            <h3>Transfer Conversation</h3>
+            <div class="form-group">
+                <label>Select Agent</label>
+                <select id="transferAgentSelect">
+                    <option value="">Select an agent...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Reason</label>
+                <input type="text" id="transferReason" placeholder="Reason for transfer" />
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="transferNotes" rows="3" placeholder="Additional notes..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideTransferModal()">Cancel</button>
+                <button class="btn" onclick="transferConversation()">Transfer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Close Modal -->
+    <div class="modal" id="closeModal">
+        <div class="modal-content">
+            <h3>Close Conversation</h3>
+            <div class="form-group">
+                <label>Reason</label>
+                <select id="closeReason">
+                    <option value="resolved">Resolved</option>
+                    <option value="abandoned">Customer Abandoned</option>
+                    <option value="escalated">Escalated</option>
+                    <option value="spam">Spam</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Resolution Status</label>
+                <select id="resolutionStatus">
+                    <option value="resolved">Resolved</option>
+                    <option value="unresolved">Unresolved</option>
+                    <option value="pending">Pending</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="closeNotes" rows="3" placeholder="Summary and notes..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideCloseModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="closeConversation()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Panel -->
+    <div class="debug-panel">
+        <h4>Debug Log</h4>
+        <div id="debugLog"></div>
+    </div>
+
+    <script>
+        class AgentDashboard {
+            constructor() {
+                this.websocket = null;
+                this.agentToken = null;
+                this.agentInfo = null;
+                this.sessionId = null;
+                this.currentConversationId = null;
+                this.activeConversations = {};
+                this.queueData = [];
+                this.availableAgents = [];
+                this.serverUrl = 'https://botbackend-qtbf.onrender.com';
+                this.wsUrl = 'wss://botbackend-qtbf.onrender.com';
+                this.isTyping = false;
+                this.typingTimeout = null;
+                this.connectionRetries = 0;
+                this.maxRetries = 3;
+            }
+
+            log(message, type = 'info') {
+                const logContainer = document.getElementById('debugLog');
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${type}`;
+                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logContainer.appendChild(entry);
+                logContainer.scrollTop = logContainer.scrollHeight;
+                
+                // Also log to console for debugging
+                console.log(`[${type.toUpperCase()}] ${message}`);
+            }
+
+            async loginAgent() {
+                try {
+                    const email = document.getElementById('agentEmail').value.trim();
+                    const password = document.getElementById('agentPassword').value.trim();
+
+                    if (!email || !password) {
+                        throw new Error('Email and password are required');
+                    }
+
+                    this.log(`Attempting login for: ${email}`, 'info');
+
+                    // Login request
+                    const response = await fetch(`${this.serverUrl}/live-chat/auth/login`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            username: email,
+                            password: password,
+                            grant_type: 'password'
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        let errorMessage;
+                        try {
+                            const errorJson = JSON.parse(errorText);
+                            errorMessage = errorJson.detail || errorJson.message || errorText;
+                        } catch {
+                            errorMessage = errorText;
+                        }
+                        throw new Error(`Login failed: ${errorMessage}`);
+                    }
+
+                    const loginData = await response.json();
+                    this.log(`Login successful for agent: ${loginData.agent_name}`, 'success');
+
+                    // Store agent info
+                    this.agentToken = loginData.access_token;
+                    this.sessionId = loginData.session_id;
+                    this.agentInfo = {
+                        id: loginData.agent_id,
+                        name: loginData.agent_name,
+                        display_name: loginData.display_name,
+                        email: loginData.email,
+                        tenant_id: loginData.tenant_id
+                    };
+
+                    // Update UI
+                    this.showAgentDashboard();
+                    await this.connectWebSocket();
+                    await this.loadInitialData();
+
+                } catch (error) {
+                    this.log(`Login error: ${error.message}`, 'error');
+                    alert(`Login failed: ${error.message}`);
+                }
+            }
+
+            showAgentDashboard() {
+                // Hide login, show dashboard
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('agentInfo').classList.remove('hidden');
+                document.getElementById('queueSection').classList.remove('hidden');
+
+                // Update agent info
+                document.getElementById('agentName').textContent = this.agentInfo.display_name;
+                document.getElementById('agentEmail2').textContent = this.agentInfo.email;
+                document.getElementById('statusIndicator').classList.add('online');
+            }
+
+            async connectWebSocket() {
+                try {
+                    const wsPath = `/live-chat/ws/agent/${this.agentInfo.id}?session_id=${this.sessionId}`;
+                    const fullWsUrl = `${this.wsUrl}${wsPath}`;
+
+                    this.log(`Connecting to WebSocket: ${fullWsUrl}`, 'info');
+
+                    this.websocket = new WebSocket(fullWsUrl);
+
+                    this.websocket.onopen = () => {
+                        this.log('WebSocket connected successfully', 'success');
+                        this.connectionRetries = 0;
+                    };
+
+                    this.websocket.onmessage = (event) => {
+                        try {
+                            const message = JSON.parse(event.data);
+                            this.handleWebSocketMessage(message);
+                        } catch (error) {
+                            this.log(`Error parsing WebSocket message: ${error.message}`, 'error');
+                        }
+                    };
+
+                    this.websocket.onclose = (event) => {
+                        this.log(`WebSocket closed: Code ${event.code}, Reason: ${event.reason || 'No reason'}`, 'error');
+                        document.getElementById('statusIndicator').classList.remove('online');
+                        
+                        // Auto-reconnect logic
+                        if (this.connectionRetries < this.maxRetries && event.code !== 1000 && this.agentToken) {
+                            this.connectionRetries++;
+                            this.log(`Attempting reconnection ${this.connectionRetries}/${this.maxRetries}`, 'info');
+                            setTimeout(() => {
+                                this.connectWebSocket();
+                            }, 2000 * this.connectionRetries);
+                        }
+                    };
+
+                    this.websocket.onerror = (error) => {
+                        this.log(`WebSocket error: ${error.type || 'Unknown error'}`, 'error');
+                    };
+
+                } catch (error) {
+                    this.log(`WebSocket connection error: ${error.message}`, 'error');
+                    throw error;
+                }
+            }
+
+            handleWebSocketMessage(message) {
+                this.log(`WS Received: ${message.type}`, 'info');
+                
+                switch (message.type) {
+                    case 'agent_connected':
+                        this.log('Agent connected successfully', 'success');
+                        break;
+                        
+                    case 'initial_data':
+                        this.handleInitialData(message.data);
+                        break;
+                        
+                    case 'new_message':
+                        this.displayMessage(message.data);
+                        break;
+                        
+                    case 'typing_indicator':
+                        this.handleTypingIndicator(message.data);
+                        break;
+                        
+                    case 'conversation_closed':
+                        this.handleConversationClosed(message.data);
+                        break;
+                        
+                    case 'agent_joined':
+                        this.log(`Agent joined conversation: ${message.data.agent_name}`, 'info');
+                        break;
+                        
+                    case 'queue_updated':
+                        this.updateQueue(message.data);
+                        break;
+                        
+                    case 'error':
+                        this.log(`Server error: ${message.data.message}`, 'error');
+                        break;
+                        
+                    default:
+                        this.log(`Unhandled message type: ${message.type}`, 'warning');
+                }
+            }
+
+            handleInitialData(data) {
+                if (data.queue_status) {
+                    this.queueData = data.queue_status.queue || [];
+                    this.availableAgents = data.queue_status.agents || [];
+                    this.updateQueueDisplay();
+                    this.updateStats(data.queue_status);
+                }
+            }
+
+            async loadInitialData() {
+                try {
+                    // Load queue status
+                    await this.refreshQueue();
+                    
+                    // Load active conversations
+                    await this.loadActiveConversations();
+                    
+                    // Load available agents for transfers
+                    await this.loadAvailableAgents();
+                    
+                } catch (error) {
+                    this.log(`Error loading initial data: ${error.message}`, 'error');
+                }
+            }
+
+            async refreshQueue() {
+                try {
+                    const response = await fetch(`${this.serverUrl}/live-chat/queue-status`, {
+                        headers: {
+                            'X-API-Key': 'sk-3e47a102b8ea41b7915261f912abf645' // Queue status still uses API key
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const queueStatus = await response.json();
+                    this.queueData = queueStatus.queue || [];
+                    this.updateQueueDisplay();
+                    this.updateStats(queueStatus);
+                    
+                } catch (error) {
+                    this.log(`Error refreshing queue: ${error.message}`, 'error');
+                }
+            }
+
+            async loadActiveConversations() {
+                try {
+                    const response = await fetch(`${this.serverUrl}/live-chat/conversations/active`, {
+                        headers: {
+                            'Authorization': `Bearer ${this.agentToken}` // FIXED: Use Bearer token
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    this.updateActiveConversationsDisplay(data.conversations || []);
+                    
+                } catch (error) {
+                    this.log(`Error loading conversations: ${error.message}`, 'error');
+                }
+            }
+
+            async loadAvailableAgents() {
+                try {
+                    const response = await fetch(`${this.serverUrl}/live-chat/auth/active-agents`, {
+                        headers: {
+                            'X-API-Key': 'sk-3e47a102b8ea41b7915261f912abf645' // Active agents still uses API key
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    this.availableAgents = data.active_agents || [];
+                    this.updateTransferAgentOptions();
+                    
+                } catch (error) {
+                    this.log(`Error loading agents: ${error.message}`, 'error');
+                }
+            }
+
+            updateQueueDisplay() {
+                const queueList = document.getElementById('queueList');
+                queueList.innerHTML = '';
+
+                if (this.queueData.length === 0) {
+                    queueList.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280;">No customers in queue</div>';
+                    return;
+                }
+
+                this.queueData.forEach(item => {
+                    const queueItem = document.createElement('div');
+                    queueItem.className = `queue-item ${item.priority > 1 ? 'priority-high' : ''}`;
+                    queueItem.onclick = () => this.selectQueueItem(item);
+                    
+                    queueItem.innerHTML = `
+                        <div class="customer-name">${item.customer_name || 'Customer'}</div>
+                        <div class="customer-preview">${item.customer_preview || 'Waiting to chat...'}</div>
+                        <div class="queue-meta">
+                            <span>Position: ${item.position}</span>
+                            <span>Wait: ${item.wait_time_minutes}m</span>
+                        </div>
+                    `;
+                    
+                    queueList.appendChild(queueItem);
+                });
+            }
+
+            updateActiveConversationsDisplay(conversations) {
+                const activeList = document.getElementById('activeConversations');
+                activeList.innerHTML = '';
+
+                const myConversations = conversations.filter(conv => 
+                    conv.assigned_agent_id === this.agentInfo.id
+                );
+
+                if (myConversations.length === 0) {
+                    activeList.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280;">No active conversations</div>';
+                    return;
+                }
+
+                myConversations.forEach(conv => {
+                    const convItem = document.createElement('div');
+                    convItem.className = 'queue-item';
+                    convItem.onclick = () => this.selectConversation(conv.conversation_id);
+                    
+                    convItem.innerHTML = `
+                        <div class="customer-name">${conv.customer_name || conv.customer_identifier}</div>
+                        <div class="customer-preview">${conv.customer_email || ''}</div>
+                        <div class="queue-meta">
+                            <span>Messages: ${conv.message_count}</span>
+                            <span>Status: ${conv.status}</span>
+                        </div>
+                    `;
+                    
+                    activeList.appendChild(convItem);
+                });
+            }
+
+            updateStats(queueStatus) {
+                document.getElementById('queueLength').textContent = queueStatus.queue_length || 0;
+                document.getElementById('activeChats').textContent = queueStatus.available_agents || 0;
+            }
+
+            updateTransferAgentOptions() {
+                const select = document.getElementById('transferAgentSelect');
+                select.innerHTML = '<option value="">Select an agent...</option>';
+                
+                this.availableAgents.forEach(agent => {
+                    if (agent.agent_id !== this.agentInfo.id) {
+                        const option = document.createElement('option');
+                        option.value = agent.agent_id;
+                        option.textContent = `${agent.display_name} (${agent.active_conversations}/${agent.max_concurrent_chats})`;
+                        select.appendChild(option);
+                    }
+                });
+            }
+
+            async selectQueueItem(queueItem) {
+                try {
+                    // Manually assign conversation to this agent
+                    const response = await fetch(`${this.serverUrl}/live-chat/assign-conversation`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.agentToken}` // FIXED: Use Bearer token
+                        },
+                        body: JSON.stringify({
+                            queue_id: queueItem.queue_id,
+                            agent_id: this.agentInfo.id
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Assignment failed: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    this.log(`Conversation assigned: ${JSON.stringify(result)}`, 'success');
+                    
+                    // Select the conversation
+                    await this.selectConversation(queueItem.conversation_id);
+                    
+                    // Refresh queue
+                    await this.refreshQueue();
+                    await this.loadActiveConversations();
+                    
+                } catch (error) {
+                    this.log(`Error assigning conversation: ${error.message}`, 'error');
+                    alert(`Failed to assign conversation: ${error.message}`);
+                }
+            }
+
+            async selectConversation(conversationId) {
+                try {
+                    this.currentConversationId = conversationId;
+                    
+                    // Load conversation history
+                    const response = await fetch(`${this.serverUrl}/live-chat/conversations/${conversationId}/history`, {
+                        headers: {
+                            'Authorization': `Bearer ${this.agentToken}` // FIXED: Use Bearer token
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to load conversation: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    // Show chat area
+                    document.getElementById('noConversation').classList.add('hidden');
+                    document.getElementById('chatArea').classList.remove('hidden');
+                    
+                    // Update conversation info
+                    document.getElementById('conversationTitle').textContent = `Conversation #${conversationId}`;
+                    document.getElementById('conversationMeta').textContent = `Status: ${data.conversation_status} • Messages: ${data.total_count}`;
+                    
+                    // Display messages
+                    this.displayConversationHistory(data.messages);
+                    
+                    // Join conversation via WebSocket
+                    this.joinConversation(conversationId);
+                    
+                    this.log(`Selected conversation: ${conversationId}`, 'success');
+                    
+                } catch (error) {
+                    this.log(`Error selecting conversation: ${error.message}`, 'error');
+                }
+            }
+
+            joinConversation(conversationId) {
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    const message = {
+                        type: 'agent_join_conversation',
+                        data: {
+                            conversation_id: conversationId
+                        }
+                    };
+                    this.websocket.send(JSON.stringify(message));
+                    this.log(`Joined conversation: ${conversationId}`, 'info');
+                }
+            }
+
+            displayConversationHistory(messages) {
+                const messagesArea = document.getElementById('messagesArea');
+                messagesArea.innerHTML = '';
+                
+                messages.forEach(msg => {
+                    this.displayMessage(msg);
+                });
+            }
+
+            displayMessage(messageData) {
+                const messagesArea = document.getElementById('messagesArea');
+                const messageDiv = document.createElement('div');
+                
+                const senderClass = messageData.sender_type === 'agent' ? 'agent' : 
+                                   messageData.sender_type === 'system' ? 'system' : 'customer';
+                messageDiv.className = `message ${senderClass}`;
+                
+                const time = new Date(messageData.sent_at).toLocaleTimeString();
+                const senderInitial = messageData.sender_name ? messageData.sender_name.charAt(0).toUpperCase() : '?';
+                
+                messageDiv.innerHTML = `
+                    <div class="message-avatar">${senderInitial}</div>
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            ${this.escapeHtml(messageData.content)}
+                        </div>
+                        <div class="message-info">
+                            <span>${messageData.sender_name}</span>
+                            <span>${time}</span>
+                        </div>
+                    </div>
+                `;
+                
+                messagesArea.appendChild(messageDiv);
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+            }
+
+            sendMessage() {
+                const input = document.getElementById('messageInput');
+                const content = input.value.trim();
+                
+                if (!content || !this.websocket || this.websocket.readyState !== WebSocket.OPEN || !this.currentConversationId) {
+                    if (!content) {
+                        this.log('Cannot send empty message', 'error');
+                    } else if (!this.currentConversationId) {
+                        this.log('No conversation selected', 'error');
+                    } else {
+                        this.log('WebSocket not connected', 'error');
+                    }
+                    return;
+                }
+
+                const message = {
+                    type: 'chat_message',
+                    data: {
+                        conversation_id: this.currentConversationId,
+                        content: content,
+                        sender_name: this.agentInfo.display_name
+                    }
+                };
+
+                this.websocket.send(JSON.stringify(message));
+                this.log(`Sent message: ${content}`, 'success');
+                
+                input.value = '';
+                this.stopTyping();
+            }
+
+            handleTyping() {
+                if (!this.isTyping) {
+                    this.isTyping = true;
+                    this.sendTypingIndicator(true);
+                }
+
+                clearTimeout(this.typingTimeout);
+                this.typingTimeout = setTimeout(() => {
+                    this.stopTyping();
+                }, 2000);
+            }
+
+            stopTyping() {
+                if (this.isTyping) {
+                    this.isTyping = false;
+                    this.sendTypingIndicator(false);
+                }
+                clearTimeout(this.typingTimeout);
+            }
+
+            sendTypingIndicator(isTyping) {
+                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN || !this.currentConversationId) {
+                    return;
+                }
+
+                const message = {
+                    type: isTyping ? 'typing_start' : 'typing_stop',
+                    data: {
+                        conversation_id: this.currentConversationId
+                    }
+                };
+
+                this.websocket.send(JSON.stringify(message));
+            }
+
+            handleTypingIndicator(data) {
+                if (data.user_type === 'customer' && data.conversation_id === this.currentConversationId) {
+                    const messagesArea = document.getElementById('messagesArea');
+                    let typingDiv = document.getElementById('typing-indicator');
+                    
+                    if (data.is_typing) {
+                        if (!typingDiv) {
+                            typingDiv = document.createElement('div');
+                            typingDiv.id = 'typing-indicator';
+                            typingDiv.className = 'message customer';
+                            typingDiv.innerHTML = `
+                                <div class="message-avatar">C</div>
+                                <div class="typing-indicator">
+                                    <div class="typing-dots">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                </div>
+                            `;
+                            messagesArea.appendChild(typingDiv);
+                            messagesArea.scrollTop = messagesArea.scrollHeight;
+                        }
+                    } else {
+                        if (typingDiv) {
+                            typingDiv.remove();
+                        }
+                    }
+                }
+            }
+
+            handleConversationClosed(data) {
+                if (data.conversation_id === this.currentConversationId) {
+                    this.displaySystemMessage('This conversation has been closed');
+                    document.getElementById('messageInput').disabled = true;
+                    
+                    // Refresh data
+                    setTimeout(() => {
+                        this.refreshQueue();
+                        this.loadActiveConversations();
+                    }, 1000);
+                }
+            }
+
+            displaySystemMessage(content) {
+                const messageData = {
+                    content: content,
+                    sender_type: 'system',
+                    sender_name: 'System',
+                    sent_at: new Date().toISOString()
+                };
+                this.displayMessage(messageData);
+            }
+
+            // Modal functions
+            showTransferModal() {
+                if (!this.currentConversationId) {
+                    alert('No conversation selected');
+                    return;
+                }
+                document.getElementById('transferModal').style.display = 'block';
+            }
+
+            hideTransferModal() {
+                document.getElementById('transferModal').style.display = 'none';
+            }
+
+            showCloseModal() {
+                if (!this.currentConversationId) {
+                    alert('No conversation selected');
+                    return;
+                }
+                document.getElementById('closeModal').style.display = 'block';
+            }
+
+            hideCloseModal() {
+                document.getElementById('closeModal').style.display = 'none';
+            }
+
+            async transferConversation() {
+                try {
+                    const toAgentId = document.getElementById('transferAgentSelect').value;
+                    const reason = document.getElementById('transferReason').value.trim();
+                    const notes = document.getElementById('transferNotes').value.trim();
+
+                    if (!toAgentId) {
+                        alert('Please select an agent');
+                        return;
+                    }
+
+                    const response = await fetch(`${this.serverUrl}/live-chat/conversations/${this.currentConversationId}/transfer`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.agentToken}` // FIXED: Use Bearer token
+                        },
+                        body: JSON.stringify({
+                            to_agent_id: parseInt(toAgentId),
+                            reason: reason || 'transfer',
+                            notes: notes
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Transfer failed: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    this.log(`Conversation transferred: ${JSON.stringify(result)}`, 'success');
+                    
+                    this.hideTransferModal();
+                    
+                    // Reset form
+                    document.getElementById('transferAgentSelect').value = '';
+                    document.getElementById('transferReason').value = '';
+                    document.getElementById('transferNotes').value = '';
+                    
+                    // Go back to no conversation state
+                    document.getElementById('chatArea').classList.add('hidden');
+                    document.getElementById('noConversation').classList.remove('hidden');
+                    this.currentConversationId = null;
+                    
+                    // Refresh data
+                    this.refreshQueue();
+                    this.loadActiveConversations();
+                    
+                } catch (error) {
+                    this.log(`Transfer error: ${error.message}`, 'error');
+                    alert(`Failed to transfer conversation: ${error.message}`);
+                }
+            }
+
+            async closeConversation() {
+                try {
+                    const reason = document.getElementById('closeReason').value;
+                    const resolutionStatus = document.getElementById('resolutionStatus').value;
+                    const notes = document.getElementById('closeNotes').value.trim();
+
+                    const response = await fetch(`${this.serverUrl}/live-chat/conversations/${this.currentConversationId}/close`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.agentToken}` // FIXED: Use Bearer token
+                        },
+                        body: JSON.stringify({
+                            reason: reason,
+                            resolution_status: resolutionStatus,
+                            notes: notes
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Close failed: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    this.log(`Conversation closed: ${JSON.stringify(result)}`, 'success');
+                    
+                    this.hideCloseModal();
+                    
+                    // Reset form
+                    document.getElementById('closeReason').value = 'resolved';
+                    document.getElementById('resolutionStatus').value = 'resolved';
+                    document.getElementById('closeNotes').value = '';
+                    
+                    // Go back to no conversation state
+                    document.getElementById('chatArea').classList.add('hidden');
+                    document.getElementById('noConversation').classList.remove('hidden');
+                    this.currentConversationId = null;
+                    
+                    // Refresh data
+                    this.refreshQueue();
+                    this.loadActiveConversations();
+                    
+                } catch (error) {
+                    this.log(`Close error: ${error.message}`, 'error');
+                    alert(`Failed to close conversation: ${error.message}`);
+                }
+            }
+
+            async logout() {
+                try {
+                    if (this.sessionId) {
+                        await fetch(`${this.serverUrl}/live-chat/auth/logout`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${this.agentToken}`
+                            },
+                            body: JSON.stringify({
+                                session_id: this.sessionId
+                            })
+                        });
+                    }
+
+                    if (this.websocket) {
+                        this.websocket.close();
+                    }
+
+                    // Reset state
+                    this.agentToken = null;
+                    this.agentInfo = null;
+                    this.sessionId = null;
+                    this.currentConversationId = null;
+
+                    // Reset UI
+                    document.getElementById('loginSection').classList.remove('hidden');
+                    document.getElementById('agentInfo').classList.add('hidden');
+                    document.getElementById('queueSection').classList.add('hidden');
+                    document.getElementById('chatArea').classList.add('hidden');
+                    document.getElementById('noConversation').classList.remove('hidden');
+
+                    this.log('Logged out successfully', 'success');
+
+                } catch (error) {
+                    this.log(`Logout error: ${error.message}`, 'error');
+                }
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        }
+
+        // Global instance
+        const dashboard = new AgentDashboard();
+
+        // Global functions for HTML events
+        function loginAgent() {
+            dashboard.loginAgent();
+        }
+
+        function logout() {
+            dashboard.logout();
+        }
+
+        function refreshQueue() {
+            dashboard.refreshQueue();
+        }
+
+        function sendMessage() {
+            dashboard.sendMessage();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function handleTyping() {
+            dashboard.handleTyping();
+        }
+
+        function showTransferModal() {
+            dashboard.showTransferModal();
+        }
+
+        function hideTransferModal() {
+            dashboard.hideTransferModal();
+        }
+
+        function showCloseModal() {
+            dashboard.showCloseModal();
+        }
+
+        function hideCloseModal() {
+            dashboard.hideCloseModal();
+        }
+
+        function transferConversation() {
+            dashboard.transferConversation();
+        }
+
+        function closeConversation() {
+            dashboard.closeConversation();
+        }
+
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            const transferModal = document.getElementById('transferModal');
+            const closeModal = document.getElementById('closeModal');
+            
+            if (event.target === transferModal) {
+                hideTransferModal();
+            }
+            if (event.target === closeModal) {
+                hideCloseModal();
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            dashboard.log('Production Agent Dashboard loaded', 'success');
+            dashboard.log('Backend URL: https://botbackend-qtbf.onrender.com', 'info');
+            dashboard.log('WebSocket URL: wss://botbackend-qtbf.onrender.com', 'info');
+            dashboard.log('✅ Authentication: Agent endpoints now use Bearer tokens', 'success');
+            dashboard.log('🔧 API Key Requirement: Queue/active-agents endpoints need your tenant API key', 'warning');
+            dashboard.log('💡 To fix 403 errors: Replace "your-api-key-here" with your actual tenant API key', 'info');
+            
+            // Auto-refresh queue every 30 seconds
+            setInterval(() => {
+                if (dashboard.agentToken) {
+                    dashboard.refreshQueue();
+                    dashboard.loadActiveConversations();
+                }
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

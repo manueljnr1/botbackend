@@ -149,3 +149,6 @@ svix==1.24.0
 python-jose
 Pillow
 resend
+geoip2
+user-agents
+python-whois
