@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from passlib.context import CryptContext
 
+from fastapi import Depends
+
+
+
 from app.tenants.models import Tenant
 from app.auth.models import TenantCredentials
 from app.auth.supabase_service import supabase_auth_service

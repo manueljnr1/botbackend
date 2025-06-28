@@ -33,6 +33,12 @@ from app.chatbot.security import SecurityPromptManager, SecurityIncident
 from app.chatbot.security import validate_and_sanitize_tenant_prompt
 from app.live_chat.models import LiveChatConversation
 from app.live_chat.queue_service import LiveChatQueueService
+from app.chatbot.admin_router import router as admin_router
+
+from app.chatbot.super_tenant_admin_engine import get_super_tenant_admin_engine
+from app.tenants.models import Tenant
+from sqlalchemy import func
+
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -806,7 +812,7 @@ async def smart_chat_streaming_dedicated(
     Dedicated streaming endpoint for smart feedback chat
     """
     # Call the regular smart chat endpoint instead
-    return await chat_with_advanced_smart_feedback_enhanced(
+    return await smart_chat_with_followup_streaming(
         SmartChatRequest(
             message=request.message,
             user_identifier=request.user_identifier,
@@ -1972,3 +1978,177 @@ def calculate_followup_delay(followup: str) -> float:
 
 
 
+@router.post("/chat/super-tenant-admin")
+async def super_tenant_admin_chat(
+    request: SmartChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Super Tenant Admin Chat - Enhanced chatbot for authenticated tenant management
+    Only available when tenant is logged in and chatting with super tenant
+    """
+    try:
+        logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
+        
+        # 🔒 CRITICAL: Validate API key and get authenticated tenant
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # 🔒 SECURITY: Verify tenant is active
+        if not tenant.is_active:
+            raise HTTPException(status_code=403, detail="Tenant account is inactive")
+        
+        # Check if this is actually the super tenant's chatbot
+        # In your implementation, you might check a special header or context
+        # For now, we'll assume any authenticated tenant can use admin features
+        
+        logger.info(f"🔒 Processing admin chat for tenant: {tenant.name} (ID: {tenant.id})")
+        
+        # Initialize admin engine
+        admin_engine = get_super_tenant_admin_engine(db)
+        
+        # Process admin message with security boundary
+        result = admin_engine.process_admin_message(
+            user_message=request.message,
+            authenticated_tenant_id=tenant.id,  # 🔒 Security boundary
+            user_identifier=request.user_identifier,
+            session_context={}
+        )
+        
+        # Track usage for admin operations
+        track_conversation_started_with_super_tenant(
+            tenant_id=tenant.id,
+            user_identifier=request.user_identifier,
+            platform="admin_web",
+            db=db
+        )
+        
+        return {
+            "success": result.get("success", False),
+            "response": result.get("response", ""),
+            "action": result.get("action"),
+            "requires_confirmation": result.get("requires_confirmation", False),
+            "requires_input": result.get("requires_input", False),
+            "pending_action": result.get("pending_action"),
+            "tenant_id": tenant.id,
+            "session_id": result.get("session_id"),
+            "admin_mode": True,
+            "capabilities": {
+                "faq_management": True,
+                "settings_update": True,
+                "analytics_view": True,
+                "branding_update": True
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"💥 Error in super tenant admin chat: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail="An internal error occurred processing your admin request"
+        )
+
+@router.get("/admin-help")
+async def get_admin_help(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive admin help and available commands
+    """
+    try:
+        # 🔒 Validate authentication
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        from app.chatbot.admin_intent_parser import AdminIntentParser
+        parser = AdminIntentParser()
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "help_text": parser.get_help_text(),
+            "admin_features": {
+                "natural_language": True,
+                "faq_management": True,
+                "analytics": True,
+                "settings": True,
+                "confirmations": True
+            },
+            "example_conversations": [
+                {
+                    "user": "Add FAQ: What are your business hours?",
+                    "bot": "Great! I have the question: 'What are your business hours?' What should the answer be?"
+                },
+                {
+                    "user": "Show my analytics",
+                    "bot": "📊 Analytics for YourBusiness\n• FAQs: 15\n• Chat Sessions (30 days): 234\n• Messages: 1,456"
+                },
+                {
+                    "user": "Delete FAQ #5",
+                    "bot": "⚠️ Are you sure you want to delete FAQ #5? Type 'yes' to confirm or 'no' to cancel."
+                }
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting admin help: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get admin help")
+
+# Include the admin router in your main router
+# Add this to the bottom of your router.py file:
+router.include_router(admin_router, prefix="/admin", tags=["Admin Chat"])
+
+# Add this endpoint to check if user is in admin mode
+@router.get("/is-admin-context")
+async def check_admin_context(
+    api_key: str = Header(..., alias="X-API-Key"),
+    is_super_tenant_chat: bool = False,  # This would come from frontend context
+    db: Session = Depends(get_db)
+):
+    """
+    Check if current context supports admin operations
+    Frontend should call this when user is on super tenant's chat widget
+    """
+    try:
+        # 🔒 Validate authentication
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # In a real implementation, you'd check:
+        # 1. Is user authenticated?
+        # 2. Are they on the super tenant's website/chat?
+        # 3. Is this the official super tenant chatbot?
+        
+        admin_available = (
+            tenant.is_active and 
+            is_super_tenant_chat  # This indicates they're using super tenant's chat
+        )
+        
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "admin_mode_available": admin_available,
+            "is_authenticated": True,
+            "is_super_tenant_context": is_super_tenant_chat,
+            "admin_capabilities": {
+                "faq_management": admin_available,
+                "settings_update": admin_available,
+                "analytics_view": admin_available,
+                "branding_update": admin_available
+            } if admin_available else {}
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking admin context: {str(e)}")
+        return {
+            "success": False,
+            "admin_mode_available": False,
+            "error": "Failed to check admin context"
+        }

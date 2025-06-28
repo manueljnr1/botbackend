@@ -46,6 +46,10 @@ from app.live_chat.router import router as live_chat_main_router
 from app.live_chat.customer_detection_config import CustomerDetectionMiddleware
 from app.live_chat.transcript_router import router as transcript_router
 
+from app.chatbot.admin_router import router as enhanced_admin_router
+
+
+
 from app.config import settings
 # from app.live_chat import auth_router, router as live_chat_router
 import asyncio
@@ -162,7 +166,7 @@ app.include_router(live_chat_auth_router, prefix="/live-chat/auth", tags=["Live 
 app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"])
 app.add_middleware(CustomerDetectionMiddleware, enabled=True)
 app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
-
+app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
 
 # Initialize WhatsApp router
 # try:

@@ -8,11 +8,20 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import logging
 
+from fastapi import Depends
+
 from app.database import get_db
 from app.live_chat.agent_service import AgentAuthService, AgentSessionService, LiveChatSettingsService
 from app.live_chat.models import Agent, AgentStatus
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
+from app.live_chat.permissions import AgentRole, AgentPermission, require_permission, require_role, get_current_agent_with_permissions, get_role_info
+from app.live_chat.invitation_service import AgentInvitationService, AgentInviteWithRoleRequest, AgentInviteResponse, BulkInviteRequest, AgentPromotionRequest
+
+
+
+
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -90,22 +99,29 @@ class MessageResponse(BaseModel):
 # TENANT ENDPOINTS (Agent Management)
 # =============================================================================
 
-@router.post("/invite-agent")
-async def invite_agent(
-    request: AgentInviteRequest,
+
+
+
+
+
+@router.post("/invite-agent-with-role", response_model=AgentInviteResponse)
+async def invite_agent_with_role(
+    request: AgentInviteWithRoleRequest,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Tenant invites a new agent to their support team"""
+    """
+    Tenant invites a new agent with specific role assignment
+    Supports all roles with proper permission validation
+    """
     try:
         tenant = get_tenant_from_api_key(api_key, db)
         
-        service = AgentAuthService(db)
-        result = await service.invite_agent(
+        service = AgentInvitationService(db)
+        result = await service.invite_agent_with_role(
+            request=request,
             tenant_id=tenant.id,
-            email=request.email,
-            full_name=request.full_name,
-            invited_by_id=tenant.id
+            invited_by_agent_id=None  # Tenant admin invitation
         )
         
         return result
@@ -113,8 +129,359 @@ async def invite_agent(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in invite_agent endpoint: {str(e)}")
+        logger.error(f"Error in tenant invite agent with role: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to invite agent")
+
+@router.post("/agent-invite-with-role", response_model=AgentInviteResponse)
+@require_permission(AgentPermission.INVITE_AGENTS)
+async def agent_invite_with_role(
+    request: AgentInviteWithRoleRequest,
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """
+    Agent invites another agent with role validation
+    Only Senior Agents and Team Captains can use this
+    """
+    try:
+        service = AgentInvitationService(db)
+        result = await service.invite_agent_with_role(
+            request=request,
+            tenant_id=current_agent.tenant_id,
+            invited_by_agent_id=current_agent.id
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in agent invite with role: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to invite agent")
+
+@router.post("/bulk-invite-agents")
+@require_permission(AgentPermission.INVITE_AGENTS)
+async def bulk_invite_agents(
+    request: BulkInviteRequest,
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """Bulk invite multiple agents with different roles"""
+    try:
+        service = AgentInvitationService(db)
+        result = await service.bulk_invite_agents(
+            request=request,
+            tenant_id=current_agent.tenant_id,
+            invited_by_agent_id=current_agent.id
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in bulk invite: {str(e)}")
+        raise HTTPException(status_code=500, detail="Bulk invitation failed")
+
+# =============================================================================
+# ROLE MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@router.post("/agents/{agent_id}/promote")
+@require_permission(AgentPermission.PROMOTE_AGENTS)
+async def promote_agent(
+    agent_id: int,
+    request: AgentPromotionRequest,
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """Promote an agent to a higher role"""
+    try:
+        # Verify agent belongs to same tenant
+        target_agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.tenant_id == current_agent.tenant_id
+        ).first()
+        
+        if not target_agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        service = AgentInvitationService(db)
+        result = await service.promote_agent(
+            agent_id=agent_id,
+            request=request,
+            promoted_by_agent_id=current_agent.id
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error promoting agent: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to promote agent")
+
+@router.get("/agents/{agent_id}/promotion-options")
+@require_role(AgentRole.SENIOR_AGENT)
+async def get_promotion_options(
+    agent_id: int,
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """Get available promotion options for an agent"""
+    try:
+        # Verify agent belongs to same tenant
+        target_agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.tenant_id == current_agent.tenant_id
+        ).first()
+        
+        if not target_agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Determine available promotions
+        available_roles = []
+        current_role = AgentRole(target_agent.role)
+        
+        if current_role == AgentRole.MEMBER:
+            available_roles.append(get_role_info(AgentRole.SENIOR_AGENT))
+        elif current_role == AgentRole.SENIOR_AGENT:
+            # Only Team Captains can promote to Team Captain
+            if current_agent.role == AgentRole.TEAM_CAPTAIN:
+                available_roles.append(get_role_info(AgentRole.TEAM_CAPTAIN))
+        
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "current_role": target_agent.role,
+            "available_promotions": available_roles,
+            "can_promote": len(available_roles) > 0
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting promotion options: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get promotion options")
+
+# =============================================================================
+# ROLE INFORMATION ENDPOINTS
+# =============================================================================
+
+@router.get("/available-roles")
+async def get_available_roles(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get available agent roles for tenant admin"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        roles = [
+            get_role_info(AgentRole.MEMBER),
+            get_role_info(AgentRole.SENIOR_AGENT),
+            get_role_info(AgentRole.TEAM_CAPTAIN)
+        ]
+        
+        return {
+            "success": True,
+            "roles": roles,
+            "default_role": AgentRole.MEMBER
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available roles: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get roles")
+
+@router.get("/agent/available-invitation-roles")
+@require_permission(AgentPermission.INVITE_AGENTS)
+async def get_agent_invitation_roles(
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """Get roles that current agent can invite to"""
+    try:
+        service = AgentInvitationService(db)
+        available_roles = await service.get_available_roles_for_invitation(
+            inviter_agent_id=current_agent.id
+        )
+        
+        return {
+            "success": True,
+            "inviter_role": current_agent.role,
+            "available_roles": available_roles
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting invitation roles: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get invitation roles")
+
+# =============================================================================
+# ENHANCED AGENT MANAGEMENT
+# =============================================================================
+
+@router.get("/agents-with-roles")
+async def get_agents_with_roles(
+    api_key: str = Header(..., alias="X-API-Key"),
+    role_filter: Optional[AgentRole] = None,
+    db: Session = Depends(get_db)
+):
+    """Get all agents with their roles and permissions"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        # Build query
+        query = db.query(Agent).filter(Agent.tenant_id == tenant.id)
+        
+        if role_filter:
+            query = query.filter(Agent.role == role_filter)
+        
+        agents = query.order_by(Agent.created_at.desc()).all()
+        
+        # Format response with role information
+        agent_list = []
+        for agent in agents:
+            role_info = get_role_info(AgentRole(agent.role))
+            
+            agent_data = {
+                "agent_id": agent.id,
+                "email": agent.email,
+                "full_name": agent.full_name,
+                "display_name": agent.display_name,
+                "status": agent.status,
+                "is_active": agent.is_active,
+                "is_online": agent.is_online,
+                
+                # Role information
+                "role": agent.role,
+                "role_info": role_info,
+                "can_assign_conversations": agent.can_assign_conversations,
+                "can_manage_team": agent.can_manage_team,
+                "can_access_analytics": agent.can_access_analytics,
+                
+                # Timestamps
+                "invited_at": agent.invited_at.isoformat() if agent.invited_at else None,
+                "promoted_at": agent.promoted_at.isoformat() if agent.promoted_at else None,
+                "last_login": agent.last_login.isoformat() if agent.last_login else None,
+                
+                # Performance
+                "total_conversations": agent.total_conversations,
+                "average_response_time": agent.average_response_time,
+                "customer_satisfaction_avg": agent.customer_satisfaction_avg
+            }
+            
+            agent_list.append(agent_data)
+        
+        # Group by role for summary
+        role_summary = {}
+        for role in [AgentRole.MEMBER, AgentRole.SENIOR_AGENT, AgentRole.TEAM_CAPTAIN]:
+            role_agents = [a for a in agent_list if a["role"] == role]
+            role_summary[role.value] = {
+                "count": len(role_agents),
+                "active": len([a for a in role_agents if a["is_active"]]),
+                "online": len([a for a in role_agents if a["is_online"]])
+            }
+        
+        return {
+            "success": True,
+            "total_agents": len(agent_list),
+            "role_summary": role_summary,
+            "agents": agent_list
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agents with roles: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get agents")
+
+@router.get("/agents/{agent_id}/role-history")
+@require_role(AgentRole.SENIOR_AGENT)
+async def get_agent_role_history(
+    agent_id: int,
+    current_agent: Agent = Depends(get_current_agent_with_permissions),
+    db: Session = Depends(get_db)
+):
+    """Get role change history for an agent"""
+    try:
+        from app.live_chat.models import AgentRoleHistory
+        
+        # Verify agent belongs to same tenant
+        target_agent = db.query(Agent).filter(
+            Agent.id == agent_id,
+            Agent.tenant_id == current_agent.tenant_id
+        ).first()
+        
+        if not target_agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Get role history
+        history = db.query(AgentRoleHistory).filter(
+            AgentRoleHistory.agent_id == agent_id
+        ).order_by(AgentRoleHistory.changed_at.desc()).all()
+        
+        history_list = []
+        for record in history:
+            changed_by_agent = db.query(Agent).filter(
+                Agent.id == record.changed_by
+            ).first() if record.changed_by else None
+            
+            history_list.append({
+                "id": record.id,
+                "old_role": record.old_role,
+                "new_role": record.new_role,
+                "changed_at": record.changed_at.isoformat(),
+                "reason": record.reason,
+                "changed_by": {
+                    "id": changed_by_agent.id if changed_by_agent else None,
+                    "name": changed_by_agent.display_name if changed_by_agent else "System"
+                }
+            })
+        
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "agent_name": target_agent.display_name,
+            "current_role": target_agent.role,
+            "history": history_list
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting role history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get role history")
+
+
+
+
+# @router.post("/invite-agent")
+# async def invite_agent(
+#     request: AgentInviteRequest,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Tenant invites a new agent to their support team"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         service = AgentAuthService(db)
+#         result = await service.invite_agent(
+#             tenant_id=tenant.id,
+#             email=request.email,
+#             full_name=request.full_name,
+#             invited_by_id=tenant.id
+#         )
+        
+#         return result
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in invite_agent endpoint: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to invite agent")
 
 
 @router.get("/agents", response_model=List[AgentResponse])

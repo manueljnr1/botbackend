@@ -1,5 +1,5 @@
 # app/live_chat/models.py - FIXED VERSION
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, JSON, Table
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, JSON, Table, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -111,6 +111,23 @@ class Agent(Base):
     tags = relationship("AgentTag", secondary=agent_tags_association, foreign_keys=[agent_tags_association.c.agent_id, agent_tags_association.c.tag_id], back_populates="agents")
     tag_performances = relationship("AgentTagPerformance", back_populates="agent", cascade="all, delete-orphan")
 
+
+
+    # Permission & Role fields
+    role = Column(String, default="member")  # AgentRole enum values
+    promoted_at = Column(DateTime, nullable=True)
+    promoted_by = Column(Integer, ForeignKey("agents.id"), nullable=True)
+
+
+    # Convenience flags for quick permission checks
+    can_assign_conversations = Column(Boolean, default=False)
+    can_manage_team = Column(Boolean, default=False)
+    can_access_analytics = Column(Boolean, default=False)
+
+    # New relationships
+    promoted_by_agent = relationship("Agent", foreign_keys=[promoted_by], remote_side="Agent.id")
+    permission_overrides = relationship("AgentPermissionOverride", foreign_keys="AgentPermissionOverride.agent_id", back_populates="agent", cascade="all, delete-orphan")
+    role_history = relationship("AgentRoleHistory", foreign_keys="AgentRoleHistory.agent_id", back_populates="agent", cascade="all, delete-orphan")
 
 
     # Specialization settings
@@ -759,6 +776,41 @@ class SmartRoutingLog(Base):
 
 
 
+class AgentPermissionOverride(Base):
+    """Custom permission overrides for specific agents"""
+    __tablename__ = "agent_permission_overrides"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    permission = Column(String, nullable=False)
+    granted = Column(Boolean, default=True)  # True = granted, False = revoked
+    granted_by = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    granted_at = Column(DateTime, default=datetime.utcnow)
+    reason = Column(Text, nullable=True)
+    
+    # Relationships
+    agent = relationship("Agent", foreign_keys=[agent_id], back_populates="permission_overrides")
+    granted_by_agent = relationship("Agent", foreign_keys=[granted_by])
+    
+    # Ensure unique permission per agent
+    __table_args__ = (
+        UniqueConstraint('agent_id', 'permission', name='unique_agent_permission'),
+    )
 
+class AgentRoleHistory(Base):
+    """Track role changes for audit purposes"""
+    __tablename__ = "agent_role_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    old_role = Column(String, nullable=True)
+    new_role = Column(String, nullable=False)
+    changed_by = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow)
+    reason = Column(Text, nullable=True)
+    
+    # Relationships
+    agent = relationship("Agent", foreign_keys=[agent_id], back_populates="role_history")
+    changed_by_agent = relationship("Agent", foreign_keys=[changed_by])
 
 
