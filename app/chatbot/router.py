@@ -2113,13 +2113,16 @@ def calculate_followup_delay(followup: str) -> float:
 @router.post("/chat/super-tenant-admin")
 async def super_tenant_admin_chat(
     request: SmartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),      # Tenant chatting
+    chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),    # Super tenant's chatbot
     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
     db: Session = Depends(get_db)
 ):
     """
-    Super Tenant Admin Chat with Smart Features - Direct Integration
-    SECURITY: Only available when chatting with super tenant's official chatbot
+    Super Tenant Admin Chat with Smart Features - Dual API Key Security
+    SECURITY: 
+    - chatbot_api_key: Must belong to super tenant (chatbot owner)
+    - tenant_api_key: The tenant who is chatting (gets admin features for their account)
     """
     
     async def stream_admin_response():
@@ -2132,18 +2135,44 @@ async def super_tenant_admin_chat(
                 yield f"{json.dumps({'type': 'error', 'error': 'Admin features are only available on the super tenant official chatbot', 'status_code': 403})}\n"
                 return
             
-            logger.info(f"✅ Super tenant context validated: {super_tenant_context}")
+            # 🔒 CRITICAL: Validate chatbot owner is super tenant
+            try:
+                chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
+                logger.info(f"🏢 Chatbot owner: {chatbot_owner.name} (ID: {chatbot_owner.id})")
+                
+                # Check if chatbot owner is super tenant (you can add is_super_tenant flag or check specific ID)
+                if not getattr(chatbot_owner, 'is_super_tenant', False):
+                    # Fallback: Check if it's your specific super tenant ID
+                    SUPER_TENANT_IDS = [324112833]  # Add your super tenant ID(s) here
+                    if chatbot_owner.id not in SUPER_TENANT_IDS:
+                        logger.warning(f"🚨 Non-super tenant trying to host admin chatbot: {chatbot_owner.id}")
+                        yield f"{json.dumps({'type': 'error', 'error': 'This chatbot is not hosted by an authorized super tenant', 'status_code': 403})}\n"
+                        return
+                
+                logger.info(f"✅ Super tenant validation passed: {chatbot_owner.name}")
+                
+            except Exception as e:
+                logger.error(f"❌ Invalid chatbot API key: {str(e)}")
+                yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot API key', 'status_code': 403})}\n"
+                return
             
-            # 🔒 Get authenticated tenant (the tenant using the super tenant's chatbot)
-            tenant = get_tenant_from_api_key(api_key, db)
-            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            # 🔒 Get authenticated tenant (the one chatting and getting admin features)
+            try:
+                tenant = get_tenant_from_api_key(tenant_api_key, db)
+                check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+                logger.info(f"✅ Authenticated tenant: {tenant.name} (ID: {tenant.id})")
+                
+            except Exception as e:
+                logger.error(f"❌ Invalid tenant API key: {str(e)}")
+                yield f"{json.dumps({'type': 'error', 'error': 'Invalid tenant API key', 'status_code': 403})}\n"
+                return
             
             # 🔒 SECURITY: Verify tenant is active
             if not tenant.is_active:
                 yield f"{json.dumps({'type': 'error', 'error': 'Tenant account is inactive', 'status_code': 403})}\n"
                 return
             
-            logger.info(f"🔒 Processing admin chat for authenticated tenant: {tenant.name} (ID: {tenant.id}) via super tenant's chatbot")
+            logger.info(f"🔒 Processing admin chat: Tenant {tenant.name} using {chatbot_owner.name}'s super tenant chatbot")
             
             # Auto-generate user ID if needed
             user_id = request.user_identifier
@@ -2153,8 +2182,8 @@ async def super_tenant_admin_chat(
                 user_id = f"admin_auto_{str(uuid.uuid4())}"
                 auto_generated = True
             
-            # Send initial metadata
-            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id})}\n"
+            # Send initial metadata with both tenant info
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'chatbot_owner_id': chatbot_owner.id, 'super_tenant_name': chatbot_owner.name})}\n"
             
             # Check for admin greetings
             user_message_lower = request.message.lower().strip()
@@ -2212,12 +2241,12 @@ async def super_tenant_admin_chat(
             # Initialize admin engine for regular requests
             admin_engine = get_super_tenant_admin_engine(db)
             
-            # Process admin message
+            # Process admin message using tenant API key
             result = admin_engine.process_admin_message(
                 user_message=request.message,
-                authenticated_tenant_id=tenant.id,  # 🔒 Security boundary
+                authenticated_tenant_id=tenant.id,  # 🔒 Security boundary - tenant getting admin features
                 user_identifier=user_id,
-                session_context={"admin_mode": True}
+                session_context={"admin_mode": True, "super_tenant_hosted": True, "chatbot_owner_id": chatbot_owner.id}
             )
             
             if not result.get("success"):
