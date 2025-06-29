@@ -34,7 +34,6 @@ from app.chatbot.security import validate_and_sanitize_tenant_prompt
 from app.live_chat.models import LiveChatConversation
 from app.live_chat.queue_service import LiveChatQueueService
 from app.chatbot.admin_router import router as admin_router
-
 from app.chatbot.super_tenant_admin_engine import get_super_tenant_admin_engine
 from app.tenants.models import Tenant
 from sqlalchemy import func
@@ -1637,7 +1636,6 @@ def calculate_formatting_aware_delay(chunk: str) -> float:
 
 
 
-# In your router.py, replace the smart chat endpoint with this:
 
 @router.post("/chat/smart")
 async def smart_chat_with_followup_streaming(
@@ -1979,17 +1977,17 @@ def calculate_followup_delay(followup: str) -> float:
 
 
 @router.post("/chat/super-tenant-admin")
-async def super_tenant_admin_chat(
+async def super_tenant_admin_chat_enhanced(
     request: SmartChatRequest,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Super Tenant Admin Chat - Enhanced chatbot for authenticated tenant management
-    Only available when tenant is logged in and chatting with super tenant
+    Enhanced Super Tenant Admin Chat with Smart Features
+    Combines admin functionality with intelligent streaming and context analysis
     """
     try:
-        logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
+        logger.info(f"🤖 Enhanced super tenant admin chat: {request.message[:50]}...")
         
         # 🔒 CRITICAL: Validate API key and get authenticated tenant
         tenant = get_tenant_from_api_key(api_key, db)
@@ -1998,53 +1996,28 @@ async def super_tenant_admin_chat(
         if not tenant.is_active:
             raise HTTPException(status_code=403, detail="Tenant account is inactive")
         
-        # Check if this is actually the super tenant's chatbot
-        # In your implementation, you might check a special header or context
-        # For now, we'll assume any authenticated tenant can use admin features
+        logger.info(f"🔒 Processing enhanced admin chat for tenant: {tenant.name} (ID: {tenant.id})")
         
-        logger.info(f"🔒 Processing admin chat for tenant: {tenant.name} (ID: {tenant.id})")
+        # Forward to enhanced admin router with smart features
+        from app.chatbot.admin_router import EnhancedAdminChatRequest
         
-        # Initialize admin engine
-        admin_engine = get_super_tenant_admin_engine(db)
-        
-        # Process admin message with security boundary
-        result = admin_engine.process_admin_message(
-            user_message=request.message,
-            authenticated_tenant_id=tenant.id,  # 🔒 Security boundary
+        enhanced_request = EnhancedAdminChatRequest(
+            message=request.message,
             user_identifier=request.user_identifier,
-            session_context={}
+            session_context={"admin_mode": True, "tenant_authenticated": True},
+            conversation_mode=True,
+            enable_streaming=True,
+            max_context=request.max_context
         )
         
-        # Track usage for admin operations
-        track_conversation_started_with_super_tenant(
-            tenant_id=tenant.id,
-            user_identifier=request.user_identifier,
-            platform="admin_web",
-            db=db
-        )
-        
-        return {
-            "success": result.get("success", False),
-            "response": result.get("response", ""),
-            "action": result.get("action"),
-            "requires_confirmation": result.get("requires_confirmation", False),
-            "requires_input": result.get("requires_input", False),
-            "pending_action": result.get("pending_action"),
-            "tenant_id": tenant.id,
-            "session_id": result.get("session_id"),
-            "admin_mode": True,
-            "capabilities": {
-                "faq_management": True,
-                "settings_update": True,
-                "analytics_view": True,
-                "branding_update": True
-            }
-        }
+        # Call the enhanced admin chat with streaming
+        from app.chatbot.admin_router import enhanced_admin_chat_with_smart_features
+        return await enhanced_admin_chat_with_smart_features(enhanced_request, api_key, db)
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"💥 Error in super tenant admin chat: {str(e)}")
+        logger.error(f"💥 Error in enhanced super tenant admin chat: {str(e)}")
         raise HTTPException(
             status_code=500, 
             detail="An internal error occurred processing your admin request"
@@ -2101,7 +2074,7 @@ async def get_admin_help(
 
 # Include the admin router in your main router
 # Add this to the bottom of your router.py file:
-router.include_router(admin_router, prefix="/admin", tags=["Admin Chat"])
+router.include_router(admin_router, prefix="/admin-enhanced", tags=["Enhanced Admin Chat"])
 
 # Add this endpoint to check if user is in admin mode
 @router.get("/is-admin-context")
