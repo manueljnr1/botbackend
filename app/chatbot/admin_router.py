@@ -62,7 +62,7 @@ async def enhanced_admin_chat(
             raise HTTPException(status_code=403, detail="Tenant account is inactive")
         
         # Initialize enhanced admin engine with LLM capabilities
-        admin_engine = get_enhanced_super_tenant_admin_engine(db)
+        admin_engine = get_super_tenant_admin_engine(db)
         
         # 🔒 CRITICAL: Pass authenticated tenant ID to ensure security boundary
         result = admin_engine.process_admin_message(
