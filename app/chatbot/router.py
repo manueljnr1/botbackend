@@ -2129,7 +2129,7 @@ async def super_tenant_admin_chat(
         try:
             logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
             
-            # 🔒 CRITICAL SECURITY CHECK: Validate super tenant context
+           
             if super_tenant_context != "super_tenant_official_widget":
                 logger.warning(f"🚨 Unauthorized admin access attempt. Context: {super_tenant_context}")
                 yield f"{json.dumps({'type': 'error', 'error': 'Admin features are only available on the super tenant official chatbot', 'status_code': 403})}\n"
