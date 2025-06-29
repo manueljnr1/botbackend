@@ -2114,17 +2114,27 @@ def calculate_followup_delay(followup: str) -> float:
 async def super_tenant_admin_chat(
     request: SmartChatRequest,
     api_key: str = Header(..., alias="X-API-Key"),
+    super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
     db: Session = Depends(get_db)
 ):
     """
     Super Tenant Admin Chat with Smart Features - Direct Integration
+    SECURITY: Only available when chatting with super tenant's official chatbot
     """
     
     async def stream_admin_response():
         try:
             logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
             
-            # 🔒 CRITICAL: Validate API key and get authenticated tenant
+            # 🔒 CRITICAL SECURITY CHECK: Validate super tenant context
+            if super_tenant_context != "super_tenant_official_widget":
+                logger.warning(f"🚨 Unauthorized admin access attempt. Context: {super_tenant_context}")
+                yield f"{json.dumps({'type': 'error', 'error': 'Admin features are only available on the super tenant official chatbot', 'status_code': 403})}\n"
+                return
+            
+            logger.info(f"✅ Super tenant context validated: {super_tenant_context}")
+            
+            # 🔒 Get authenticated tenant (the tenant using the super tenant's chatbot)
             tenant = get_tenant_from_api_key(api_key, db)
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
@@ -2133,7 +2143,7 @@ async def super_tenant_admin_chat(
                 yield f"{json.dumps({'type': 'error', 'error': 'Tenant account is inactive', 'status_code': 403})}\n"
                 return
             
-            logger.info(f"🔒 Processing admin chat for tenant: {tenant.name} (ID: {tenant.id})")
+            logger.info(f"🔒 Processing admin chat for authenticated tenant: {tenant.name} (ID: {tenant.id}) via super tenant's chatbot")
             
             # Auto-generate user ID if needed
             user_id = request.user_identifier
