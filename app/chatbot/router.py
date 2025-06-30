@@ -2797,22 +2797,29 @@ ADMIN CAPABILITIES:
 - General business guidance
 
 TASK: Analyze and determine:
-1. Is this a specific admin task (FAQ, analytics, settings) OR general conversation?
-2. What type of response approach would be most helpful?
-3. What context or mood should the response have?
+1. Is this a SPECIFIC EXECUTABLE COMMAND with complete data OR just a help request/question?
+2. Does the user provide actual data to execute an action?
+3. What type of response approach would be most helpful?
+
+CRITICAL DISTINCTIONS:
+- "can you help me add faq?" = HELP REQUEST (requires_admin_engine: false)
+- "add FAQ: What are your hours? Answer: 9-5 weekdays" = EXECUTABLE COMMAND (requires_admin_engine: true)
+- "show my analytics" = EXECUTABLE COMMAND (requires_admin_engine: true)
+- "how do I create an FAQ?" = HELP REQUEST (requires_admin_engine: false)
+- "what can you do?" = HELP REQUEST (requires_admin_engine: false)
 
 RESPONSE FORMAT (JSON):
 {{
     "requires_admin_engine": true/false,
-    "interaction_type": "specific_task|general_conversation|greeting|question",
+    "interaction_type": "executable_command|help_request|greeting|question",
     "admin_domain": "faq|analytics|settings|integrations|general",
-    "response_tone": "professional|friendly|helpful|encouraging",
+    "has_complete_data": true/false,
     "user_intent_confidence": 0.95,
     "reasoning": "explanation of analysis"
 }}
 
-Use admin_engine for specific tasks like "add FAQ" or "show analytics".
-Use conversational_llm for greetings, questions, or general guidance.
+Use admin_engine ONLY for executable commands with complete data.
+Use conversational_llm for help requests, questions, and guidance.
 
 JSON Response:"""
         )
