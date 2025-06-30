@@ -248,88 +248,88 @@ def calculate_sentence_delay(sentence: str, is_last: bool = False) -> float:
 
 
 
-def should_generate_admin_followups_llm(user_question: str, bot_response: str, company_name: str, action: str = None) -> tuple[bool, List[str]]:
-    """
-    Use LLM to intelligently decide if admin follow-ups are needed and generate them
-    """
-    from langchain_openai import ChatOpenAI
-    from langchain.prompts import PromptTemplate
+# def should_generate_admin_followups_llm(user_question: str, bot_response: str, company_name: str, action: str = None) -> tuple[bool, List[str]]:
+#     """
+#     Use LLM to intelligently decide if admin follow-ups are needed and generate them
+#     """
+#     from langchain_openai import ChatOpenAI
+#     from langchain.prompts import PromptTemplate
     
-    prompt = PromptTemplate(
-        input_variables=["user_question", "bot_response", "company_name", "action"],
-        template="""You are an expert admin assistant analyst. Analyze this admin interaction and decide if follow-up questions would be helpful.
+#     prompt = PromptTemplate(
+#         input_variables=["user_question", "bot_response", "company_name", "action"],
+#         template="""You are an expert admin assistant analyst. Analyze this admin interaction and decide if follow-up questions would be helpful.
 
-USER QUESTION: "{user_question}"
-BOT RESPONSE: "{bot_response}"
-COMPANY: {company_name}
-ACTION PERFORMED: {action}
+# USER QUESTION: "{user_question}"
+# BOT RESPONSE: "{bot_response}"
+# COMPANY: {company_name}
+# ACTION PERFORMED: {action}
 
-INSTRUCTIONS:
-1. Determine if follow-up questions would help the admin continue their work
-2. If YES, suggest 1-3 relevant admin follow-up questions
-3. If NO, respond with "NO_FOLLOWUPS"
+# INSTRUCTIONS:
+# 1. Determine if follow-up questions would help the admin continue their work
+# 2. If YES, suggest 1-3 relevant admin follow-up questions
+# 3. If NO, respond with "NO_FOLLOWUPS"
 
-Admin Context - Generate follow-ups for:
-- FAQ management tasks that might need continuation
-- Analytics requests that could be expanded
-- Settings changes that might need additional configuration
-- Complex admin procedures with multiple steps
+# Admin Context - Generate follow-ups for:
+# - FAQ management tasks that might need continuation
+# - Analytics requests that could be expanded
+# - Settings changes that might need additional configuration
+# - Complex admin procedures with multiple steps
 
-DON'T generate follow-ups for:
-- Simple greetings or acknowledgments
-- Complete error responses
-- Very short admin confirmations
+# DON'T generate follow-ups for:
+# - Simple greetings or acknowledgments
+# - Complete error responses
+# - Very short admin confirmations
 
-Format response as:
-DECISION: YES/NO
-FOLLOWUPS:
-1. First admin follow-up question (if any)
-2. Second admin follow-up question (if any)  
-3. Third admin follow-up question (if any)
+# Format response as:
+# DECISION: YES/NO
+# FOLLOWUPS:
+# 1. First admin follow-up question (if any)
+# 2. Second admin follow-up question (if any)  
+# 3. Third admin follow-up question (if any)
 
-Response:"""
-    )
+# Response:"""
+#     )
     
-    try:
-        llm = ChatOpenAI(
-            model_name="gpt-3.5-turbo", 
-            temperature=0.3,
-            openai_api_key=settings.OPENAI_API_KEY
-        )
+#     try:
+#         llm = ChatOpenAI(
+#             model_name="gpt-3.5-turbo", 
+#             temperature=0.3,
+#             openai_api_key=settings.OPENAI_API_KEY
+#         )
         
-        result = llm.invoke(prompt.format(
-            user_question=user_question,
-            bot_response=bot_response,
-            company_name=company_name,
-            action=action or "unknown"
-        ))
+#         result = llm.invoke(prompt.format(
+#             user_question=user_question,
+#             bot_response=bot_response,
+#             company_name=company_name,
+#             action=action or "unknown"
+#         ))
         
-        response_text = result.content if hasattr(result, 'content') else str(result)
+#         response_text = result.content if hasattr(result, 'content') else str(result)
         
-        # Parse LLM response
-        if "DECISION: NO" in response_text or "NO_FOLLOWUPS" in response_text:
-            logger.info(f"🤖 LLM decided NO admin follow-ups needed")
-            return False, []
+#         # Parse LLM response
+#         if "DECISION: NO" in response_text or "NO_FOLLOWUPS" in response_text:
+#             logger.info(f"🤖 LLM decided NO admin follow-ups needed")
+#             return False, []
         
-        # Extract follow-up questions
-        followups = []
-        lines = response_text.split('\n')
-        for line in lines:
-            if re.match(r'^\d+\.', line.strip()):
-                followup = re.sub(r'^\d+\.\s*', '', line.strip())
-                if followup:
-                    followups.append(followup)
+#         # Extract follow-up questions
+#         followups = []
+#         lines = response_text.split('\n')
+#         for line in lines:
+#             if re.match(r'^\d+\.', line.strip()):
+#                 followup = re.sub(r'^\d+\.\s*', '', line.strip())
+#                 if followup:
+#                     followups.append(followup)
         
-        if followups:
-            logger.info(f"🤖 LLM generated {len(followups)} admin follow-ups")
-            return True, followups[:3]  # Max 3
-        else:
-            return False, []
+#         if followups:
+#             logger.info(f"🤖 LLM generated {len(followups)} admin follow-ups")
+#             return True, followups[:3]  # Max 3
+#         else:
+#             return False, []
             
-    except Exception as e:
-        logger.error(f"Error in LLM admin follow-up generation: {e}")
-        # Fallback to simple admin rules
-        return should_generate_admin_followups_simple(user_question, bot_response, action)
+#     except Exception as e:
+#         logger.error(f"Error in LLM admin follow-up generation: {e}")
+#         # Fallback to simple admin rules
+#         return should_generate_admin_followups_simple(user_question, bot_response, action)
 
 def should_generate_admin_followups_simple(user_question: str, bot_response: str, action: str = None) -> tuple[bool, List[str]]:
     """Fallback simple rules for admin follow-ups if LLM fails"""
@@ -2110,226 +2110,226 @@ def calculate_followup_delay(followup: str) -> float:
 
 
 
-@router.post("/chat/super-tenant-admin")
-async def super_tenant_admin_chat(
-    request: SmartChatRequest,
-    tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),      # Tenant chatting
-    chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),    # Super tenant's chatbot
-    super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
-    db: Session = Depends(get_db)
-):
-    """
-    Super Tenant Admin Chat with Smart Features - Dual API Key Security
-    SECURITY: 
-    - chatbot_api_key: Must belong to super tenant (chatbot owner)
-    - tenant_api_key: The tenant who is chatting (gets admin features for their account)
-    """
+# @router.post("/chat/super-tenant-admin")
+# async def super_tenant_admin_chat(
+#     request: SmartChatRequest,
+#     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),      # Tenant chatting
+#     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),    # Super tenant's chatbot
+#     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Super Tenant Admin Chat with Smart Features - Dual API Key Security
+#     SECURITY: 
+#     - chatbot_api_key: Must belong to super tenant (chatbot owner)
+#     - tenant_api_key: The tenant who is chatting (gets admin features for their account)
+#     """
     
-    async def stream_admin_response():
-        try:
-            logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
+#     async def stream_admin_response():
+#         try:
+#             logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
             
            
-            if super_tenant_context != "super_tenant_official_widget":
-                logger.warning(f"🚨 Unauthorized admin access attempt. Context: {super_tenant_context}")
-                yield f"{json.dumps({'type': 'error', 'error': 'Admin features are only available on the super tenant official chatbot', 'status_code': 403})}\n"
-                return
+#             if super_tenant_context != "super_tenant_official_widget":
+#                 logger.warning(f"🚨 Unauthorized admin access attempt. Context: {super_tenant_context}")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Not available to you', 'status_code': 403})}\n"
+#                 return
             
-            # 🔒 CRITICAL: Validate chatbot owner is super tenant
-            try:
-                chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
-                logger.info(f"🏢 Chatbot owner: {chatbot_owner.name} (ID: {chatbot_owner.id})")
+#             # 🔒 CRITICAL: Validate chatbot owner is super tenant
+#             try:
+#                 chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
+#                 logger.info(f"🏢 Chatbot owner: {chatbot_owner.name} (ID: {chatbot_owner.id})")
                 
-                # Check if chatbot owner is super tenant (you can add is_super_tenant flag or check specific ID)
-                if not getattr(chatbot_owner, 'is_super_tenant', False):
-                    # Fallback: Check if it's your specific super tenant ID
-                    SUPER_TENANT_IDS = [324112833]  # Add your super tenant ID(s) here
-                    if chatbot_owner.id not in SUPER_TENANT_IDS:
-                        logger.warning(f"🚨 Non-super tenant trying to host admin chatbot: {chatbot_owner.id}")
-                        yield f"{json.dumps({'type': 'error', 'error': 'This chatbot is not hosted by an authorized super tenant', 'status_code': 403})}\n"
-                        return
+#                 # Check if chatbot owner is super tenant (you can add is_super_tenant flag or check specific ID)
+#                 if not getattr(chatbot_owner, 'is_super_tenant', False):
+#                     # Fallback: Check if it's your specific super tenant ID
+#                     SUPER_TENANT_IDS = [324112833]  # Add your super tenant ID(s) here
+#                     if chatbot_owner.id not in SUPER_TENANT_IDS:
+#                         logger.warning(f"🚨 Non-super tenant trying to host admin chatbot: {chatbot_owner.id}")
+#                         yield f"{json.dumps({'type': 'error', 'error': 'This chatbot is not hosted by an authorized super tenant', 'status_code': 403})}\n"
+#                         return
                 
-                logger.info(f"✅ Super tenant validation passed: {chatbot_owner.name}")
+#                 logger.info(f"✅ Super tenant validation passed: {chatbot_owner.name}")
                 
-            except Exception as e:
-                logger.error(f"❌ Invalid chatbot API key: {str(e)}")
-                yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot API key', 'status_code': 403})}\n"
-                return
+#             except Exception as e:
+#                 logger.error(f"❌ Invalid chatbot API key: {str(e)}")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot API key', 'status_code': 403})}\n"
+#                 return
             
-            # 🔒 Get authenticated tenant (the one chatting and getting admin features)
-            try:
-                tenant = get_tenant_from_api_key(tenant_api_key, db)
-                check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-                logger.info(f"✅ Authenticated tenant: {tenant.name} (ID: {tenant.id})")
+#             # 🔒 Get authenticated tenant (the one chatting and getting admin features)
+#             try:
+#                 tenant = get_tenant_from_api_key(tenant_api_key, db)
+#                 check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+#                 logger.info(f"✅ Authenticated tenant: {tenant.name} (ID: {tenant.id})")
                 
-            except Exception as e:
-                logger.error(f"❌ Invalid tenant API key: {str(e)}")
-                yield f"{json.dumps({'type': 'error', 'error': 'Invalid tenant API key', 'status_code': 403})}\n"
-                return
+#             except Exception as e:
+#                 logger.error(f"❌ Invalid tenant API key: {str(e)}")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid tenant API key', 'status_code': 403})}\n"
+#                 return
             
-            # 🔒 SECURITY: Verify tenant is active
-            if not tenant.is_active:
-                yield f"{json.dumps({'type': 'error', 'error': 'Tenant account is inactive', 'status_code': 403})}\n"
-                return
+#             # 🔒 SECURITY: Verify tenant is active
+#             if not tenant.is_active:
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Tenant account is inactive', 'status_code': 403})}\n"
+#                 return
             
-            logger.info(f"🔒 Processing admin chat: Tenant {tenant.name} using {chatbot_owner.name}'s super tenant chatbot")
+#             logger.info(f"🔒 Processing admin chat: Tenant {tenant.name} using {chatbot_owner.name}'s super tenant chatbot")
             
-            # Auto-generate user ID if needed
-            user_id = request.user_identifier
-            auto_generated = False
+#             # Auto-generate user ID if needed
+#             user_id = request.user_identifier
+#             auto_generated = False
             
-            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-                user_id = f"admin_auto_{str(uuid.uuid4())}"
-                auto_generated = True
+#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#                 user_id = f"admin_auto_{str(uuid.uuid4())}"
+#                 auto_generated = True
             
-            # Send initial metadata with both tenant info
-            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'chatbot_owner_id': chatbot_owner.id, 'super_tenant_name': chatbot_owner.name})}\n"
+#             # Send initial metadata with both tenant info
+#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'chatbot_owner_id': chatbot_owner.id, 'super_tenant_name': chatbot_owner.name})}\n"
             
-            # Check for admin greetings
-            user_message_lower = request.message.lower().strip()
-            is_greeting = any(greeting in user_message_lower for greeting in ['hello', 'hi', 'hey', 'help', 'what can you do'])
+#             # Check for admin greetings
+#             user_message_lower = request.message.lower().strip()
+#             is_greeting = any(greeting in user_message_lower for greeting in ['hello', 'hi', 'hey', 'help', 'what can you do'])
             
-            if is_greeting and len(request.message) < 20:
-                # Send admin greeting response
-                greeting_response = f"👋 Hello! Welcome to your {tenant.name} admin dashboard. I can help you:\n\n• **Manage FAQs** - Add, edit, or delete frequently asked questions\n• **View Analytics** - Check chatbot usage and performance\n• **Update Settings** - Modify chatbot behavior and appearance\n• **Integration Setup** - Configure Discord, Slack, etc.\n\nJust tell me what you'd like to do in natural language!"
+#             if is_greeting and len(request.message) < 20:
+#                 # Send admin greeting response
+#                 greeting_response = f"👋 Hello! Welcome to your {tenant.name} admin dashboard. I can help you:\n\n• **Manage FAQs** - Add, edit, or delete frequently asked questions\n• **View Analytics** - Check chatbot usage and performance\n• **Update Settings** - Modify chatbot behavior and appearance\n• **Integration Setup** - Configure Discord, Slack, etc.\n\nJust tell me what you'd like to do in natural language!"
                 
-                main_response = {
-                    'type': 'main_response',
-                    'content': greeting_response,
-                    'session_id': f"admin_session_{tenant.id}_{user_id}",
-                    'answered_by': 'ADMIN_GREETING',
-                    'admin_mode': True
-                }
-                yield f"{json.dumps(main_response)}\n"
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': greeting_response,
+#                     'session_id': f"admin_session_{tenant.id}_{user_id}",
+#                     'answered_by': 'ADMIN_GREETING',
+#                     'admin_mode': True
+#                 }
+#                 yield f"{json.dumps(main_response)}\n"
                 
-                # Wait then send follow-ups
-                await asyncio.sleep(1.5)
+#                 # Wait then send follow-ups
+#                 await asyncio.sleep(1.5)
                 
-                admin_suggestions = [
-                    "Show me my FAQs",
-                    "Check my analytics", 
-                    "Update my settings",
-                    "Help with integrations"
-                ]
+#                 admin_suggestions = [
+#                     "Show me my FAQs",
+#                     "Check my analytics", 
+#                     "Update my settings",
+#                     "Help with integrations"
+#                 ]
                 
-                for i, suggestion in enumerate(admin_suggestions):
-                    if i > 0:
-                        await asyncio.sleep(0.8)
+#                 for i, suggestion in enumerate(admin_suggestions):
+#                     if i > 0:
+#                         await asyncio.sleep(0.8)
                     
-                    followup_data = {
-                        'type': 'followup',
-                        'content': suggestion,
-                        'index': i,
-                        'is_last': i == len(admin_suggestions) - 1,
-                        'admin_suggestion': True
-                    }
-                    yield f"{json.dumps(followup_data)}\n"
+#                     followup_data = {
+#                         'type': 'followup',
+#                         'content': suggestion,
+#                         'index': i,
+#                         'is_last': i == len(admin_suggestions) - 1,
+#                         'admin_suggestion': True
+#                     }
+#                     yield f"{json.dumps(followup_data)}\n"
                 
-                # Send completion
-                yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_suggestions), 'admin_greeting_handled': True})}\n"
+#                 # Send completion
+#                 yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_suggestions), 'admin_greeting_handled': True})}\n"
                 
-                # Track conversation
-                track_conversation_started_with_super_tenant(
-                    tenant_id=tenant.id,
-                    user_identifier=user_id,
-                    platform="admin_web",
-                    db=db
-                )
+#                 # Track conversation
+#                 track_conversation_started_with_super_tenant(
+#                     tenant_id=tenant.id,
+#                     user_identifier=user_id,
+#                     platform="admin_web",
+#                     db=db
+#                 )
                 
-                return
+#                 return
             
-            # Initialize admin engine for regular requests
-            admin_engine = get_super_tenant_admin_engine(db)
+#             # Initialize admin engine for regular requests
+#             admin_engine = get_super_tenant_admin_engine(db)
             
-            # Process admin message using tenant API key
-            result = admin_engine.process_admin_message(
-                user_message=request.message,
-                authenticated_tenant_id=tenant.id,  # 🔒 Security boundary - tenant getting admin features
-                user_identifier=user_id,
-                session_context={"admin_mode": True, "super_tenant_hosted": True, "chatbot_owner_id": chatbot_owner.id}
-            )
+#             # Process admin message using tenant API key
+#             result = admin_engine.process_admin_message(
+#                 user_message=request.message,
+#                 authenticated_tenant_id=tenant.id,  # 🔒 Security boundary - tenant getting admin features
+#                 user_identifier=user_id,
+#                 session_context={"admin_mode": True, "super_tenant_hosted": True, "chatbot_owner_id": chatbot_owner.id}
+#             )
             
-            if not result.get("success"):
-                logger.error(f"❌ Admin chat failed: {result.get('error')}")
-                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-                return
+#             if not result.get("success"):
+#                 logger.error(f"❌ Admin chat failed: {result.get('error')}")
+#                 yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+#                 return
             
-            logger.info("✅ Admin response received successfully")
+#             logger.info("✅ Admin response received successfully")
             
-            # Track admin conversation
-            track_conversation_started_with_super_tenant(
-                tenant_id=tenant.id,
-                user_identifier=user_id,
-                platform="admin_web",
-                db=db
-            )
+#             # Track admin conversation
+#             track_conversation_started_with_super_tenant(
+#                 tenant_id=tenant.id,
+#                 user_identifier=user_id,
+#                 platform="admin_web",
+#                 db=db
+#             )
             
-            # Send main admin response
-            main_response = {
-                'type': 'main_response',
-                'content': result.get("response", ""),
-                'session_id': result.get('session_id', f"admin_session_{tenant.id}_{user_id}"),
-                'answered_by': result.get('action', 'ADMIN_ACTION'),
-                'action': result.get('action'),
-                'requires_confirmation': result.get('requires_confirmation', False),
-                'requires_input': result.get('requires_input', False),
-                'pending_action': result.get('pending_action'),
-                'confidence': result.get('confidence'),
-                'admin_mode': True,
-                'tenant_id': tenant.id
-            }
-            yield f"{json.dumps(main_response)}\n"
+#             # Send main admin response
+#             main_response = {
+#                 'type': 'main_response',
+#                 'content': result.get("response", ""),
+#                 'session_id': result.get('session_id', f"admin_session_{tenant.id}_{user_id}"),
+#                 'answered_by': result.get('action', 'ADMIN_ACTION'),
+#                 'action': result.get('action'),
+#                 'requires_confirmation': result.get('requires_confirmation', False),
+#                 'requires_input': result.get('requires_input', False),
+#                 'pending_action': result.get('pending_action'),
+#                 'confidence': result.get('confidence'),
+#                 'admin_mode': True,
+#                 'tenant_id': tenant.id
+#             }
+#             yield f"{json.dumps(main_response)}\n"
             
-            # Wait before admin follow-ups
-            await asyncio.sleep(1.5)
+#             # Wait before admin follow-ups
+#             await asyncio.sleep(1.5)
             
-            # Generate LLM-powered admin follow-ups
-            should_generate, admin_followups = should_generate_admin_followups_llm(
-                request.message, 
-                result.get("response", ""), 
-                tenant.name,
-                result.get('action')
-            )
+#             # Generate LLM-powered admin follow-ups
+#             should_generate, admin_followups = should_generate_admin_followups_llm(
+#                 request.message, 
+#                 result.get("response", ""), 
+#                 tenant.name,
+#                 result.get('action')
+#             )
             
-            # Stream LLM-generated follow-ups
-            if should_generate and admin_followups:
-                for i, followup in enumerate(admin_followups):
-                    if i > 0:
-                        delay = calculate_followup_delay(followup)
-                        await asyncio.sleep(delay)
+#             # Stream LLM-generated follow-ups
+#             if should_generate and admin_followups:
+#                 for i, followup in enumerate(admin_followups):
+#                     if i > 0:
+#                         delay = calculate_followup_delay(followup)
+#                         await asyncio.sleep(delay)
                     
-                    followup_data = {
-                        'type': 'followup',
-                        'content': followup,
-                        'index': i,
-                        'is_last': i == len(admin_followups) - 1,
-                        'admin_followup': True
-                    }
-                    yield f"{json.dumps(followup_data)}\n"
+#                     followup_data = {
+#                         'type': 'followup',
+#                         'content': followup,
+#                         'index': i,
+#                         'is_last': i == len(admin_followups) - 1,
+#                         'admin_followup': True
+#                     }
+#                     yield f"{json.dumps(followup_data)}\n"
             
-            # Send completion signal
-            yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_followups) if admin_followups else 0, 'admin_enhanced': True})}\n"
+#             # Send completion signal
+#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_followups) if admin_followups else 0, 'admin_enhanced': True})}\n"
             
-            logger.info(f"✅ Enhanced admin chat completed")
+#             logger.info(f"✅ Enhanced admin chat completed")
             
-        except HTTPException as e:
-            logger.error(f"🚫 HTTP error in admin chat: {e.detail}")
-            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-        except Exception as e:
-            logger.error(f"💥 Error in admin streaming: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+#         except HTTPException as e:
+#             logger.error(f"🚫 HTTP error in admin chat: {e.detail}")
+#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+#         except Exception as e:
+#             logger.error(f"💥 Error in admin streaming: {str(e)}")
+#             import traceback
+#             logger.error(traceback.format_exc())
+#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
     
-    return StreamingResponse(
-        stream_admin_response(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+#     return StreamingResponse(
+#         stream_admin_response(),
+#         media_type="application/x-ndjson",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
 
 @router.get("/admin-help")
 async def get_admin_help(
@@ -2433,3 +2433,479 @@ async def check_admin_context(
             "admin_mode_available": False,
             "error": "Failed to check admin context"
         }
+
+
+
+
+
+
+@router.post("/chat/super-tenant-admin")
+async def super_tenant_admin_chat(
+    request: SmartChatRequest,
+    tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),
+    chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),
+    super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
+    db: Session = Depends(get_db)
+):
+    """
+    Super Tenant Admin Chat with Full LLM Intelligence
+    Routes ALL interactions through LLM - no hardcoded responses
+    """
+    
+    async def stream_admin_response():
+        try:
+            logger.info(f"🤖 LLM-powered admin chat: {request.message[:50]}...")
+            
+            # Security validation
+            if super_tenant_context != "super_tenant_official_widget":
+                logger.warning(f"🚨 Unauthorized admin access attempt")
+                yield f"{json.dumps({'type': 'error', 'error': 'Admin features not available in this context', 'status_code': 403})}\n"
+                return
+            
+            # Validate chatbot owner is super tenant
+            try:
+                chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
+                SUPER_TENANT_IDS = [324112833]
+                
+                if not getattr(chatbot_owner, 'is_super_tenant', False) and chatbot_owner.id not in SUPER_TENANT_IDS:
+                    logger.warning(f"🚨 Unauthorized super tenant access: {chatbot_owner.id}")
+                    yield f"{json.dumps({'type': 'error', 'error': 'Unauthorized chatbot host', 'status_code': 403})}\n"
+                    return
+                    
+            except Exception as e:
+                logger.error(f"❌ Invalid chatbot API key: {str(e)}")
+                yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot credentials', 'status_code': 403})}\n"
+                return
+            
+            # Authenticate admin tenant
+            try:
+                tenant = get_tenant_from_api_key(tenant_api_key, db)
+                check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+                
+                if not tenant.is_active:
+                    yield f"{json.dumps({'type': 'error', 'error': 'Account inactive', 'status_code': 403})}\n"
+                    return
+                    
+            except Exception as e:
+                logger.error(f"❌ Tenant authentication failed: {str(e)}")
+                yield f"{json.dumps({'type': 'error', 'error': 'Authentication failed', 'status_code': 403})}\n"
+                return
+            
+            # Auto-generate user ID
+            user_id = request.user_identifier
+            auto_generated = False
+            
+            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+                user_id = f"admin_auto_{str(uuid.uuid4())}"
+                auto_generated = True
+            
+            # Send metadata
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'super_tenant_name': chatbot_owner.name})}\n"
+            
+            # Initialize memory for conversation context
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            memory = SimpleChatbotMemory(db, tenant.id)
+            conversation_history = memory.get_conversation_history(user_id, request.max_context)
+            
+            # **CRITICAL CHANGE: Route through LLM for admin context analysis**
+            admin_context_analysis = await analyze_admin_message_with_llm(
+                request.message, 
+                conversation_history, 
+                tenant,
+                chatbot_owner
+            )
+            
+            # **NEW: Handle admin-specific context detection with LLM**
+            if admin_context_analysis.get('requires_admin_engine', True):
+                # Use admin engine for complex admin tasks
+                admin_engine = get_super_tenant_admin_engine(db)
+                
+                result = admin_engine.process_admin_message(
+                    user_message=request.message,
+                    authenticated_tenant_id=tenant.id,
+                    user_identifier=user_id,
+                    session_context={
+                        "admin_mode": True, 
+                        "super_tenant_hosted": True, 
+                        "chatbot_owner_id": chatbot_owner.id,
+                        "llm_context": admin_context_analysis
+                    }
+                )
+                
+                if not result.get("success"):
+                    logger.error(f"❌ Admin engine failed: {result.get('error')}")
+                    yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+                    return
+                
+                # Store conversation
+                session_id, _ = memory.get_or_create_session(user_id, "admin_web")
+                memory.store_message(session_id, request.message, True)
+                memory.store_message(session_id, result["response"], False)
+                
+                # Send main response
+                main_response = {
+                    'type': 'main_response',
+                    'content': result.get("response", ""),
+                    'session_id': session_id,
+                    'answered_by': result.get('action', 'ADMIN_ENGINE'),
+                    'action': result.get('action'),
+                    'requires_confirmation': result.get('requires_confirmation', False),
+                    'requires_input': result.get('requires_input', False),
+                    'admin_mode': True,
+                    'tenant_id': tenant.id
+                }
+                
+            else:
+                # **NEW: Use conversational LLM for general admin interactions**
+                conversational_result = await process_admin_conversational_llm(
+                    request.message,
+                    conversation_history,
+                    tenant,
+                    chatbot_owner,
+                    db
+                )
+                
+                # Store conversation
+                session_id, _ = memory.get_or_create_session(user_id, "admin_web")
+                memory.store_message(session_id, request.message, True)
+                memory.store_message(session_id, conversational_result["response"], False)
+                
+                main_response = {
+                    'type': 'main_response',
+                    'content': conversational_result["response"],
+                    'session_id': session_id,
+                    'answered_by': 'ADMIN_CONVERSATIONAL',
+                    'admin_mode': True,
+                    'tenant_id': tenant.id,
+                    'llm_analysis': admin_context_analysis
+                }
+            
+            yield f"{json.dumps(main_response)}\n"
+            
+            # Track conversation
+            track_conversation_started_with_super_tenant(
+                tenant_id=tenant.id,
+                user_identifier=user_id,
+                platform="admin_web",
+                db=db
+            )
+            
+            # Generate intelligent follow-ups using LLM
+            await asyncio.sleep(1.5)
+            
+            admin_followups = await generate_admin_followups_llm(
+                request.message,
+                main_response['content'],
+                tenant,
+                admin_context_analysis
+            )
+            
+            # Stream follow-ups
+            if admin_followups:
+                for i, followup in enumerate(admin_followups):
+                    if i > 0:
+                        await asyncio.sleep(calculate_followup_delay(followup))
+                    
+                    followup_data = {
+                        'type': 'followup',
+                        'content': followup,
+                        'index': i,
+                        'is_last': i == len(admin_followups) - 1,
+                        'admin_followup': True
+                    }
+                    yield f"{json.dumps(followup_data)}\n"
+            
+            # Send completion
+            yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_followups) if admin_followups else 0, 'llm_powered': True})}\n"
+            
+        except HTTPException as e:
+            logger.error(f"🚫 HTTP error: {e.detail}")
+            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error: {str(e)}")
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+    return StreamingResponse(
+        stream_admin_response(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+# **NEW LLM FUNCTIONS FOR ADMIN INTELLIGENCE**
+
+# Import LLM availability check
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain.prompts import PromptTemplate
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+
+async def analyze_admin_message_with_llm(
+    user_message: str, 
+    conversation_history: List[Dict], 
+    tenant: Tenant,
+    chatbot_owner: Tenant
+) -> Dict[str, Any]:
+    """
+    LLM analysis to determine admin context and routing
+    """
+    try:
+        if not LLM_AVAILABLE:
+            return {"requires_admin_engine": True, "type": "fallback"}
+        
+        # Build context
+        history_text = ""
+        if conversation_history:
+            recent_messages = conversation_history[-5:]
+            for msg in recent_messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")[:100]
+                history_text += f"{role}: {content}\n"
+        
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.3,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        prompt = PromptTemplate(
+            input_variables=["user_message", "conversation_history", "tenant_name", "super_tenant_name"],
+            template="""You are analyzing an admin message to determine the best routing and response approach.
+
+CONTEXT:
+- User: Business owner managing their chatbot
+- Tenant: {tenant_name}
+- Super Tenant: {super_tenant_name}
+- Platform: Admin dashboard
+
+USER MESSAGE: "{user_message}"
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+ADMIN CAPABILITIES:
+- FAQ management (create, update, delete, list)
+- Analytics viewing
+- Settings updates
+- Integration management
+- General business guidance
+
+TASK: Analyze and determine:
+1. Is this a specific admin task (FAQ, analytics, settings) OR general conversation?
+2. What type of response approach would be most helpful?
+3. What context or mood should the response have?
+
+RESPONSE FORMAT (JSON):
+{{
+    "requires_admin_engine": true/false,
+    "interaction_type": "specific_task|general_conversation|greeting|question",
+    "admin_domain": "faq|analytics|settings|integrations|general",
+    "response_tone": "professional|friendly|helpful|encouraging",
+    "user_intent_confidence": 0.95,
+    "reasoning": "explanation of analysis"
+}}
+
+Use admin_engine for specific tasks like "add FAQ" or "show analytics".
+Use conversational_llm for greetings, questions, or general guidance.
+
+JSON Response:"""
+        )
+        
+        response = llm.invoke(prompt.format(
+            user_message=user_message,
+            conversation_history=history_text,
+            tenant_name=tenant.name,
+            super_tenant_name=chatbot_owner.name
+        ))
+        
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        import json
+        import re
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            analysis = json.loads(json_match.group())
+            logger.info(f"🧠 Admin LLM analysis: {analysis.get('interaction_type')} - {analysis.get('reasoning', '')[:50]}...")
+            return analysis
+        
+    except Exception as e:
+        logger.error(f"Error in admin LLM analysis: {e}")
+    
+    # Fallback
+    return {"requires_admin_engine": True, "type": "fallback"}
+
+async def process_admin_conversational_llm(
+    user_message: str,
+    conversation_history: List[Dict],
+    tenant: Tenant,
+    chatbot_owner: Tenant,
+    db: Session
+) -> Dict[str, Any]:
+    """
+    Process conversational admin interactions through pure LLM
+    """
+    try:
+        if not LLM_AVAILABLE:
+            return {"response": "I'm here to help with your admin tasks. What would you like to do?"}
+        
+        # Get tenant context for LLM
+        from app.chatbot.tenant_data_manager import TenantDataManager
+        data_manager = TenantDataManager(db, tenant.id)
+        
+        analytics = data_manager.get_analytics_summary()
+        settings = data_manager.get_tenant_settings()
+        
+        # Build rich context
+        context_info = f"""
+Business: {tenant.business_name or tenant.name}
+FAQs: {analytics.get('content_stats', {}).get('faqs', 0)}
+Recent Sessions (30d): {analytics.get('usage_stats_30_days', {}).get('chat_sessions', 0)}
+Discord: {'✅' if analytics.get('integrations', {}).get('discord') else '❌'}
+Slack: {'✅' if analytics.get('integrations', {}).get('slack') else '❌'}
+"""
+        
+        # Build conversation context
+        history_text = ""
+        if conversation_history:
+            for msg in conversation_history[-8:]:
+                role = "You" if msg.get("role") == "user" else "Assistant"
+                content = msg.get("content", "")
+                history_text += f"{role}: {content}\n"
+        
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.6,  # Higher for conversational
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        prompt = PromptTemplate(
+            input_variables=["user_message", "conversation_history", "context_info", "tenant_name"],
+            template="""You are an intelligent admin assistant for {tenant_name}. You help business owners manage their chatbot through natural conversation.
+
+BUSINESS CONTEXT:
+{context_info}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+USER MESSAGE: "{user_message}"
+
+INSTRUCTIONS:
+- Be conversational, helpful, and encouraging
+- Provide specific guidance based on their business context
+- If they need specific admin tasks (add FAQ, view analytics), guide them naturally
+- Use their business data to give personalized insights
+- Be proactive in suggesting improvements
+- Keep responses concise but informative
+- Use emojis sparingly for warmth
+
+ADMIN CAPABILITIES YOU CAN MENTION:
+- FAQ management
+- Analytics and insights
+- Settings customization
+- Integration setup (Discord, Slack, etc.)
+- Performance optimization
+
+Respond as a knowledgeable business advisor who understands their chatbot needs.
+
+Your helpful response:"""
+        )
+        
+        response = llm.invoke(prompt.format(
+            user_message=user_message,
+            conversation_history=history_text,
+            context_info=context_info,
+            tenant_name=tenant.business_name or tenant.name
+        ))
+        
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        return {"response": response_text.strip()}
+        
+    except Exception as e:
+        logger.error(f"Error in conversational admin LLM: {e}")
+        return {"response": f"I'm here to help you manage {tenant.business_name or tenant.name}'s chatbot. What would you like to work on?"}
+
+async def generate_admin_followups_llm(
+    user_message: str,
+    assistant_response: str,
+    tenant: Tenant,
+    context_analysis: Dict[str, Any]
+) -> List[str]:
+    """
+    Generate intelligent admin follow-ups using LLM
+    """
+    try:
+        if not LLM_AVAILABLE:
+            return []
+        
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.4,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        prompt = PromptTemplate(
+            input_variables=["user_message", "assistant_response", "tenant_name", "interaction_type"],
+            template="""Generate helpful follow-up suggestions for an admin conversation.
+
+USER MESSAGE: "{user_message}"
+ASSISTANT RESPONSE: "{assistant_response}"
+BUSINESS: {tenant_name}
+INTERACTION TYPE: {interaction_type}
+
+TASK: Generate 2-3 natural follow-up suggestions that would genuinely help the business owner continue their admin work.
+
+GUIDELINES:
+- Make suggestions specific and actionable
+- Consider what they might logically want to do next
+- Keep suggestions conversational, not robotic
+- Focus on business value
+- Avoid obvious or redundant suggestions
+
+EXAMPLES:
+- "Want to see how your recent changes are performing?"
+- "Need help setting up Discord for your community?"
+- "Should we optimize your top-performing FAQs?"
+
+Generate 2-3 relevant follow-ups as a JSON array:
+["suggestion1", "suggestion2", "suggestion3"]
+
+JSON Response:"""
+        )
+        
+        response = llm.invoke(prompt.format(
+            user_message=user_message,
+            assistant_response=assistant_response,
+            tenant_name=tenant.business_name or tenant.name,
+            interaction_type=context_analysis.get('interaction_type', 'general')
+        ))
+        
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        import json
+        import re
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            followups = json.loads(json_match.group())
+            logger.info(f"🔄 Generated {len(followups)} admin follow-ups")
+            return followups[:3]  # Max 3
+        
+    except Exception as e:
+        logger.error(f"Error generating admin follow-ups: {e}")
+    
+    return []
