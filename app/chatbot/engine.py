@@ -1849,7 +1849,7 @@ Your detailed, step-by-step response:"""
     def _generate_llm_greeting_response_enhanced(self, current_message: str, previous_topic: str, 
                                             suggested_approach: str, company_name: str, 
                                             context_analysis: Dict) -> Optional[str]:
-        """Enhanced version of your existing function with more variety"""
+        """Enhanced version with natural LLM generation - no examples"""
         
         try:
             from langchain_openai import ChatOpenAI
@@ -1858,7 +1858,7 @@ Your detailed, step-by-step response:"""
             greeting_type = context_analysis.get('type', 'UNKNOWN')
             hours_since_last = context_analysis.get('hours_since_last', 0)
             
-            # Enhanced prompt with more variety instructions
+            # Clean prompt without contaminating examples
             prompt_template = """You are a helpful AI assistant for {company_name}. A customer just greeted you.
 
     CUSTOMER'S MESSAGE: "{current_message}"
@@ -1873,12 +1873,9 @@ Your detailed, step-by-step response:"""
     4. Keep it brief and welcoming (under 30 words)
     5. For recent conversations, acknowledge continuity
     6. For fresh conversations, be welcoming but fresh
-
-    EXAMPLES OF VARIETY:
-    - "Hey! How can I help you today?"
-    - "Hello there! What brings you here?"
-    - "Hi! Great to see you. How can I assist?"
-    - "Hey there! I'm here to help. What's up?"
+    7. If they ask about previous topics, summarize naturally and offer to continue or help with something new
+    8. Try to avoid any general knowledge questions, just tell them you wouldnt be answering that politely. but answer if its within the scope of tenant business
+    9. You must never sound robotic
 
     Your friendly, varied greeting response:"""
 
@@ -1909,14 +1906,14 @@ Your detailed, step-by-step response:"""
                 response_text = response_text[:150] + "..."
             
             if len(response_text) < 5:
-                return f"Hello! How can I help you today?"
+                return "Hello! How can I help you today?"
             
             logger.info(f"🤖 Generated enhanced LLM greeting: {response_text[:40]}...")
             return response_text
             
         except Exception as e:
             logger.error(f"Error generating enhanced LLM greeting response: {e}")
-            return f"Hello! How can I help you today?"
+            return "Hello! How can I help you today?"
 
 
 
