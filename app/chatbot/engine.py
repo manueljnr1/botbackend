@@ -110,6 +110,7 @@ class ChatbotEngine:
     2. If no FAQ matches, respond with: "NO_MATCH"
     3. Consider variations in wording (e.g., "business hours" matches "what time are you open")
     4. Look for semantic similarity, not just exact words
+    5. If someone ask you what what you do, you should not answer with a FAQ or list out your FAQs, but rather with a general description of the company and its services.
 
     Response:"""
         )
