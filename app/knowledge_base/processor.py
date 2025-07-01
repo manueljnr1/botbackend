@@ -4,7 +4,9 @@ import pandas as pd
 import logging
 import tempfile
 import shutil
+import json
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
@@ -17,6 +19,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from app.config import settings
 from app.knowledge_base.models import DocumentType
+from app.knowledge_base.website_crawler import WebsiteCrawler
 from app.services.storage import storage_service
 
 # Setup logging
@@ -24,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
-    """Process and load documents for vector storage with cloud storage support"""
+    """Enhanced processor with website crawling support"""
     
     def __init__(self, tenant_id: int):
         """Initialize DocumentProcessor with tenant ID and required components"""
@@ -129,6 +132,120 @@ class DocumentProcessor:
                     logger.info(f"Cleaned up temp vector dir: {temp_vector_dir}")
                 except:
                     pass
+
+    async def process_website(self, 
+                            base_url: str, 
+                            vector_store_id: str,
+                            crawl_depth: int = 3,
+                            include_patterns: List[str] = None,
+                            exclude_patterns: List[str] = None) -> Dict[str, Any]:
+        """Process website content and store in vector store"""
+        logger.info(f"Processing website: {base_url} -> {vector_store_id}")
+        
+        temp_vector_dir = None
+        
+        try:
+            # Initialize crawler
+            crawler = WebsiteCrawler(
+                max_depth=crawl_depth,
+                max_pages=100,  # Reasonable limit
+                delay=1.0  # Be respectful
+            )
+            
+            # Crawl website
+            crawl_results = await crawler.crawl_website(
+                base_url=base_url,
+                include_patterns=include_patterns,
+                exclude_patterns=exclude_patterns
+            )
+            
+            if not crawl_results:
+                raise ValueError("No content extracted from website")
+            
+            # Convert to documents
+            documents = crawler.get_documents()
+            
+            if not documents:
+                raise ValueError("No valid documents created from crawled content")
+            
+            logger.info(f"Created {len(documents)} documents from {len(crawl_results)} crawled pages")
+            
+            # Split into chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+            )
+            splits = text_splitter.split_documents(documents)
+            
+            if not splits:
+                raise ValueError("No text chunks created from website content")
+            
+            logger.info(f"Split into {len(splits)} chunks")
+            
+            # Create vector store in temp directory
+            temp_vector_dir = tempfile.mkdtemp()
+            logger.info(f"Creating vector store in temp dir: {temp_vector_dir}")
+            
+            # Create and save vector store locally first
+            vector_store = FAISS.from_documents(documents=splits, embedding=self.embeddings)
+            vector_store.save_local(temp_vector_dir)
+            logger.info(f"Vector store saved to temp directory")
+            
+            # Verify local creation
+            required_files = ["index.faiss", "index.pkl"]
+            for file in required_files:
+                file_path = os.path.join(temp_vector_dir, file)
+                if not os.path.exists(file_path):
+                    raise ValueError(f"Required vector store file not created: {file}")
+            
+            # Upload vector store files to cloud
+            self.storage.upload_vector_store_files(self.tenant_id, vector_store_id, temp_vector_dir)
+            logger.info(f"Vector store uploaded to cloud successfully")
+            
+            # Store crawl metadata in cloud
+            metadata = {
+                'base_url': base_url,
+                'pages_crawled': len(crawl_results),
+                'successful_pages': len([r for r in crawl_results if r.content and not r.error]),
+                'failed_pages': len([r for r in crawl_results if r.error]),
+                'crawled_urls': [r.url for r in crawl_results if r.content and not r.error],
+                'failed_urls': [{'url': r.url, 'error': r.error} for r in crawl_results if r.error],
+                'crawled_at': datetime.utcnow().isoformat(),
+                'include_patterns': include_patterns,
+                'exclude_patterns': exclude_patterns
+            }
+            
+            # Save metadata to cloud
+            metadata_json = json.dumps(metadata, indent=2)
+            metadata_path = f"tenant_{self.tenant_id}/crawl_metadata/{vector_store_id}.json"
+            self.storage.upload_file("vector-stores", metadata_path, metadata_json.encode())
+            
+            return {
+                'vector_store_id': vector_store_id,
+                'pages_crawled': len(crawl_results),
+                'successful_pages': len([r for r in crawl_results if r.content and not r.error]),
+                'failed_pages': len([r for r in crawl_results if r.error]),
+                'metadata': metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Website processing failed: {e}")
+            # Clean up any partial cloud files
+            try:
+                self.storage.delete_vector_store(self.tenant_id, vector_store_id)
+            except:
+                pass  # Ignore cleanup errors
+            raise
+            
+        finally:
+            # Clean up temp files
+            if temp_vector_dir and os.path.exists(temp_vector_dir):
+                try:
+                    shutil.rmtree(temp_vector_dir)
+                    logger.info(f"Cleaned up temp vector dir: {temp_vector_dir}")
+                except:
+                    pass
     
     def _get_loader(self, file_path: str, doc_type: DocumentType):
         """Get the appropriate document loader based on file type"""
@@ -200,6 +317,14 @@ class DocumentProcessor:
         """Delete a vector store from cloud storage"""
         try:
             success = self.storage.delete_vector_store(self.tenant_id, vector_store_id)
+            
+            # Also delete metadata if exists
+            try:
+                metadata_path = f"tenant_{self.tenant_id}/crawl_metadata/{vector_store_id}.json"
+                self.storage.delete_file("vector-stores", metadata_path)
+            except:
+                pass  # Metadata might not exist
+            
             if success:
                 logger.info(f"Deleted vector store from cloud: {vector_store_id}")
             else:
@@ -255,3 +380,13 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Error processing FAQ sheet: {str(e)}", exc_info=True)
             raise
+
+    async def get_crawl_metadata(self, vector_store_id: str) -> Optional[Dict]:
+        """Get crawl metadata for a website knowledge base"""
+        try:
+            metadata_path = f"tenant_{self.tenant_id}/crawl_metadata/{vector_store_id}.json"
+            metadata_content = self.storage.download_file("vector-stores", metadata_path)
+            return json.loads(metadata_content.decode())
+        except Exception as e:
+            logger.warning(f"Could not load crawl metadata for {vector_store_id}: {e}")
+            return None

@@ -1,8 +1,9 @@
 import logging
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 import os
 import shutil
 import uuid
@@ -27,16 +28,30 @@ class KnowledgeBaseCreate(BaseModel):
     name: str
     description: Optional[str] = None
 
+class WebsiteKnowledgeBaseCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    base_url: HttpUrl
+    crawl_depth: int = 3
+    include_patterns: Optional[List[str]] = None
+    exclude_patterns: Optional[List[str]] = None
+
 class KnowledgeBaseOut(BaseModel):
     id: int
     name: str
     description: Optional[str]
-    file_path: str
+    file_path: Optional[str]
+    base_url: Optional[str]
     document_type: DocumentType
     vector_store_id: str
-    processing_status: ProcessingStatus  # Add this
-    processing_error: Optional[str] = None  # Add this
-    processed_at: Optional[datetime] = None  # Add this
+    processing_status: ProcessingStatus
+    processing_error: Optional[str] = None
+    processed_at: Optional[datetime] = None
+    crawl_depth: Optional[int] = None
+    pages_crawled: Optional[int] = None
+    last_crawled_at: Optional[datetime] = None
+    include_patterns: Optional[List[str]] = None
+    exclude_patterns: Optional[List[str]] = None
     
     class Config:
         from_attributes = True
@@ -53,6 +68,15 @@ class FAQOut(BaseModel):
     class Config:
         from_attributes = True
 
+class CrawlStatusOut(BaseModel):
+    id: int
+    name: str
+    base_url: str
+    pages_crawled: int
+    last_crawled_at: Optional[datetime]
+    processing_status: ProcessingStatus
+    processing_error: Optional[str] = None
+
 # Helper function to get tenant from API key
 def get_tenant_from_api_key(api_key: str, db: Session):
     tenant = db.query(Tenant).filter(Tenant.api_key == api_key, Tenant.is_active == True).first()
@@ -65,17 +89,13 @@ def get_tenant_from_api_key(api_key: str, db: Session):
         raise HTTPException(status_code=403, detail="Invalid API key")
     return tenant
 
-# Endpoints
-
-
+# Existing endpoints (unchanged)
 @router.get("/", response_model=List[KnowledgeBaseOut])
 async def list_knowledge_bases(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    List all knowledge bases for the tenant
-    """
+    """List all knowledge bases for the tenant"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Listing knowledge bases for tenant: {tenant.name} (ID: {tenant_id})")
@@ -91,9 +111,7 @@ async def delete_knowledge_base(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Delete a knowledge base with cloud storage support
-    """
+    """Delete a knowledge base with cloud storage support"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Delete knowledge base requested. ID: {kb_id}, Tenant ID: {tenant_id}")
@@ -116,17 +134,17 @@ async def delete_knowledge_base(
         logger.error(f"Error deleting vector store from cloud: {str(e)}")
         # Continue with deletion even if vector store deletion fails
     
-    # Delete the uploaded file from cloud storage
-    try:
-        from app.services.storage import storage_service
-        file_deleted = storage_service.delete_file("knowledge-base-files", kb.file_path)
-        if file_deleted:
-            logger.info(f"File deleted from cloud: {kb.file_path}")
-        else:
-            logger.warning(f"File not found in cloud: {kb.file_path}")
-    except Exception as e:
-        logger.error(f"Error deleting file from cloud: {str(e)}")
-        # Continue with deletion even if file deletion fails
+    # Delete the uploaded file from cloud storage (only for file-based KB)
+    if kb.file_path and kb.document_type != DocumentType.WEBSITE:
+        try:
+            file_deleted = storage_service.delete_file("knowledge-base-files", kb.file_path)
+            if file_deleted:
+                logger.info(f"File deleted from cloud: {kb.file_path}")
+            else:
+                logger.warning(f"File not found in cloud: {kb.file_path}")
+        except Exception as e:
+            logger.error(f"Error deleting file from cloud: {str(e)}")
+            # Continue with deletion even if file deletion fails
     
     # Delete from database
     db.delete(kb)
@@ -135,15 +153,276 @@ async def delete_knowledge_base(
     
     return {"message": "Knowledge base deleted successfully"}
 
+@router.post("/upload", response_model=KnowledgeBaseOut)
+async def upload_knowledge_base(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Upload and automatically process knowledge base document with cloud storage"""
+    logger.info(f"Knowledge base upload requested: {name}")
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    # Get document type
+    file_extension = file.filename.split('.')[-1].lower()
+    try:
+        doc_type = DocumentType(file_extension)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
+    
+    # Read file content and upload to cloud storage
+    try:
+        file_content = await file.read()
+        logger.info(f"Read {len(file_content)} bytes from uploaded file")
+        
+        # Upload to cloud instead of saving locally
+        cloud_file_path = storage_service.upload_knowledge_base_file(
+            tenant_id, file.filename, file_content
+        )
+        logger.info(f"Uploaded file to cloud: {cloud_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to upload file to cloud storage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file to cloud storage")
+    
+    # Create database record FIRST (with pending status)
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=name,
+        description=description,
+        file_path=cloud_file_path,
+        document_type=doc_type,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",
+        processing_status=ProcessingStatus.PENDING
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Process document with error handling
+    processor = DocumentProcessor(tenant_id)
+    try:
+        kb.processing_status = ProcessingStatus.PROCESSING
+        db.commit()
+        
+        logger.info(f"Processing document for KB {kb.id}...")
+        processor.process_document_with_id(cloud_file_path, doc_type, kb.vector_store_id)
+        
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        kb.processing_error = None
+        
+        logger.info(f"Document processed successfully: {kb.vector_store_id}")
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        logger.error(f"Failed to process document: {e}")
+        
+        # Clean up uploaded file on processing failure
+        try:
+            storage_service.delete_file("knowledge-base-files", cloud_file_path)
+            logger.info(f"Cleaned up failed upload: {cloud_file_path}")
+        except Exception as cleanup_error:
+            logger.error(f"Failed to cleanup file after processing failure: {cleanup_error}")
+        
+    db.commit()
+    return kb
+
+# NEW WEBSITE CRAWLING ENDPOINTS
+
+@router.post("/website", response_model=KnowledgeBaseOut)
+async def create_website_knowledge_base(
+    website_data: WebsiteKnowledgeBaseCreate,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Create a website knowledge base and start crawling"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    logger.info(f"Website KB creation requested: {website_data.name} -> {website_data.base_url}")
+    
+    # Create database record first
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=website_data.name,
+        description=website_data.description,
+        base_url=str(website_data.base_url),
+        document_type=DocumentType.WEBSITE,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",
+        processing_status=ProcessingStatus.PENDING,
+        crawl_depth=website_data.crawl_depth,
+        include_patterns=website_data.include_patterns,
+        exclude_patterns=website_data.exclude_patterns
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Start crawling in background
+    async def crawl_website():
+        processor = DocumentProcessor(tenant_id)
+        try:
+            kb.processing_status = ProcessingStatus.PROCESSING
+            db.commit()
+            
+            logger.info(f"Starting website crawl for KB {kb.id}...")
+            result = await processor.process_website(
+                base_url=str(website_data.base_url),
+                vector_store_id=kb.vector_store_id,
+                crawl_depth=website_data.crawl_depth,
+                include_patterns=website_data.include_patterns,
+                exclude_patterns=website_data.exclude_patterns
+            )
+            
+            kb.processing_status = ProcessingStatus.COMPLETED
+            kb.processed_at = datetime.utcnow()
+            kb.last_crawled_at = datetime.utcnow()
+            kb.pages_crawled = result['successful_pages']
+            kb.processing_error = None
+            
+            logger.info(f"Website crawled successfully: {result['successful_pages']} pages")
+            
+        except Exception as e:
+            kb.processing_status = ProcessingStatus.FAILED
+            kb.processing_error = str(e)
+            logger.error(f"Failed to crawl website: {e}")
+            
+        db.commit()
+    
+    # Start crawling task
+    asyncio.create_task(crawl_website())
+    
+    return kb
+
+@router.post("/{kb_id}/recrawl")
+async def recrawl_website(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger a website recrawl"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id,
+        KnowledgeBase.document_type == DocumentType.WEBSITE
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Website knowledge base not found")
+    
+    if kb.processing_status == ProcessingStatus.PROCESSING:
+        raise HTTPException(status_code=400, detail="Crawling already in progress")
+    
+    # Start recrawling
+    async def recrawl_website():
+        processor = DocumentProcessor(tenant.id)
+        try:
+            kb.processing_status = ProcessingStatus.PROCESSING
+            kb.processing_error = None
+            db.commit()
+            
+            # Clean up old vector store
+            processor.delete_vector_store(kb.vector_store_id)
+            
+            # Recrawl
+            result = await processor.process_website(
+                base_url=kb.base_url,
+                vector_store_id=kb.vector_store_id,
+                crawl_depth=kb.crawl_depth,
+                include_patterns=kb.include_patterns,
+                exclude_patterns=kb.exclude_patterns
+            )
+            
+            kb.processing_status = ProcessingStatus.COMPLETED
+            kb.processed_at = datetime.utcnow()
+            kb.last_crawled_at = datetime.utcnow()
+            kb.pages_crawled = result['successful_pages']
+            
+        except Exception as e:
+            kb.processing_status = ProcessingStatus.FAILED
+            kb.processing_error = str(e)
+            logger.error(f"Recrawling failed: {e}")
+            
+        db.commit()
+    
+    asyncio.create_task(recrawl_website())
+    
+    return {"message": "Recrawling started", "status": "processing"}
+
+@router.get("/websites/status", response_model=List[CrawlStatusOut])
+async def get_website_crawl_status(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get crawl status of all website knowledge bases"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    websites = db.query(KnowledgeBase).filter(
+        KnowledgeBase.tenant_id == tenant.id,
+        KnowledgeBase.document_type == DocumentType.WEBSITE
+    ).all()
+    
+    return [{
+        "id": kb.id,
+        "name": kb.name,
+        "base_url": kb.base_url,
+        "pages_crawled": kb.pages_crawled or 0,
+        "last_crawled_at": kb.last_crawled_at,
+        "processing_status": kb.processing_status,
+        "processing_error": kb.processing_error
+    } for kb in websites]
+
+@router.get("/{kb_id}/crawl-details")
+async def get_crawl_details(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get detailed crawl information for a website KB"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id,
+        KnowledgeBase.document_type == DocumentType.WEBSITE
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Website knowledge base not found")
+    
+    # Get crawl metadata
+    processor = DocumentProcessor(tenant.id)
+    metadata = await processor.get_crawl_metadata(kb.vector_store_id)
+    
+    return {
+        "id": kb.id,
+        "name": kb.name,
+        "base_url": kb.base_url,
+        "crawl_depth": kb.crawl_depth,
+        "include_patterns": kb.include_patterns,
+        "exclude_patterns": kb.exclude_patterns,
+        "pages_crawled": kb.pages_crawled,
+        "last_crawled_at": kb.last_crawled_at,
+        "processing_status": kb.processing_status.value,
+        "processing_error": kb.processing_error,
+        "metadata": metadata
+    }
+
+# Existing FAQ endpoints continue unchanged...
 @router.post("/faqs/upload", response_model=List[FAQOut])
 async def upload_faq_sheet(
     file: UploadFile = File(...),
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Upload an FAQ sheet (CSV or Excel)
-    """
+    """Upload an FAQ sheet (CSV or Excel)"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"FAQ upload requested. Tenant: {tenant.name} (ID: {tenant_id})")
@@ -198,9 +477,7 @@ async def list_faqs(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    List all FAQs for the tenant
-    """
+    """List all FAQs for the tenant"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Listing FAQs for tenant: {tenant.name} (ID: {tenant_id})")
@@ -216,9 +493,7 @@ async def create_faq(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Create a new FAQ
-    """
+    """Create a new FAQ"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Creating new FAQ for tenant: {tenant.name} (ID: {tenant_id})")
@@ -242,9 +517,7 @@ async def update_faq(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Update an FAQ
-    """
+    """Update an FAQ"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Updating FAQ. ID: {faq_id}, Tenant: {tenant.name} (ID: {tenant_id})")
@@ -268,9 +541,7 @@ async def delete_faq(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """
-    Delete an FAQ
-    """
+    """Delete an FAQ"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"Deleting FAQ. ID: {faq_id}, Tenant: {tenant.name} (ID: {tenant_id})")
@@ -285,90 +556,6 @@ async def delete_faq(
     logger.info(f"FAQ deleted successfully")
     
     return {"message": "FAQ deleted successfully"}
-
-
-@router.post("/upload", response_model=KnowledgeBaseOut)
-async def upload_knowledge_base(
-    request: Request,
-    file: UploadFile = File(...),
-    name: str = Form(...),
-    description: Optional[str] = Form(None),
-    x_api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db),
-):
-    """Upload and automatically process knowledge base document with cloud storage"""
-    logger.info(f"Knowledge base upload requested: {name}")
-    tenant = get_tenant_from_api_key(x_api_key, db)
-    tenant_id = tenant.id
-    
-    # Get document type
-    file_extension = file.filename.split('.')[-1].lower()
-    try:
-        doc_type = DocumentType(file_extension)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
-    
-    # Read file content and upload to cloud storage (CHANGED)
-    try:
-        file_content = await file.read()
-        logger.info(f"Read {len(file_content)} bytes from uploaded file")
-        
-        # Upload to cloud instead of saving locally
-        from app.services.storage import storage_service
-        cloud_file_path = storage_service.upload_knowledge_base_file(
-            tenant_id, file.filename, file_content
-        )
-        logger.info(f"Uploaded file to cloud: {cloud_file_path}")
-    except Exception as e:
-        logger.error(f"Failed to upload file to cloud storage: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload file to cloud storage")
-    
-    # Create database record FIRST (with pending status) - SAME AS BEFORE
-    kb = KnowledgeBase(
-        tenant_id=tenant_id,
-        name=name,
-        description=description,
-        file_path=cloud_file_path,  # CHANGED: now stores cloud path instead of local path
-        document_type=doc_type,
-        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",  # Generate ID upfront
-        processing_status=ProcessingStatus.PENDING
-    )
-    db.add(kb)
-    db.commit()
-    db.refresh(kb)
-    
-    # Process document with error handling - SAME LOGIC AS BEFORE
-    processor = DocumentProcessor(tenant_id)
-    try:
-        kb.processing_status = ProcessingStatus.PROCESSING
-        db.commit()
-        
-        logger.info(f"Processing document for KB {kb.id}...")
-        # Use the pre-generated vector_store_id with cloud file path (CHANGED)
-        processor.process_document_with_id(cloud_file_path, doc_type, kb.vector_store_id)
-        
-        kb.processing_status = ProcessingStatus.COMPLETED
-        kb.processed_at = datetime.utcnow()
-        kb.processing_error = None
-        
-        logger.info(f"Document processed successfully: {kb.vector_store_id}")
-        
-    except Exception as e:
-        kb.processing_status = ProcessingStatus.FAILED
-        kb.processing_error = str(e)
-        logger.error(f"Failed to process document: {e}")
-        
-        # Clean up uploaded file on processing failure (ADDED)
-        try:
-            storage_service.delete_file("knowledge-base-files", cloud_file_path)
-            logger.info(f"Cleaned up failed upload: {cloud_file_path}")
-        except Exception as cleanup_error:
-            logger.error(f"Failed to cleanup file after processing failure: {cleanup_error}")
-        
-        # Don't raise exception - keep the record for retry
-        
-    db.commit()
-    return kb
 
 @router.post("/{kb_id}/reprocess")
 async def reprocess_knowledge_base(
@@ -387,9 +574,13 @@ async def reprocess_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     
+    # Handle website vs file reprocessing
+    if kb.document_type == DocumentType.WEBSITE:
+        # Redirect to recrawl endpoint
+        return await recrawl_website(kb_id, x_api_key, db)
+    
     # Check if source file exists in cloud storage
     try:
-        from app.services.storage import storage_service
         if not storage_service.file_exists("knowledge-base-files", kb.file_path):
             raise HTTPException(status_code=400, detail="Source file no longer exists in cloud storage")
     except Exception as e:
@@ -419,8 +610,6 @@ async def reprocess_knowledge_base(
     db.commit()
     return {"message": "Reprocessing completed", "status": kb.processing_status.value}
 
-
-
 @router.get("/status", response_model=List[dict])
 async def get_processing_status(
     x_api_key: str = Header(..., alias="X-API-Key"),
@@ -434,7 +623,10 @@ async def get_processing_status(
     return [{
         "id": kb.id,
         "name": kb.name,
+        "type": kb.document_type.value,
         "status": kb.processing_status.value,
         "error": kb.processing_error,
-        "processed_at": kb.processed_at.isoformat() if kb.processed_at else None
+        "processed_at": kb.processed_at.isoformat() if kb.processed_at else None,
+        "pages_crawled": kb.pages_crawled if kb.document_type == DocumentType.WEBSITE else None,
+        "last_crawled_at": kb.last_crawled_at.isoformat() if kb.last_crawled_at else None
     } for kb in kbs]
