@@ -14,33 +14,7 @@ class CrawlScheduler:
     
     def __init__(self):
         self.running = False
-        self.check_interval = 3600  # Global scheduler instance
-scheduler = CrawlScheduler()
-
-async def start_crawl_scheduler():
-    """Start the background crawl scheduler"""
-    await scheduler.start()
-
-def stop_crawl_scheduler():
-    """Stop the background crawl scheduler"""
-    scheduler.stop()
-
-# FastAPI startup/shutdown events
-from fastapi import FastAPI
-
-def setup_scheduler(app: FastAPI):
-    """Setup scheduler with FastAPI app lifecycle"""
-    
-    @app.on_event("startup")
-    async def startup_event():
-        # Start scheduler in background
-        asyncio.create_task(start_crawl_scheduler())
-        logger.info("Background crawl scheduler initialized")
-    
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        stop_crawl_scheduler()
-        logger.info("Background crawl scheduler stopped") #Check every hour
+        self.check_interval = 3600  # Check every hour
         
     async def start(self):
         """Start the background scheduler"""
@@ -136,4 +110,30 @@ def setup_scheduler(app: FastAPI):
         finally:
             db.commit()
 
-#
+# Global scheduler instance
+scheduler = CrawlScheduler()
+
+async def start_crawl_scheduler():
+    """Start the background crawl scheduler"""
+    await scheduler.start()
+
+def stop_crawl_scheduler():
+    """Stop the background crawl scheduler"""
+    scheduler.stop()
+
+# FastAPI startup/shutdown events
+from fastapi import FastAPI
+
+def setup_scheduler(app: FastAPI):
+    """Setup scheduler with FastAPI app lifecycle"""
+    
+    @app.on_event("startup")
+    async def startup_event():
+        # Start scheduler in background
+        asyncio.create_task(start_crawl_scheduler())
+        logger.info("Background crawl scheduler initialized")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        stop_crawl_scheduler()
+        logger.info("Background crawl scheduler stopped")
