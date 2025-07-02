@@ -19,7 +19,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from app.config import settings
 from app.knowledge_base.models import DocumentType
-from app.knowledge_base.website_crawler import WebsiteCrawler
+from app.knowledge_base.js_crawler import JSWebsiteCrawler
 from app.services.storage import storage_service
 
 # Setup logging
@@ -145,11 +145,12 @@ class DocumentProcessor:
         temp_vector_dir = None
         
         try:
-            # Initialize crawler
-            crawler = WebsiteCrawler(
+            # Initialize JS-enabled crawler
+            crawler = JSWebsiteCrawler(
                 max_depth=crawl_depth,
-                max_pages=100,  # Reasonable limit
-                delay=1.0  # Be respectful
+                max_pages=50,  # Reasonable limit
+                delay=1.0,  # Be respectful
+                enable_js=True  # Enable JavaScript rendering
             )
             
             # Crawl website

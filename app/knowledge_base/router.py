@@ -8,6 +8,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime 
+import re
 
 from app.database import get_db
 from app.knowledge_base.models import KnowledgeBase, FAQ, DocumentType, ProcessingStatus
@@ -240,7 +241,7 @@ async def create_website_knowledge_base(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Create a website knowledge base and start crawling"""
+    """Create a website knowledge base with better error handling"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     
@@ -263,22 +264,27 @@ async def create_website_knowledge_base(
     db.commit()
     db.refresh(kb)
     
-    # Start crawling in background
-    async def crawl_website():
+    # SYNCHRONOUS crawling with timeout to prevent hanging
+    async def crawl_with_timeout():
         processor = DocumentProcessor(tenant_id)
         try:
             kb.processing_status = ProcessingStatus.PROCESSING
             db.commit()
             
-            logger.info(f"Starting website crawl for KB {kb.id}...")
-            result = await processor.process_website(
-                base_url=str(website_data.base_url),
-                vector_store_id=kb.vector_store_id,
-                crawl_depth=website_data.crawl_depth,
-                include_patterns=website_data.include_patterns,
-                exclude_patterns=website_data.exclude_patterns
-            )
+            logger.info(f"Starting crawl for KB {kb.id}...")
             
+            # Increased timeout to 5 minutes
+            result = await asyncio.wait_for(
+                processor.process_website(
+                    base_url=str(website_data.base_url),
+                    vector_store_id=kb.vector_store_id,
+                    crawl_depth=website_data.crawl_depth,
+                    include_patterns=website_data.include_patterns,
+                    exclude_patterns=website_data.exclude_patterns
+                ),
+                timeout=300.0  # 5 minutes instead of 60 seconds
+            )
+                
             kb.processing_status = ProcessingStatus.COMPLETED
             kb.processed_at = datetime.utcnow()
             kb.last_crawled_at = datetime.utcnow()
@@ -287,17 +293,170 @@ async def create_website_knowledge_base(
             
             logger.info(f"Website crawled successfully: {result['successful_pages']} pages")
             
+        except asyncio.TimeoutError:
+            kb.processing_status = ProcessingStatus.FAILED
+            kb.processing_error = "Crawling timeout after 60 seconds"
+            logger.error(f"Crawling timeout for KB {kb.id}")
+            
         except Exception as e:
             kb.processing_status = ProcessingStatus.FAILED
             kb.processing_error = str(e)
-            logger.error(f"Failed to crawl website: {e}")
+            logger.error(f"Failed to crawl website: {e}", exc_info=True)
             
-        db.commit()
+        finally:
+            db.commit()
     
-    # Start crawling task
-    asyncio.create_task(crawl_website())
+    # Start crawling task (don't await - let it run in background)
+    asyncio.create_task(crawl_with_timeout())
     
     return kb
+
+
+# Alternative: Synchronous crawling for immediate feedback
+@router.post("/website/sync", response_model=KnowledgeBaseOut)
+async def create_website_knowledge_base_sync(
+    website_data: WebsiteKnowledgeBaseCreate,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Create website KB with synchronous processing (waits for completion)"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    logger.info(f"Sync website KB creation: {website_data.name} -> {website_data.base_url}")
+    
+    # Validate patterns first
+    base_url = str(website_data.base_url)
+    
+    # Check if include patterns would match the base URL
+    if website_data.include_patterns:
+        pattern_matches = any(
+            re.search(pattern, base_url, re.IGNORECASE) 
+            for pattern in website_data.include_patterns
+        )
+        if not pattern_matches:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Include patterns {website_data.include_patterns} don't match base URL {base_url}"
+            )
+    
+    # Create database record
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=website_data.name,
+        description=website_data.description,
+        base_url=base_url,
+        document_type=DocumentType.WEBSITE,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",
+        processing_status=ProcessingStatus.PROCESSING,
+        crawl_depth=website_data.crawl_depth,
+        include_patterns=website_data.include_patterns,
+        exclude_patterns=website_data.exclude_patterns
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Process synchronously with timeout
+    processor = DocumentProcessor(tenant_id)
+    try:
+        logger.info(f"Starting sync crawl for KB {kb.id}...")
+        
+        # Process with timeout
+        result = await asyncio.wait_for(
+        processor.process_website(
+            base_url=base_url,
+            vector_store_id=kb.vector_store_id,
+            crawl_depth=website_data.crawl_depth,
+            include_patterns=website_data.include_patterns,
+            exclude_patterns=website_data.exclude_patterns
+        ),
+        timeout=300.0  # 5 minutes instead of 60 seconds
+    )
+        
+        # Update success status
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        kb.last_crawled_at = datetime.utcnow()
+        kb.pages_crawled = result['successful_pages']
+        kb.processing_error = None
+        
+        logger.info(f"Sync crawl completed: {result['successful_pages']} pages")
+        
+    except asyncio.TimeoutError:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = "Crawling timeout after 60 seconds"
+        logger.error(f"Sync crawl timeout for KB {kb.id}")
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        logger.error(f"Sync crawl failed: {e}", exc_info=True)
+    
+    finally:
+        db.commit()
+        db.refresh(kb)
+    
+    return kb
+
+
+# Debug endpoint to check what's wrong with stuck crawls
+@router.get("/{kb_id}/debug")
+async def debug_stuck_crawl(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Debug a stuck crawl to see what's wrong"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    
+    # Test the URL with the exact same patterns
+    from app.knowledge_base.website_crawler import WebsiteCrawler
+    
+    crawler = WebsiteCrawler(max_depth=1, max_pages=5, delay=0.5, timeout=10)
+    
+    try:
+        # Quick test crawl
+        results = await asyncio.wait_for(
+            crawler.crawl_website(
+                base_url=kb.base_url,
+                include_patterns=kb.include_patterns,
+                exclude_patterns=kb.exclude_patterns
+            ),
+            timeout=30.0
+        )
+        
+        return {
+            "kb_id": kb_id,
+            "base_url": kb.base_url,
+            "include_patterns": kb.include_patterns,
+            "exclude_patterns": kb.exclude_patterns,
+            "test_results": {
+                "success": True,
+                "pages_found": len(results),
+                "pages": [{"url": r.url, "content_length": len(r.content), "error": r.error} for r in results]
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "kb_id": kb_id,
+            "base_url": kb.base_url,
+            "include_patterns": kb.include_patterns,
+            "exclude_patterns": kb.exclude_patterns,
+            "test_results": {
+                "success": False,
+                "error": str(e)
+            }
+        }
 
 @router.post("/{kb_id}/recrawl")
 async def recrawl_website(
@@ -630,3 +789,47 @@ async def get_processing_status(
         "pages_crawled": kb.pages_crawled if kb.document_type == DocumentType.WEBSITE else None,
         "last_crawled_at": kb.last_crawled_at.isoformat() if kb.last_crawled_at else None
     } for kb in kbs]
+
+
+
+
+@router.get("/{kb_id}/vector-content")
+async def get_vector_content(
+    kb_id: int,
+    limit: int = 5,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get sample content from vector store"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    
+    try:
+        processor = DocumentProcessor(tenant.id)
+        vector_store = processor.get_vector_store(kb.vector_store_id)
+        
+        # Get some sample documents
+        docs = vector_store.similarity_search("content", k=limit)
+        
+        return {
+            "kb_id": kb_id,
+            "vector_store_id": kb.vector_store_id,
+            "total_docs": len(docs),
+            "documents": [
+                {
+                    "content": doc.page_content[:500] + ("..." if len(doc.page_content) > 500 else ""),
+                    "metadata": doc.metadata,
+                    "full_length": len(doc.page_content)
+                } for doc in docs
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading vector store: {str(e)}")
