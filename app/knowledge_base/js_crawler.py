@@ -25,10 +25,10 @@ class JSWebsiteCrawler:
     
     def __init__(self, 
                  max_depth: int = 3,
-                 max_pages: int = 100,
-                 delay: float = 1.0,
-                 timeout: int = 30,
-                 enable_js: bool = True):
+                 max_pages: int = 20,
+                 delay: float = 0.5,
+                 timeout: int = 10,
+                 enable_js: bool = False):
         self.max_depth = max_depth
         self.max_pages = max_pages
         self.delay = delay
@@ -46,7 +46,7 @@ class JSWebsiteCrawler:
         logger.info(f"Starting JS-enabled crawl of {base_url} (depth: {self.max_depth}, max_pages: {self.max_pages})")
         
         # Check if we can use playwright for JS rendering
-        playwright_available = await self._check_playwright()
+        playwright_available = False  # Disable JS by default for speed
         
         if self.enable_js and playwright_available:
             logger.info("🎭 Using Playwright for JavaScript rendering")
@@ -196,16 +196,14 @@ class JSWebsiteCrawler:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
         
-        # Setup HTTP session
+        # Setup HTTP session with aggressive timeouts
         connector = aiohttp.TCPConnector(
-            limit=10, 
-            limit_per_host=3,
+            limit=5, 
+            limit_per_host=2,
             ssl=ssl_context,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
             enable_cleanup_closed=True
         )
-        timeout = aiohttp.ClientTimeout(total=self.timeout, connect=10)
+        timeout = aiohttp.ClientTimeout(total=self.timeout, connect=3)
         
         async with aiohttp.ClientSession(
             connector=connector,
@@ -240,10 +238,14 @@ class JSWebsiteCrawler:
                         
                         # Extract links for next level
                         if depth < self.max_depth:
-                            links = self._extract_links(result.content, current_url)
-                            for link in links[:10]:
-                                if link not in self.visited_urls:
-                                    crawl_queue.append((link, depth + 1))
+                            try:
+                                links = self._extract_links(html, current_url)
+                                logger.info(f"Found {len(links)} links on {current_url}")
+                                for link in links[:5]:  # Limit to 5 links per page
+                                    if link not in self.visited_urls:
+                                        crawl_queue.append((link, depth + 1))
+                            except Exception as e:
+                                logger.warning(f"Link extraction failed for {current_url}: {e}")
                     else:
                         logger.warning(f"Failed to crawl {current_url}: {result.error}")
                 
@@ -256,27 +258,45 @@ class JSWebsiteCrawler:
     async def _crawl_page_http(self, session: aiohttp.ClientSession, url: str) -> Optional[CrawlResult]:
         """Crawl a single page with HTTP only"""
         try:
+            logger.info(f"🌐 Attempting to crawl: {url}")
             async with session.get(url, allow_redirects=True, max_redirects=5) as response:
+                logger.info(f"📡 Response status: {response.status} for {url}")
+                
                 if response.status not in [200, 201]:
+                    logger.warning(f"❌ Bad status {response.status} for {url}")
                     return CrawlResult(url, "", "", response.status, f"HTTP {response.status}")
                 
                 # Check content type
                 content_type = response.headers.get('content-type', '').lower()
+                logger.info(f"📄 Content-Type: {content_type} for {url}")
+                
                 if not any(ct in content_type for ct in ['text/html', 'application/xhtml', 'text/plain']):
                     return CrawlResult(url, "", "", response.status, f"Non-HTML content: {content_type}")
                 
-                # Read content
+                # Read content with better error handling
                 try:
                     html = await response.text()
-                except UnicodeDecodeError:
-                    html_bytes = await response.read()
-                    html = html_bytes.decode('utf-8', errors='ignore')
+                    logger.info(f"📖 Raw HTML length: {len(html)} chars for {url}")
+                except Exception as e:
+                    try:
+                        html_bytes = await response.read()
+                        html = html_bytes.decode('utf-8', errors='ignore')
+                        logger.info(f"📖 Decoded HTML length: {len(html)} chars for {url}")
+                    except Exception as e2:
+                        logger.error(f"❌ Failed to read content: {e2}")
+                        return CrawlResult(url, "", "", response.status, "Could not read content")
                 
-                if not html or len(html.strip()) < 50:
-                    return CrawlResult(url, "", "", response.status, "Empty content")
+                if not html or len(html.strip()) < 20:
+                    logger.warning(f"❌ Empty/minimal HTML for {url}")
+                    return CrawlResult(url, "", "", response.status, "Empty or minimal content")
                 
                 # Extract content
                 soup = BeautifulSoup(html, 'html.parser')
+                
+                # Log page title for debugging
+                title_tag = soup.find('title')
+                page_title = title_tag.get_text().strip() if title_tag else "No title"
+                logger.info(f"📝 Page title: '{page_title}' for {url}")
                 
                 # Remove unwanted elements
                 for element in soup(['script', 'style', 'nav', 'header', 'footer', 
@@ -284,29 +304,35 @@ class JSWebsiteCrawler:
                     element.decompose()
                 
                 # Extract title
-                title_tag = soup.find('title')
-                title = title_tag.get_text().strip() if title_tag else urlparse(url).path
+                title = page_title if page_title != "No title" else urlparse(url).path
                 
                 # Extract main content
                 content = self._extract_main_content(soup)
+                logger.info(f"📄 Extracted content length: {len(content) if content else 0} chars for {url}")
                 
-                if not content or len(content.strip()) < 50:
+                if not content or len(content.strip()) < 20:
+                    logger.warning(f"❌ Insufficient content extracted for {url}")
+                    # Log first 200 chars of HTML for debugging
+                    logger.info(f"🔍 HTML preview: {html[:200]}...")
                     return CrawlResult(url, "", title, response.status, "Insufficient content")
                 
+                logger.info(f"✅ Successfully extracted content for {url}")
                 return CrawlResult(url, content, title, response.status)
                 
         except Exception as e:
+            logger.error(f"❌ Exception crawling {url}: {str(e)}")
             return CrawlResult(url, "", "", 0, f"Error: {str(e)}")
     
     def _extract_main_content(self, soup: BeautifulSoup) -> str:
         """Extract main content from HTML with improved selection"""
         content_parts = []
         
-        # Try main content areas first
+        # Try main content areas first with very low thresholds
         content_selectors = [
             'main', 'article', '[role="main"]', '.main-content', '.content',
             '#main-content', '#content', '.post-content', '.entry-content',
-            '.page-content', '.article-content', '.blog-content'
+            '.page-content', '.article-content', '.blog-content', '.hero',
+            '.banner', '.intro', '.description'
         ]
         
         found_content = False
@@ -315,20 +341,20 @@ class JSWebsiteCrawler:
             if elements:
                 for el in elements:
                     text = el.get_text(separator=' ', strip=True)
-                    if len(text) > 50:
+                    if len(text) > 10:  # Very low threshold
                         content_parts.append(text)
                         found_content = True
                 break
         
         # If no main content, extract from common content tags
         if not found_content:
-            content_tags = ['p', 'div', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span']
+            content_tags = ['p', 'div', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'li', 'td']
             for tag in content_tags:
                 elements = soup.find_all(tag)
                 for el in elements:
                     if self._is_likely_content(el):
                         text = el.get_text(separator=' ', strip=True)
-                        if len(text) > 20:
+                        if len(text) > 10:  # Very low threshold
                             content_parts.append(text)
         
         # Fallback: body
@@ -336,8 +362,14 @@ class JSWebsiteCrawler:
             body = soup.find('body')
             if body:
                 text = body.get_text(separator=' ', strip=True)
-                if len(text) > 20:
+                if len(text) > 10:  # Very low threshold
                     content_parts.append(text)
+        
+        # Final fallback: get all text
+        if not content_parts:
+            text = soup.get_text(separator=' ', strip=True)
+            if len(text) > 10:
+                content_parts.append(text)
         
         # Join and clean
         final_content = ' '.join(content_parts)
@@ -346,19 +378,25 @@ class JSWebsiteCrawler:
         return final_content
     
     def _is_likely_content(self, element) -> bool:
-        """Check if element contains main content"""
+        """Check if element contains main content - more permissive"""
         skip_classes = ['nav', 'navigation', 'menu', 'header', 'footer', 'sidebar', 
-                       'advertisement', 'ads', 'social', 'share', 'comment']
-        skip_ids = ['nav', 'navigation', 'menu', 'header', 'footer', 'sidebar']
+                       'advertisement', 'ads', 'social', 'share', 'comment', 'cookie']
+        skip_ids = ['nav', 'navigation', 'menu', 'header', 'footer', 'sidebar', 'cookie']
         
         # Check class and id attributes
         classes = element.get('class', [])
         element_id = element.get('id', '').lower()
         
+        # Skip obvious non-content
         if (any(skip_class in ' '.join(classes).lower() for skip_class in skip_classes) or
             any(skip_id in element_id for skip_id in skip_ids)):
             return False
         
+        # Accept more content - be less strict
+        text = element.get_text(strip=True)
+        if len(text) < 5:  # Very short text
+            return False
+            
         return True
     
     def _extract_links(self, html_content: str, base_url: str) -> List[str]:
