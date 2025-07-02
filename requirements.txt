@@ -158,4 +158,4 @@ lxml
 html5lib
 pydantic
 certifi
-playwright
+# playwright

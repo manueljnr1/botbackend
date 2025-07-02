@@ -1771,6 +1771,209 @@ def calculate_formatting_aware_delay(chunk: str) -> float:
 
 
 
+# @router.post("/chat/smart")
+# async def smart_chat_with_followup_streaming(
+#     request: SmartChatRequest,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Smart chat with instant main response + streamed follow-up suggestions
+#     NOW WITH: Intelligent topic change detection using LLM
+#     """
+    
+#     async def stream_with_followups():
+#         try:
+#             logger.info(f"🚀 Smart chat with follow-up streaming + context analysis for: {request.user_identifier}")
+            
+#             # Get tenant and check limits
+#             tenant = get_tenant_from_api_key(api_key, db)
+#             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+#             # Initialize chatbot engine FIRST
+#             engine = ChatbotEngine(db)
+            
+#             # Auto-generate user ID if needed
+#             user_id = request.user_identifier
+#             auto_generated = False
+            
+#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#                 user_id = f"auto_{str(uuid.uuid4())}"
+#                 auto_generated = True
+            
+#             # Send initial metadata
+#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated})}\n"
+            
+#             # Get conversation history for context analysis
+#             from app.chatbot.simple_memory import SimpleChatbotMemory
+#             memory = SimpleChatbotMemory(db, tenant.id)
+#             conversation_history = memory.get_conversation_history(user_id, request.max_context)
+            
+#             # NEW: Analyze conversation context with LLM - USE ENGINE METHOD
+#             context_analysis = None
+#             topic_change_response = None
+
+#             if conversation_history and len(conversation_history) > 1:
+#                 # Call the method from the engine instance
+#                 context_analysis = engine.analyze_conversation_context_llm(
+#                     request.message, 
+#                     conversation_history, 
+#                     tenant.name
+#                 )
+                
+#                 logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
+                
+#                 # Handle greeting types AND conversation questions
+#                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
+                
+#                 if context_analysis and context_analysis.get('type') in special_handling_types:
+#                     logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
+                    
+#                     # Generate appropriate response
+#                     topic_change_response = engine.handle_topic_change_response(
+#                         request.message,
+#                         context_analysis.get('previous_topic', ''),
+#                         context_analysis.get('suggested_approach', ''),
+#                         tenant.name,
+#                         context_analysis  # Pass the full analysis
+#                     )
+                    
+#                     if topic_change_response and len(topic_change_response.strip()) > 0:
+#                         logger.info(f"🔄 Generated response: {topic_change_response[:50]}...")
+#                     else:
+#                         logger.info(f"🔄 No response generated, proceeding normally")
+#                         topic_change_response = None
+#                 else:
+#                     logger.info(f"🔄 Normal processing for type: {context_analysis.get('type', 'UNKNOWN')}")
+            
+#             # If greeting detected, send that response instead
+#             if topic_change_response:
+#                 logger.info(f"🔄 Sending greeting response")
+                
+#                 # Store the conversation in memory
+#                 session_id, _ = memory.get_or_create_session(user_id, "web")
+#                 memory.store_message(session_id, request.message, True)
+#                 memory.store_message(session_id, topic_change_response, False)
+                
+#                 # Send greeting response as main response
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': topic_change_response,
+#                     'session_id': session_id,
+#                     'answered_by': 'GREETING_DETECTION',
+#                     'context_analysis': context_analysis
+#                 }
+#                 yield f"{json.dumps(main_response)}\n"
+                
+#                 # Wait a moment, then ask clarifying follow-up
+#                 await asyncio.sleep(1.5)
+                
+#                 clarifying_followup = {
+#                     'type': 'followup',
+#                     'content': "What would you like help with?",
+#                     'index': 0,
+#                     'is_last': True
+#                 }
+#                 yield f"{json.dumps(clarifying_followup)}\n"
+                
+#                 # Send completion
+#                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'greeting_handled': True})}\n"
+                
+#                 # Track conversation
+#                 track_conversation_started_with_super_tenant(
+#                     tenant_id=tenant.id,
+#                     user_identifier=user_id,
+#                     platform="web",
+#                     db=db
+#                 )
+                
+#                 return
+            
+#             # Continue with normal processing if no greeting
+#             result = engine.process_web_message_with_advanced_feedback_llm(
+#                 api_key=api_key,
+#                 user_message=request.message,
+#                 user_identifier=user_id,
+#                 max_context=request.max_context,
+#                 use_smart_llm=True
+#             )
+            
+#             if not result.get("success"):
+#                 logger.error(f"❌ Smart chat failed: {result.get('error')}")
+#                 yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+#                 return
+            
+#             logger.info("✅ Chatbot response received successfully")
+            
+#             # Track conversation
+#             track_conversation_started_with_super_tenant(
+#                 tenant_id=tenant.id,
+#                 user_identifier=user_id,
+#                 platform="web",
+#                 db=db
+#             )
+            
+#             # Send main response INSTANTLY
+#             main_response = {
+#                 'type': 'main_response',
+#                 'content': result["response"],
+#                 'session_id': result.get('session_id'),
+#                 'answered_by': result.get('answered_by'),
+#                 'email_captured': result.get('email_captured', False),
+#                 'feedback_triggered': result.get('feedback_triggered', False),
+#                 'context_analysis': context_analysis  # Include analysis in response
+#             }
+#             yield f"{json.dumps(main_response)}\n"
+            
+#             # Wait before follow-ups
+#             await asyncio.sleep(1.5)
+            
+#             # Generate and stream follow-up suggestions using LLM
+#             should_generate, followups = should_generate_followups_llm(
+#                 request.message, 
+#                 result["response"], 
+#                 tenant.name
+#             )
+            
+#             if should_generate and followups:
+#                 for i, followup in enumerate(followups):
+#                     if i > 0:
+#                         delay = calculate_followup_delay(followup)
+#                         await asyncio.sleep(delay)
+                    
+#                     followup_data = {
+#                         'type': 'followup',
+#                         'content': followup,
+#                         'index': i,
+#                         'is_last': i == len(followups) - 1
+#                     }
+#                     yield f"{json.dumps(followup_data)}\n"
+            
+#             # Send completion signal
+#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0})}\n"
+            
+#             logger.info(f"✅ Smart chat with follow-ups + context analysis completed")
+            
+#         except HTTPException as e:
+#             logger.error(f"🚫 HTTP error in smart chat: {e.detail}")
+#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+#         except Exception as e:
+#             logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
+#             import traceback
+#             logger.error(traceback.format_exc())
+#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+#     return StreamingResponse(
+#         stream_with_followups(),
+#         media_type="application/x-ndjson",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
+
+
 @router.post("/chat/smart")
 async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
@@ -1778,19 +1981,18 @@ async def smart_chat_with_followup_streaming(
     db: Session = Depends(get_db)
 ):
     """
-    Smart chat with instant main response + streamed follow-up suggestions
-    NOW WITH: Intelligent topic change detection using LLM
+    Smart chat with intelligent delay simulation + follow-up suggestions
     """
     
     async def stream_with_followups():
         try:
-            logger.info(f"🚀 Smart chat with follow-up streaming + context analysis for: {request.user_identifier}")
+            logger.info(f"🚀 Smart chat with delay simulation for: {request.user_identifier}")
             
             # Get tenant and check limits
             tenant = get_tenant_from_api_key(api_key, db)
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
-            # Initialize chatbot engine FIRST
+            # Initialize chatbot engine
             engine = ChatbotEngine(db)
             
             # Auto-generate user ID if needed
@@ -1809,12 +2011,11 @@ async def smart_chat_with_followup_streaming(
             memory = SimpleChatbotMemory(db, tenant.id)
             conversation_history = memory.get_conversation_history(user_id, request.max_context)
             
-            # NEW: Analyze conversation context with LLM - USE ENGINE METHOD
+            # Context analysis for greetings/special cases
             context_analysis = None
             topic_change_response = None
 
             if conversation_history and len(conversation_history) > 1:
-                # Call the method from the engine instance
                 context_analysis = engine.analyze_conversation_context_llm(
                     request.message, 
                     conversation_history, 
@@ -1823,50 +2024,47 @@ async def smart_chat_with_followup_streaming(
                 
                 logger.info(f"🧠 Context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
                 
-                # Handle greeting types AND conversation questions
                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
                 
                 if context_analysis and context_analysis.get('type') in special_handling_types:
-                    logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
-                    
-                    # Generate appropriate response
                     topic_change_response = engine.handle_topic_change_response(
                         request.message,
                         context_analysis.get('previous_topic', ''),
                         context_analysis.get('suggested_approach', ''),
                         tenant.name,
-                        context_analysis  # Pass the full analysis
+                        context_analysis
                     )
-                    
-                    if topic_change_response and len(topic_change_response.strip()) > 0:
-                        logger.info(f"🔄 Generated response: {topic_change_response[:50]}...")
-                    else:
-                        logger.info(f"🔄 No response generated, proceeding normally")
-                        topic_change_response = None
-                else:
-                    logger.info(f"🔄 Normal processing for type: {context_analysis.get('type', 'UNKNOWN')}")
             
-            # If greeting detected, send that response instead
+            # ⭐ NEW: Initialize delay simulator
+            delay_simulator = engine.delay_simulator
+            
+            # Handle greeting responses with delay
             if topic_change_response:
-                logger.info(f"🔄 Sending greeting response")
+                logger.info(f"🔄 Sending greeting response with delay simulation")
                 
-                # Store the conversation in memory
                 session_id, _ = memory.get_or_create_session(user_id, "web")
                 memory.store_message(session_id, request.message, True)
                 memory.store_message(session_id, topic_change_response, False)
                 
-                # Send greeting response as main response
+                # ⭐ Calculate and apply delay for greeting
+                if delay_simulator:
+                    response_delay = delay_simulator.calculate_response_delay(request.message, topic_change_response)
+                    logger.info(f"⏱️ Applying {response_delay:.2f}s delay for greeting")
+                    await asyncio.sleep(response_delay)
+                
                 main_response = {
                     'type': 'main_response',
                     'content': topic_change_response,
                     'session_id': session_id,
                     'answered_by': 'GREETING_DETECTION',
-                    'context_analysis': context_analysis
+                    'context_analysis': context_analysis,
+                    'response_delay': response_delay if delay_simulator else 0
                 }
                 yield f"{json.dumps(main_response)}\n"
                 
-                # Wait a moment, then ask clarifying follow-up
-                await asyncio.sleep(1.5)
+                # Follow-up with natural delay
+                followup_delay = 2.0 + random.uniform(0.5, 1.5)  # 2-3.5s variation
+                await asyncio.sleep(followup_delay)
                 
                 clarifying_followup = {
                     'type': 'followup',
@@ -1876,10 +2074,8 @@ async def smart_chat_with_followup_streaming(
                 }
                 yield f"{json.dumps(clarifying_followup)}\n"
                 
-                # Send completion
                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'greeting_handled': True})}\n"
                 
-                # Track conversation
                 track_conversation_started_with_super_tenant(
                     tenant_id=tenant.id,
                     user_identifier=user_id,
@@ -1889,7 +2085,9 @@ async def smart_chat_with_followup_streaming(
                 
                 return
             
-            # Continue with normal processing if no greeting
+            # ⭐ ENHANCED: Process normal message with timing
+            start_time = time.time()
+            
             result = engine.process_web_message_with_advanced_feedback_llm(
                 api_key=api_key,
                 user_message=request.message,
@@ -1905,6 +2103,18 @@ async def smart_chat_with_followup_streaming(
             
             logger.info("✅ Chatbot response received successfully")
             
+            # ⭐ Calculate intelligent delay based on question complexity and response
+            response_delay = 0
+            if delay_simulator:
+                response_delay = delay_simulator.calculate_response_delay(request.message, result["response"])
+                processing_time = time.time() - start_time
+                
+                # Subtract processing time from delay (don't double-delay)
+                actual_delay = max(0.2, response_delay - processing_time)
+                
+                logger.info(f"⏱️ Calculated delay: {response_delay:.2f}s, Processing: {processing_time:.2f}s, Actual delay: {actual_delay:.2f}s")
+                await asyncio.sleep(actual_delay)
+            
             # Track conversation
             track_conversation_started_with_super_tenant(
                 tenant_id=tenant.id,
@@ -1913,7 +2123,7 @@ async def smart_chat_with_followup_streaming(
                 db=db
             )
             
-            # Send main response INSTANTLY
+            # Send main response with delay info
             main_response = {
                 'type': 'main_response',
                 'content': result["response"],
@@ -1921,14 +2131,17 @@ async def smart_chat_with_followup_streaming(
                 'answered_by': result.get('answered_by'),
                 'email_captured': result.get('email_captured', False),
                 'feedback_triggered': result.get('feedback_triggered', False),
-                'context_analysis': context_analysis  # Include analysis in response
+                'context_analysis': context_analysis,
+                'response_delay': response_delay if delay_simulator else 0,
+                'total_processing_time': time.time() - start_time
             }
             yield f"{json.dumps(main_response)}\n"
             
-            # Wait before follow-ups
-            await asyncio.sleep(1.5)
+            # ⭐ ENHANCED: Smart follow-up timing
+            base_followup_delay = 1.8 + random.uniform(0.3, 0.9)  # 1.8-2.7s variation
+            await asyncio.sleep(base_followup_delay)
             
-            # Generate and stream follow-up suggestions using LLM
+            # Generate and stream follow-up suggestions
             should_generate, followups = should_generate_followups_llm(
                 request.message, 
                 result["response"], 
@@ -1938,8 +2151,9 @@ async def smart_chat_with_followup_streaming(
             if should_generate and followups:
                 for i, followup in enumerate(followups):
                     if i > 0:
-                        delay = calculate_followup_delay(followup)
-                        await asyncio.sleep(delay)
+                        # ⭐ Natural delays between follow-ups
+                        inter_followup_delay = 0.8 + random.uniform(0.2, 0.6)  # 0.8-1.4s
+                        await asyncio.sleep(inter_followup_delay)
                     
                     followup_data = {
                         'type': 'followup',
@@ -1950,15 +2164,15 @@ async def smart_chat_with_followup_streaming(
                     yield f"{json.dumps(followup_data)}\n"
             
             # Send completion signal
-            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0})}\n"
+            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'delay_simulation': True})}\n"
             
-            logger.info(f"✅ Smart chat with follow-ups + context analysis completed")
+            logger.info(f"✅ Smart chat with delays completed")
             
         except HTTPException as e:
             logger.error(f"🚫 HTTP error in smart chat: {e.detail}")
             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
         except Exception as e:
-            logger.error(f"💥 Error in smart follow-up streaming: {str(e)}")
+            logger.error(f"💥 Error in smart chat with delays: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
@@ -1972,6 +2186,12 @@ async def smart_chat_with_followup_streaming(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+
+
+
+
 
 
 
@@ -2110,226 +2330,6 @@ def calculate_followup_delay(followup: str) -> float:
 
 
 
-# @router.post("/chat/super-tenant-admin")
-# async def super_tenant_admin_chat(
-#     request: SmartChatRequest,
-#     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),      # Tenant chatting
-#     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),    # Super tenant's chatbot
-#     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Super Tenant Admin Chat with Smart Features - Dual API Key Security
-#     SECURITY: 
-#     - chatbot_api_key: Must belong to super tenant (chatbot owner)
-#     - tenant_api_key: The tenant who is chatting (gets admin features for their account)
-#     """
-    
-#     async def stream_admin_response():
-#         try:
-#             logger.info(f"🤖 Super tenant admin chat request: {request.message[:50]}...")
-            
-           
-#             if super_tenant_context != "super_tenant_official_widget":
-#                 logger.warning(f"🚨 Unauthorized admin access attempt. Context: {super_tenant_context}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Not available to you', 'status_code': 403})}\n"
-#                 return
-            
-#             # 🔒 CRITICAL: Validate chatbot owner is super tenant
-#             try:
-#                 chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
-#                 logger.info(f"🏢 Chatbot owner: {chatbot_owner.name} (ID: {chatbot_owner.id})")
-                
-#                 # Check if chatbot owner is super tenant (you can add is_super_tenant flag or check specific ID)
-#                 if not getattr(chatbot_owner, 'is_super_tenant', False):
-#                     # Fallback: Check if it's your specific super tenant ID
-#                     SUPER_TENANT_IDS = [324112833]  # Add your super tenant ID(s) here
-#                     if chatbot_owner.id not in SUPER_TENANT_IDS:
-#                         logger.warning(f"🚨 Non-super tenant trying to host admin chatbot: {chatbot_owner.id}")
-#                         yield f"{json.dumps({'type': 'error', 'error': 'This chatbot is not hosted by an authorized super tenant', 'status_code': 403})}\n"
-#                         return
-                
-#                 logger.info(f"✅ Super tenant validation passed: {chatbot_owner.name}")
-                
-#             except Exception as e:
-#                 logger.error(f"❌ Invalid chatbot API key: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot API key', 'status_code': 403})}\n"
-#                 return
-            
-#             # 🔒 Get authenticated tenant (the one chatting and getting admin features)
-#             try:
-#                 tenant = get_tenant_from_api_key(tenant_api_key, db)
-#                 check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-#                 logger.info(f"✅ Authenticated tenant: {tenant.name} (ID: {tenant.id})")
-                
-#             except Exception as e:
-#                 logger.error(f"❌ Invalid tenant API key: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid tenant API key', 'status_code': 403})}\n"
-#                 return
-            
-#             # 🔒 SECURITY: Verify tenant is active
-#             if not tenant.is_active:
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Tenant account is inactive', 'status_code': 403})}\n"
-#                 return
-            
-#             logger.info(f"🔒 Processing admin chat: Tenant {tenant.name} using {chatbot_owner.name}'s super tenant chatbot")
-            
-#             # Auto-generate user ID if needed
-#             user_id = request.user_identifier
-#             auto_generated = False
-            
-#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#                 user_id = f"admin_auto_{str(uuid.uuid4())}"
-#                 auto_generated = True
-            
-#             # Send initial metadata with both tenant info
-#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'chatbot_owner_id': chatbot_owner.id, 'super_tenant_name': chatbot_owner.name})}\n"
-            
-#             # Check for admin greetings
-#             user_message_lower = request.message.lower().strip()
-#             is_greeting = any(greeting in user_message_lower for greeting in ['hello', 'hi', 'hey', 'help', 'what can you do'])
-            
-#             if is_greeting and len(request.message) < 20:
-#                 # Send admin greeting response
-#                 greeting_response = f"👋 Hello! Welcome to your {tenant.name} admin dashboard. I can help you:\n\n• **Manage FAQs** - Add, edit, or delete frequently asked questions\n• **View Analytics** - Check chatbot usage and performance\n• **Update Settings** - Modify chatbot behavior and appearance\n• **Integration Setup** - Configure Discord, Slack, etc.\n\nJust tell me what you'd like to do in natural language!"
-                
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': greeting_response,
-#                     'session_id': f"admin_session_{tenant.id}_{user_id}",
-#                     'answered_by': 'ADMIN_GREETING',
-#                     'admin_mode': True
-#                 }
-#                 yield f"{json.dumps(main_response)}\n"
-                
-#                 # Wait then send follow-ups
-#                 await asyncio.sleep(1.5)
-                
-#                 admin_suggestions = [
-#                     "Show me my FAQs",
-#                     "Check my analytics", 
-#                     "Update my settings",
-#                     "Help with integrations"
-#                 ]
-                
-#                 for i, suggestion in enumerate(admin_suggestions):
-#                     if i > 0:
-#                         await asyncio.sleep(0.8)
-                    
-#                     followup_data = {
-#                         'type': 'followup',
-#                         'content': suggestion,
-#                         'index': i,
-#                         'is_last': i == len(admin_suggestions) - 1,
-#                         'admin_suggestion': True
-#                     }
-#                     yield f"{json.dumps(followup_data)}\n"
-                
-#                 # Send completion
-#                 yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_suggestions), 'admin_greeting_handled': True})}\n"
-                
-#                 # Track conversation
-#                 track_conversation_started_with_super_tenant(
-#                     tenant_id=tenant.id,
-#                     user_identifier=user_id,
-#                     platform="admin_web",
-#                     db=db
-#                 )
-                
-#                 return
-            
-#             # Initialize admin engine for regular requests
-#             admin_engine = get_super_tenant_admin_engine(db)
-            
-#             # Process admin message using tenant API key
-#             result = admin_engine.process_admin_message(
-#                 user_message=request.message,
-#                 authenticated_tenant_id=tenant.id,  # 🔒 Security boundary - tenant getting admin features
-#                 user_identifier=user_id,
-#                 session_context={"admin_mode": True, "super_tenant_hosted": True, "chatbot_owner_id": chatbot_owner.id}
-#             )
-            
-#             if not result.get("success"):
-#                 logger.error(f"❌ Admin chat failed: {result.get('error')}")
-#                 yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-#                 return
-            
-#             logger.info("✅ Admin response received successfully")
-            
-#             # Track admin conversation
-#             track_conversation_started_with_super_tenant(
-#                 tenant_id=tenant.id,
-#                 user_identifier=user_id,
-#                 platform="admin_web",
-#                 db=db
-#             )
-            
-#             # Send main admin response
-#             main_response = {
-#                 'type': 'main_response',
-#                 'content': result.get("response", ""),
-#                 'session_id': result.get('session_id', f"admin_session_{tenant.id}_{user_id}"),
-#                 'answered_by': result.get('action', 'ADMIN_ACTION'),
-#                 'action': result.get('action'),
-#                 'requires_confirmation': result.get('requires_confirmation', False),
-#                 'requires_input': result.get('requires_input', False),
-#                 'pending_action': result.get('pending_action'),
-#                 'confidence': result.get('confidence'),
-#                 'admin_mode': True,
-#                 'tenant_id': tenant.id
-#             }
-#             yield f"{json.dumps(main_response)}\n"
-            
-#             # Wait before admin follow-ups
-#             await asyncio.sleep(1.5)
-            
-#             # Generate LLM-powered admin follow-ups
-#             should_generate, admin_followups = should_generate_admin_followups_llm(
-#                 request.message, 
-#                 result.get("response", ""), 
-#                 tenant.name,
-#                 result.get('action')
-#             )
-            
-#             # Stream LLM-generated follow-ups
-#             if should_generate and admin_followups:
-#                 for i, followup in enumerate(admin_followups):
-#                     if i > 0:
-#                         delay = calculate_followup_delay(followup)
-#                         await asyncio.sleep(delay)
-                    
-#                     followup_data = {
-#                         'type': 'followup',
-#                         'content': followup,
-#                         'index': i,
-#                         'is_last': i == len(admin_followups) - 1,
-#                         'admin_followup': True
-#                     }
-#                     yield f"{json.dumps(followup_data)}\n"
-            
-#             # Send completion signal
-#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(admin_followups) if admin_followups else 0, 'admin_enhanced': True})}\n"
-            
-#             logger.info(f"✅ Enhanced admin chat completed")
-            
-#         except HTTPException as e:
-#             logger.error(f"🚫 HTTP error in admin chat: {e.detail}")
-#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-#         except Exception as e:
-#             logger.error(f"💥 Error in admin streaming: {str(e)}")
-#             import traceback
-#             logger.error(traceback.format_exc())
-#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-#     return StreamingResponse(
-#         stream_admin_response(),
-#         media_type="application/x-ndjson",
-#         headers={
-#             "Cache-Control": "no-cache",
-#             "Connection": "keep-alive",
-#             "X-Accel-Buffering": "no"
-#         }
-#     )
 
 @router.get("/admin-help")
 async def get_admin_help(
@@ -2439,6 +2439,306 @@ async def check_admin_context(
 
 
 
+# @router.post("/chat/super-tenant-admin")
+# async def super_tenant_admin_chat(
+#     request: SmartChatRequest,
+#     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),
+#     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),
+#     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Super Tenant Admin Chat with Full LLM Intelligence
+#     Routes ALL interactions through LLM - no hardcoded responses
+#     """
+    
+#     async def stream_admin_response():
+#         try:
+#             logger.info(f"🤖 LLM-powered admin chat: {request.message[:50]}...")
+            
+#             # Security validation
+#             if super_tenant_context != "super_tenant_official_widget":
+#                 logger.warning(f"🚨 Unauthorized admin access attempt")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Admin features not available in this context', 'status_code': 403})}\n"
+#                 return
+            
+#             # Validate chatbot owner is super tenant
+#             try:
+#                 chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
+#                 SUPER_TENANT_IDS = [324112833]
+                
+#                 if not getattr(chatbot_owner, 'is_super_tenant', False) and chatbot_owner.id not in SUPER_TENANT_IDS:
+#                     logger.warning(f"🚨 Unauthorized super tenant access: {chatbot_owner.id}")
+#                     yield f"{json.dumps({'type': 'error', 'error': 'Unauthorized chatbot host', 'status_code': 403})}\n"
+#                     return
+                    
+#             except Exception as e:
+#                 logger.error(f"❌ Invalid chatbot API key: {str(e)}")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot credentials', 'status_code': 403})}\n"
+#                 return
+            
+#             # Authenticate admin tenant
+#             try:
+#                 tenant = get_tenant_from_api_key(tenant_api_key, db)
+#                 check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+                
+#                 if not tenant.is_active:
+#                     yield f"{json.dumps({'type': 'error', 'error': 'Account inactive', 'status_code': 403})}\n"
+#                     return
+                    
+#             except Exception as e:
+#                 logger.error(f"❌ Tenant authentication failed: {str(e)}")
+#                 yield f"{json.dumps({'type': 'error', 'error': 'Authentication failed', 'status_code': 403})}\n"
+#                 return
+            
+#             # Auto-generate user ID
+#             user_id = request.user_identifier
+#             auto_generated = False
+            
+#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#                 user_id = f"admin_auto_{str(uuid.uuid4())}"
+#                 auto_generated = True
+            
+#             # Send metadata
+#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'super_tenant_name': chatbot_owner.name})}\n"
+            
+#             # Initialize memory for conversation context
+#             from app.chatbot.simple_memory import SimpleChatbotMemory
+#             memory = SimpleChatbotMemory(db, tenant.id)
+#             conversation_history = memory.get_conversation_history(user_id, request.max_context)
+            
+#             # **SMART CHAT INTEGRATION: Use conversation context analysis like smart chat**
+#             context_analysis = None
+#             topic_change_response = None
+            
+#             # Initialize chatbot engine for FAQ/KB checking
+#             engine = ChatbotEngine(db)
+
+#             if conversation_history and len(conversation_history) > 1:
+#                 # Call the method from the engine instance (same as smart chat)
+#                 context_analysis = engine.analyze_conversation_context_llm(
+#                     request.message, 
+#                     conversation_history, 
+#                     tenant.name
+#                 )
+                
+#                 logger.info(f"🧠 Admin context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
+                
+#                 # Handle greeting types AND conversation questions (same as smart chat)
+#                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
+                
+#                 if context_analysis and context_analysis.get('type') in special_handling_types:
+#                     logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
+                    
+#                     # Generate appropriate response (same as smart chat)
+#                     topic_change_response = engine.handle_topic_change_response(
+#                         request.message,
+#                         context_analysis.get('previous_topic', ''),
+#                         context_analysis.get('suggested_approach', ''),
+#                         tenant.name,
+#                         context_analysis
+#                     )
+                    
+#                     if topic_change_response and len(topic_change_response.strip()) > 0:
+#                         logger.info(f"🔄 Generated admin greeting response: {topic_change_response[:50]}...")
+#                     else:
+#                         topic_change_response = None
+
+#             # If greeting detected, send that response instead (same as smart chat)
+#             if topic_change_response:
+#                 logger.info(f"🔄 Sending admin greeting response")
+                
+#                 # Store the conversation in memory
+#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
+#                 memory.store_message(session_id, request.message, True)
+#                 memory.store_message(session_id, topic_change_response, False)
+                
+#                 # Send greeting response as main response
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': topic_change_response,
+#                     'session_id': session_id,
+#                     'answered_by': 'ADMIN_GREETING_DETECTION',
+#                     'context_analysis': context_analysis,
+#                     'admin_mode': True,
+#                     'tenant_id': tenant.id
+#                 }
+#                 yield f"{json.dumps(main_response)}\n"
+                
+#                 # Wait a moment, then ask clarifying follow-up
+#                 await asyncio.sleep(1.5)
+                
+#                 clarifying_followup = {
+#                     'type': 'followup',
+#                     'content': "What would you like help with?",
+#                     'index': 0,
+#                     'is_last': True
+#                 }
+#                 yield f"{json.dumps(clarifying_followup)}\n"
+                
+#                 # Send completion
+#                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'admin_greeting_handled': True})}\n"
+                
+#                 # Track conversation
+#                 track_conversation_started_with_super_tenant(
+#                     tenant_id=tenant.id,
+#                     user_identifier=user_id,
+#                     platform="admin_web",
+#                     db=db
+#                 )
+                
+#                 return
+
+#             # **CRITICAL: Analyze message to determine admin vs normal chatbot response**
+#             admin_context_analysis = await analyze_admin_message_with_llm(
+#                 request.message, 
+#                 conversation_history, 
+#                 tenant,
+#                 chatbot_owner
+#             )
+            
+#             # **KEY DECISION: Route based on LLM analysis**
+#             if admin_context_analysis.get('requires_admin_engine', True):
+#                 # Use admin engine for specific admin tasks
+#                 admin_engine = get_super_tenant_admin_engine(db)
+                
+#                 result = admin_engine.process_admin_message(
+#                     user_message=request.message,
+#                     authenticated_tenant_id=tenant.id,
+#                     user_identifier=user_id,
+#                     session_context={
+#                         "admin_mode": True, 
+#                         "super_tenant_hosted": True, 
+#                         "chatbot_owner_id": chatbot_owner.id,
+#                         "llm_context": admin_context_analysis
+#                     }
+#                 )
+                
+#                 if not result.get("success"):
+#                     logger.error(f"❌ Admin engine failed: {result.get('error')}")
+#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+#                     return
+                
+#                 # Store conversation
+#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
+#                 memory.store_message(session_id, request.message, True)
+#                 memory.store_message(session_id, result["response"], False)
+                
+#                 # Send main response
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': result.get("response", ""),
+#                     'session_id': session_id,
+#                     'answered_by': result.get('action', 'ADMIN_ENGINE'),
+#                     'action': result.get('action'),
+#                     'requires_confirmation': result.get('requires_confirmation', False),
+#                     'requires_input': result.get('requires_input', False),
+#                     'admin_mode': True,
+#                     'tenant_id': tenant.id,
+#                     'context_analysis': context_analysis
+#                 }
+                
+#             else:
+#                 # **SMART CHAT CORE: Use the EXACT same FAQ/KB processing as smart chat**
+#                 logger.info(f"🔍 Using smart chat FAQ/KB processing for admin context")
+                
+#                 result = engine.process_web_message_with_advanced_feedback_llm(
+#                     api_key=tenant_api_key,  # Use tenant's API key
+#                     user_message=request.message,
+#                     user_identifier=user_id,
+#                     max_context=request.max_context,
+#                     use_smart_llm=True  # Same as smart chat
+#                 )
+                
+#                 if not result.get("success"):
+#                     logger.error(f"❌ Smart chat processing failed: {result.get('error')}")
+#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+#                     return
+                
+#                 # Enhanced response with admin context
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': result["response"],
+#                     'session_id': result.get('session_id'),
+#                     'answered_by': f"ADMIN_{result.get('answered_by', 'CHATBOT')}",
+#                     'email_captured': result.get('email_captured', False),
+#                     'feedback_triggered': result.get('feedback_triggered', False),
+#                     'faq_matched': result.get('faq_matched', False),
+#                     'admin_mode': True,
+#                     'tenant_id': tenant.id,
+#                     'context_analysis': context_analysis,
+#                     'admin_context_analysis': admin_context_analysis
+#                 }
+            
+#             yield f"{json.dumps(main_response)}\n"
+            
+#             # Track conversation
+#             track_conversation_started_with_super_tenant(
+#                 tenant_id=tenant.id,
+#                 user_identifier=user_id,
+#                 platform="admin_web",
+#                 db=db
+#             )
+            
+#             # Generate intelligent follow-ups using LLM (same logic as smart chat)
+#             await asyncio.sleep(1.5)
+            
+#             # Use the SAME follow-up generation as smart chat
+#             should_generate, followups = should_generate_followups_llm(
+#                 request.message, 
+#                 main_response['content'], 
+#                 tenant.name
+#             )
+            
+#             # If no regular follow-ups, generate admin-specific ones
+#             if not (should_generate and followups):
+#                 admin_followups = await generate_admin_followups_llm(
+#                     request.message,
+#                     main_response['content'],
+#                     tenant,
+#                     admin_context_analysis
+#                 )
+#                 followups = admin_followups
+#                 should_generate = bool(followups)
+            
+#             # Stream follow-ups (same as smart chat)
+#             if should_generate and followups:
+#                 for i, followup in enumerate(followups):
+#                     if i > 0:
+#                         await asyncio.sleep(calculate_followup_delay(followup))
+                    
+#                     followup_data = {
+#                         'type': 'followup',
+#                         'content': followup,
+#                         'index': i,
+#                         'is_last': i == len(followups) - 1,
+#                         'admin_followup': True
+#                     }
+#                     yield f"{json.dumps(followup_data)}\n"
+            
+#             # Send completion (same as smart chat)
+#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'admin_enhanced': True})}\n"
+            
+#         except HTTPException as e:
+#             logger.error(f"🚫 HTTP error: {e.detail}")
+#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+#         except Exception as e:
+#             logger.error(f"💥 Error: {str(e)}")
+#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+#     return StreamingResponse(
+#         stream_admin_response(),
+#         media_type="application/x-ndjson",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
+
+
+
+
 @router.post("/chat/super-tenant-admin")
 async def super_tenant_admin_chat(
     request: SmartChatRequest,
@@ -2448,13 +2748,12 @@ async def super_tenant_admin_chat(
     db: Session = Depends(get_db)
 ):
     """
-    Super Tenant Admin Chat with Full LLM Intelligence
-    Routes ALL interactions through LLM - no hardcoded responses
+    Super Tenant Admin Chat with intelligent delay simulation
     """
     
     async def stream_admin_response():
         try:
-            logger.info(f"🤖 LLM-powered admin chat: {request.message[:50]}...")
+            logger.info(f"🤖 Admin chat with delay simulation: {request.message[:50]}...")
             
             # Security validation
             if super_tenant_context != "super_tenant_official_widget":
@@ -2502,20 +2801,20 @@ async def super_tenant_admin_chat(
             # Send metadata
             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'super_tenant_name': chatbot_owner.name})}\n"
             
-            # Initialize memory for conversation context
+            # Initialize memory and context analysis
             from app.chatbot.simple_memory import SimpleChatbotMemory
             memory = SimpleChatbotMemory(db, tenant.id)
             conversation_history = memory.get_conversation_history(user_id, request.max_context)
             
-            # **SMART CHAT INTEGRATION: Use conversation context analysis like smart chat**
+            # ⭐ NEW: Initialize delay simulator for admin
+            engine = ChatbotEngine(db)
+            delay_simulator = engine.delay_simulator
+            
+            # Context analysis for admin conversations
             context_analysis = None
             topic_change_response = None
             
-            # Initialize chatbot engine for FAQ/KB checking
-            engine = ChatbotEngine(db)
-
             if conversation_history and len(conversation_history) > 1:
-                # Call the method from the engine instance (same as smart chat)
                 context_analysis = engine.analyze_conversation_context_llm(
                     request.message, 
                     conversation_history, 
@@ -2524,13 +2823,9 @@ async def super_tenant_admin_chat(
                 
                 logger.info(f"🧠 Admin context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
                 
-                # Handle greeting types AND conversation questions (same as smart chat)
                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
                 
                 if context_analysis and context_analysis.get('type') in special_handling_types:
-                    logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
-                    
-                    # Generate appropriate response (same as smart chat)
                     topic_change_response = engine.handle_topic_change_response(
                         request.message,
                         context_analysis.get('previous_topic', ''),
@@ -2538,22 +2833,21 @@ async def super_tenant_admin_chat(
                         tenant.name,
                         context_analysis
                     )
-                    
-                    if topic_change_response and len(topic_change_response.strip()) > 0:
-                        logger.info(f"🔄 Generated admin greeting response: {topic_change_response[:50]}...")
-                    else:
-                        topic_change_response = None
-
-            # If greeting detected, send that response instead (same as smart chat)
+            
+            # Handle admin greeting with delay
             if topic_change_response:
-                logger.info(f"🔄 Sending admin greeting response")
+                logger.info(f"🔄 Sending admin greeting response with delay")
                 
-                # Store the conversation in memory
                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
                 memory.store_message(session_id, request.message, True)
                 memory.store_message(session_id, topic_change_response, False)
                 
-                # Send greeting response as main response
+                # ⭐ Calculate delay for admin greeting
+                if delay_simulator:
+                    response_delay = delay_simulator.calculate_response_delay(request.message, topic_change_response)
+                    logger.info(f"⏱️ Admin greeting delay: {response_delay:.2f}s")
+                    await asyncio.sleep(response_delay)
+                
                 main_response = {
                     'type': 'main_response',
                     'content': topic_change_response,
@@ -2561,12 +2855,14 @@ async def super_tenant_admin_chat(
                     'answered_by': 'ADMIN_GREETING_DETECTION',
                     'context_analysis': context_analysis,
                     'admin_mode': True,
-                    'tenant_id': tenant.id
+                    'tenant_id': tenant.id,
+                    'response_delay': response_delay if delay_simulator else 0
                 }
                 yield f"{json.dumps(main_response)}\n"
                 
-                # Wait a moment, then ask clarifying follow-up
-                await asyncio.sleep(1.5)
+                # Natural follow-up delay for admin
+                followup_delay = 2.2 + random.uniform(0.3, 0.8)  # 2.2-3.0s for admin
+                await asyncio.sleep(followup_delay)
                 
                 clarifying_followup = {
                     'type': 'followup',
@@ -2576,10 +2872,8 @@ async def super_tenant_admin_chat(
                 }
                 yield f"{json.dumps(clarifying_followup)}\n"
                 
-                # Send completion
                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'admin_greeting_handled': True})}\n"
                 
-                # Track conversation
                 track_conversation_started_with_super_tenant(
                     tenant_id=tenant.id,
                     user_identifier=user_id,
@@ -2589,7 +2883,7 @@ async def super_tenant_admin_chat(
                 
                 return
 
-            # **CRITICAL: Analyze message to determine admin vs normal chatbot response**
+            # ⭐ ENHANCED: Analyze admin message context
             admin_context_analysis = await analyze_admin_message_with_llm(
                 request.message, 
                 conversation_history, 
@@ -2597,9 +2891,11 @@ async def super_tenant_admin_chat(
                 chatbot_owner
             )
             
-            # **KEY DECISION: Route based on LLM analysis**
+            # ⭐ Process admin message with timing
+            start_time = time.time()
+            
             if admin_context_analysis.get('requires_admin_engine', True):
-                # Use admin engine for specific admin tasks
+                # Use admin engine
                 admin_engine = get_super_tenant_admin_engine(db)
                 
                 result = admin_engine.process_admin_message(
@@ -2619,12 +2915,24 @@ async def super_tenant_admin_chat(
                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
                     return
                 
-                # Store conversation
                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
                 memory.store_message(session_id, request.message, True)
                 memory.store_message(session_id, result["response"], False)
                 
-                # Send main response
+                # ⭐ Calculate admin-specific delay
+                response_delay = 0
+                if delay_simulator:
+                    # Admin responses tend to be more complex, slight bias toward longer delays
+                    base_delay = delay_simulator.calculate_response_delay(request.message, result["response"])
+                    admin_complexity_bonus = 0.3  # 300ms bonus for admin operations
+                    response_delay = min(5.0, base_delay + admin_complexity_bonus)
+                    
+                    processing_time = time.time() - start_time
+                    actual_delay = max(0.3, response_delay - processing_time)  # Min 300ms for admin
+                    
+                    logger.info(f"⏱️ Admin delay: {response_delay:.2f}s, Processing: {processing_time:.2f}s, Actual: {actual_delay:.2f}s")
+                    await asyncio.sleep(actual_delay)
+                
                 main_response = {
                     'type': 'main_response',
                     'content': result.get("response", ""),
@@ -2635,19 +2943,20 @@ async def super_tenant_admin_chat(
                     'requires_input': result.get('requires_input', False),
                     'admin_mode': True,
                     'tenant_id': tenant.id,
-                    'context_analysis': context_analysis
+                    'context_analysis': context_analysis,
+                    'response_delay': response_delay
                 }
                 
             else:
-                # **SMART CHAT CORE: Use the EXACT same FAQ/KB processing as smart chat**
-                logger.info(f"🔍 Using smart chat FAQ/KB processing for admin context")
+                # Use smart chat processing with admin context
+                logger.info(f"🔍 Using smart chat processing for admin context")
                 
                 result = engine.process_web_message_with_advanced_feedback_llm(
-                    api_key=tenant_api_key,  # Use tenant's API key
+                    api_key=tenant_api_key,
                     user_message=request.message,
                     user_identifier=user_id,
                     max_context=request.max_context,
-                    use_smart_llm=True  # Same as smart chat
+                    use_smart_llm=True
                 )
                 
                 if not result.get("success"):
@@ -2655,7 +2964,16 @@ async def super_tenant_admin_chat(
                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
                     return
                 
-                # Enhanced response with admin context
+                # ⭐ Calculate delay for smart admin response
+                response_delay = 0
+                if delay_simulator:
+                    response_delay = delay_simulator.calculate_response_delay(request.message, result["response"])
+                    processing_time = time.time() - start_time
+                    actual_delay = max(0.2, response_delay - processing_time)
+                    
+                    logger.info(f"⏱️ Smart admin delay: {response_delay:.2f}s, Actual: {actual_delay:.2f}s")
+                    await asyncio.sleep(actual_delay)
+                
                 main_response = {
                     'type': 'main_response',
                     'content': result["response"],
@@ -2667,7 +2985,8 @@ async def super_tenant_admin_chat(
                     'admin_mode': True,
                     'tenant_id': tenant.id,
                     'context_analysis': context_analysis,
-                    'admin_context_analysis': admin_context_analysis
+                    'admin_context_analysis': admin_context_analysis,
+                    'response_delay': response_delay
                 }
             
             yield f"{json.dumps(main_response)}\n"
@@ -2680,10 +2999,11 @@ async def super_tenant_admin_chat(
                 db=db
             )
             
-            # Generate intelligent follow-ups using LLM (same logic as smart chat)
-            await asyncio.sleep(1.5)
+            # ⭐ ENHANCED: Admin follow-up timing
+            base_admin_delay = 2.0 + random.uniform(0.4, 1.0)  # 2.0-3.0s for admin follow-ups
+            await asyncio.sleep(base_admin_delay)
             
-            # Use the SAME follow-up generation as smart chat
+            # Generate intelligent follow-ups
             should_generate, followups = should_generate_followups_llm(
                 request.message, 
                 main_response['content'], 
@@ -2701,11 +3021,13 @@ async def super_tenant_admin_chat(
                 followups = admin_followups
                 should_generate = bool(followups)
             
-            # Stream follow-ups (same as smart chat)
+            # Stream follow-ups with admin timing
             if should_generate and followups:
                 for i, followup in enumerate(followups):
                     if i > 0:
-                        await asyncio.sleep(calculate_followup_delay(followup))
+                        # ⭐ Admin-appropriate inter-followup delays
+                        inter_delay = 1.0 + random.uniform(0.2, 0.6)  # 1.0-1.6s between admin follow-ups
+                        await asyncio.sleep(inter_delay)
                     
                     followup_data = {
                         'type': 'followup',
@@ -2716,8 +3038,8 @@ async def super_tenant_admin_chat(
                     }
                     yield f"{json.dumps(followup_data)}\n"
             
-            # Send completion (same as smart chat)
-            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'admin_enhanced': True})}\n"
+            # Send completion
+            yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'admin_enhanced': True, 'delay_simulation': True})}\n"
             
         except HTTPException as e:
             logger.error(f"🚫 HTTP error: {e.detail}")
@@ -2735,6 +3057,10 @@ async def super_tenant_admin_chat(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+
+
 
 # **NEW LLM FUNCTIONS FOR ADMIN INTELLIGENCE**
 
