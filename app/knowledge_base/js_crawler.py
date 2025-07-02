@@ -231,103 +231,100 @@ class JSWebsiteCrawler:
                 
                 # Crawl the page
                 result = await self._crawl_page_http(session, current_url)
+                
                 if result:
                     if result.content and not result.error:
                         self.crawled_content.append(result)
                         logger.info(f"HTTP Crawled: {current_url} ({len(result.content)} chars)")
                         
-                        # Extract links for next level
+                        # Extract links for next level using ORIGINAL HTML
                         if depth < self.max_depth:
                             try:
-                                links = self._extract_links(result.content, current_url)
+                                if hasattr(result, 'original_html') and result.original_html:
+                                    links = self._extract_links_from_html(result.original_html, current_url)
+                                else:
+                                    # Fallback to trying with content (won't work well)
+                                    links = self._extract_links(result.content, current_url)
+                                
                                 logger.info(f"Found {len(links)} links on {current_url}")
-                                for link in links[:5]:  # Limit to 5 links per page
+                                for link in links[:10]:
                                     if link not in self.visited_urls:
                                         crawl_queue.append((link, depth + 1))
+                                        logger.debug(f"Added to queue: {link}")
                             except Exception as e:
                                 logger.warning(f"Link extraction failed for {current_url}: {e}")
+                                
                     else:
                         logger.warning(f"Failed to crawl {current_url}: {result.error}")
+                else:
+                    logger.warning(f"No result returned for {current_url}")
                 
                 self.visited_urls.add(current_url)
                 await asyncio.sleep(self.delay)
         
         logger.info(f"HTTP Crawl completed: {len(self.crawled_content)} pages crawled")
         return self.crawled_content
-    
+        
     async def _crawl_page_http(self, session: aiohttp.ClientSession, url: str) -> Optional[CrawlResult]:
         """Crawl a single page with HTTP only"""
         try:
-            logger.info(f"🌐 Attempting to crawl: {url}")
             async with session.get(url, allow_redirects=True, max_redirects=5) as response:
-                logger.info(f"📡 Response status: {response.status} for {url}")
-                
                 if response.status not in [200, 201]:
-                    logger.warning(f"❌ Bad status {response.status} for {url}")
                     return CrawlResult(url, "", "", response.status, f"HTTP {response.status}")
                 
                 # Check content type
                 content_type = response.headers.get('content-type', '').lower()
-                logger.info(f"📄 Content-Type: {content_type} for {url}")
-                
                 if not any(ct in content_type for ct in ['text/html', 'application/xhtml', 'text/plain']):
                     return CrawlResult(url, "", "", response.status, f"Non-HTML content: {content_type}")
                 
-                # Read content with better error handling
+                # Read content
                 try:
                     html = await response.text()
-                    logger.info(f"📖 Raw HTML length: {len(html)} chars for {url}")
-                except Exception as e:
-                    try:
-                        html_bytes = await response.read()
-                        html = html_bytes.decode('utf-8', errors='ignore')
-                        logger.info(f"📖 Decoded HTML length: {len(html)} chars for {url}")
-                    except Exception as e2:
-                        logger.error(f"❌ Failed to read content: {e2}")
-                        return CrawlResult(url, "", "", response.status, "Could not read content")
+                except UnicodeDecodeError:
+                    html_bytes = await response.read()
+                    html = html_bytes.decode('utf-8', errors='ignore')
                 
-                if not html or len(html.strip()) < 20:
-                    logger.warning(f"❌ Empty/minimal HTML for {url}")
-                    return CrawlResult(url, "", "", response.status, "Empty or minimal content")
+                if not html or len(html.strip()) < 10:  # Lowered threshold
+                    return CrawlResult(url, "", "", response.status, "Empty content")
                 
                 # Extract content
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # Log page title for debugging
+                # Extract title BEFORE removing elements
                 title_tag = soup.find('title')
-                page_title = title_tag.get_text().strip() if title_tag else "No title"
-                logger.info(f"📝 Page title: '{page_title}' for {url}")
+                title = title_tag.get_text().strip() if title_tag else urlparse(url).path
                 
-                # Remove unwanted elements
+                # STORE THE ORIGINAL HTML FOR LINK EXTRACTION
+                original_html = html
+                
+                # Remove unwanted elements for content extraction
                 for element in soup(['script', 'style', 'nav', 'header', 'footer', 
-                                   'aside', 'iframe', 'noscript', 'svg', 'canvas']):
+                                'aside', 'iframe', 'noscript', 'svg', 'canvas']):
                     element.decompose()
-                
-                # Extract title
-                title = page_title if page_title != "No title" else urlparse(url).path
                 
                 # Extract main content
                 content = self._extract_main_content(soup)
-                logger.info(f"📄 Extracted content length: {len(content) if content else 0} chars for {url}")
                 
-                if not content or len(content.strip()) < 10:
-                    logger.warning(f"❌ Insufficient content extracted for {url}")
-                    # For SPA sites, try to extract at least the title and meta info
+                if not content or len(content.strip()) < 10:  # Lowered threshold
+                    # Try meta content for SPA sites
                     meta_content = self._extract_meta_content(soup)
                     if meta_content:
                         logger.info(f"📋 Using meta content as fallback: {len(meta_content)} chars")
-                        return CrawlResult(url, meta_content, title, response.status)
-                    
-                    # Log first 200 chars of HTML for debugging
-                    logger.info(f"🔍 HTML preview: {html[:200]}...")
+                        # Create result with original HTML attached
+                        result = CrawlResult(url, meta_content, title, response.status)
+                        result.original_html = original_html  # Attach for link extraction
+                        return result
                     return CrawlResult(url, "", title, response.status, "Insufficient content")
                 
-                logger.info(f"✅ Successfully extracted content for {url}")
-                return CrawlResult(url, content, title, response.status)
+                # Create result with original HTML attached
+                result = CrawlResult(url, content, title, response.status)
+                result.original_html = original_html  # Attach for link extraction
+                return result
                 
         except Exception as e:
-            logger.error(f"❌ Exception crawling {url}: {str(e)}")
             return CrawlResult(url, "", "", 0, f"Error: {str(e)}")
+
+   
     
     def _extract_main_content(self, soup: BeautifulSoup) -> str:
         """Extract main content from HTML with improved selection"""
