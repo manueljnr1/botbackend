@@ -324,53 +324,7 @@ class AgentInvitationService:
             Agent.email == email.lower().strip()
         ).first()
     
-    # async def _create_agent_with_role(
-    #     self,
-    #     request: AgentInviteWithRoleRequest,
-    #     tenant_id: int,
-    #     invited_by_agent_id: Optional[int]
-    # ) -> Agent:
-    #     """Create new agent with role assignment"""
-    #     # Generate secure invite token
-    #     invite_token = secrets.token_urlsafe(32)
-        
-    #     # Create agent
-    #     agent = Agent(
-    #         tenant_id=tenant_id,
-    #         email=request.email.lower().strip(),
-    #         full_name=request.full_name,
-    #         display_name=request.full_name.split()[0],
-    #         invite_token=invite_token,
-    #         invited_by=invited_by_agent_id or tenant_id,
-    #         status=AgentStatus.INVITED,
-    #         invited_at=datetime.utcnow(),
-            
-    #         # Role assignment
-    #         role=request.role,
-    #         max_concurrent_chats=request.max_concurrent_chats or 3,
-            
-    #         # Set role-based convenience flags
-    #         can_assign_conversations=request.role in [AgentRole.SENIOR_AGENT, AgentRole.TEAM_CAPTAIN],
-    #         can_manage_team=request.role == AgentRole.TEAM_CAPTAIN,
-    #         can_access_analytics=request.role in [AgentRole.SENIOR_AGENT, AgentRole.TEAM_CAPTAIN],
-    #     )
-        
-    #     self.db.add(agent)
-    #     self.db.commit()
-    #     self.db.refresh(agent)
-        
-    #     # Create role history record
-    #     role_history = AgentRoleHistory(
-    #         agent_id=agent.id,
-    #         old_role=None,
-    #         new_role=request.role,
-    #         changed_by=invited_by_agent_id or tenant_id,
-    #         reason=f"Initial invitation as {request.role.value}"
-    #     )
-    #     self.db.add(role_history)
-    #     self.db.commit()
-        
-    #     return agent
+    
 
 
 
@@ -549,68 +503,7 @@ class AgentInvitationService:
             logger.error(f"Error sending role invitation email: {str(e)}")
             return False
     
-    # async def _reactivate_agent_with_role(
-    #     self,
-    #     agent: Agent,
-    #     request: AgentInviteWithRoleRequest,
-    #     invited_by_agent_id: Optional[int]
-    # ) -> AgentInviteResponse:
-    #     """Reactivate a previously revoked agent with new role"""
-    #     try:
-    #         # Generate new invite token
-    #         agent.invite_token = secrets.token_urlsafe(32)
-    #         agent.status = AgentStatus.INVITED
-    #         agent.is_active = True
-    #         agent.invited_at = datetime.utcnow()
-    #         agent.password_hash = None
-    #         agent.password_set_at = None
-            
-    #         # Update role
-    #         old_role = agent.role
-    #         agent.role = request.role
-    #         agent.can_assign_conversations = request.role in [AgentRole.SENIOR_AGENT, AgentRole.TEAM_CAPTAIN]
-    #         agent.can_manage_team = request.role == AgentRole.TEAM_CAPTAIN
-    #         agent.can_access_analytics = request.role in [AgentRole.SENIOR_AGENT, AgentRole.TEAM_CAPTAIN]
-            
-    #         # Create role history
-    #         role_history = AgentRoleHistory(
-    #             agent_id=agent.id,
-    #             old_role=old_role,
-    #             new_role=request.role,
-    #             changed_by=invited_by_agent_id or agent.tenant_id,
-    #             reason=f"Reactivation with role {request.role.value}"
-    #         )
-    #         self.db.add(role_history)
-    #         self.db.commit()
-            
-    #         # Send invitation
-    #         email_sent = await self._send_role_invitation_email(agent, request.role)
-            
-    #         # Get role info and permissions
-    #         role_info = get_role_info(request.role)
-    #         initial_permissions = self.permission_service.get_agent_permissions(agent)
-            
-    #         logger.info(f"Agent reactivated with role {request.role}: {agent.email}")
-            
-    #         return AgentInviteResponse(
-    #             success=True,
-    #             agent_id=agent.id,
-    #             email=agent.email,
-    #             full_name=agent.full_name,
-    #             role=agent.role,
-    #             invite_token=agent.invite_token,
-    #             status="reactivated",
-    #             invited_at=agent.invited_at.isoformat(),
-    #             email_sent=email_sent,
-    #             initial_permissions=[p.value for p in initial_permissions],
-    #             role_info=role_info
-    #         )
-            
-    #     except Exception as e:
-    #         logger.error(f"Error reactivating agent: {str(e)}")
-    #         self.db.rollback()
-    #         raise HTTPException(status_code=500, detail="Failed to reactivate agent")
-
+   
 
 
 

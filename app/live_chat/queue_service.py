@@ -26,8 +26,35 @@ class LiveChatQueueService:
     """Enhanced queue service with intelligent routing using agent tags"""
     
     def __init__(self, db: Session):
-        super().__init__(db)
+        self.db = db
         self.smart_routing = SmartRoutingService(db)
+
+
+
+    def get_queue_status(self, tenant_id: int) -> Dict:
+        """
+        Returns the live chat queue status for a specific tenant.
+        """
+        try:
+            waiting_count = self.db.query(ChatQueue).filter(
+                ChatQueue.status == "waiting",
+                ChatQueue.tenant_id == tenant_id
+            ).count()
+
+            assigned_count = self.db.query(ChatQueue).filter(
+                ChatQueue.status == "assigned",
+                ChatQueue.tenant_id == tenant_id
+            ).count()
+
+            return {
+                "success": True,
+                "waiting": waiting_count,
+                "assigned": assigned_count
+            }
+        except Exception as e:
+            logger.error(f"Error in get_queue_status: {e}")
+            return {"success": False, "error": str(e)}
+
     
     async def add_to_queue_with_smart_routing(self, conversation_id: int, priority: int = 1,
                                            preferred_agent_id: int = None, 
