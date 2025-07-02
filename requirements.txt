@@ -159,3 +159,4 @@ html5lib
 pydantic
 certifi
 # playwright
+# pip install -r requirements.txt && python -m playwright install chromium
