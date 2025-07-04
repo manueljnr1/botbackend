@@ -81,3 +81,7 @@ def check_message_security(user_message: str, company_name: str) -> tuple[bool, 
         return False, decline_message
     
     return True, ""
+
+
+
+

@@ -1976,3 +1976,5 @@ Your detailed, step-by-step response:"""
             return f"Hello! How can I help you today?"
         else:
             return f"Hello! How can I help you today?"
+
+

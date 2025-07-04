@@ -22,7 +22,7 @@ from app.knowledge_base.models import DocumentType
 from app.knowledge_base.js_crawler import JSWebsiteCrawler
 from app.services.storage import storage_service
 
-# Setup logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

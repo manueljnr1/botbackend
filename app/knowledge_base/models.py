@@ -19,7 +19,7 @@ class DocumentType(enum.Enum):
     TXT = "txt"
     CSV = "csv"
     XLSX = "xlsx"
-    WEBSITE = "website"  # NEW
+    WEBSITE = "website"  
 
 
 class CrawlStatus(enum.Enum):
@@ -45,14 +45,14 @@ class KnowledgeBase(Base):
     processing_error = Column(Text, nullable=True)
     processed_at = Column(DateTime, nullable=True)
     
-    # Website-specific fields
-    base_url = Column(String, nullable=True)  # For website crawling
+    
+    base_url = Column(String, nullable=True)  
     crawl_depth = Column(Integer, default=3)
     crawl_frequency_hours = Column(Integer, default=24)
     last_crawled_at = Column(DateTime, nullable=True)
     pages_crawled = Column(Integer, default=0)
-    include_patterns = Column(JSON, nullable=True)  # List of URL patterns to include
-    exclude_patterns = Column(JSON, nullable=True)  # List of URL patterns to exclude
+    include_patterns = Column(JSON, nullable=True)  
+    exclude_patterns = Column(JSON, nullable=True)  
     
     # Relationships
     tenant = relationship("Tenant", back_populates="knowledge_bases")

@@ -37,7 +37,7 @@ from app.chatbot.admin_router import router as admin_router
 from app.chatbot.super_tenant_admin_engine import get_super_tenant_admin_engine
 from app.tenants.models import Tenant
 from sqlalchemy import func
-
+from app.chatbot.unified_intelligent_engine import get_unified_intelligent_engine
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -248,88 +248,6 @@ def calculate_sentence_delay(sentence: str, is_last: bool = False) -> float:
 
 
 
-# def should_generate_admin_followups_llm(user_question: str, bot_response: str, company_name: str, action: str = None) -> tuple[bool, List[str]]:
-#     """
-#     Use LLM to intelligently decide if admin follow-ups are needed and generate them
-#     """
-#     from langchain_openai import ChatOpenAI
-#     from langchain.prompts import PromptTemplate
-    
-#     prompt = PromptTemplate(
-#         input_variables=["user_question", "bot_response", "company_name", "action"],
-#         template="""You are an expert admin assistant analyst. Analyze this admin interaction and decide if follow-up questions would be helpful.
-
-# USER QUESTION: "{user_question}"
-# BOT RESPONSE: "{bot_response}"
-# COMPANY: {company_name}
-# ACTION PERFORMED: {action}
-
-# INSTRUCTIONS:
-# 1. Determine if follow-up questions would help the admin continue their work
-# 2. If YES, suggest 1-3 relevant admin follow-up questions
-# 3. If NO, respond with "NO_FOLLOWUPS"
-
-# Admin Context - Generate follow-ups for:
-# - FAQ management tasks that might need continuation
-# - Analytics requests that could be expanded
-# - Settings changes that might need additional configuration
-# - Complex admin procedures with multiple steps
-
-# DON'T generate follow-ups for:
-# - Simple greetings or acknowledgments
-# - Complete error responses
-# - Very short admin confirmations
-
-# Format response as:
-# DECISION: YES/NO
-# FOLLOWUPS:
-# 1. First admin follow-up question (if any)
-# 2. Second admin follow-up question (if any)  
-# 3. Third admin follow-up question (if any)
-
-# Response:"""
-#     )
-    
-#     try:
-#         llm = ChatOpenAI(
-#             model_name="gpt-3.5-turbo", 
-#             temperature=0.3,
-#             openai_api_key=settings.OPENAI_API_KEY
-#         )
-        
-#         result = llm.invoke(prompt.format(
-#             user_question=user_question,
-#             bot_response=bot_response,
-#             company_name=company_name,
-#             action=action or "unknown"
-#         ))
-        
-#         response_text = result.content if hasattr(result, 'content') else str(result)
-        
-#         # Parse LLM response
-#         if "DECISION: NO" in response_text or "NO_FOLLOWUPS" in response_text:
-#             logger.info(f"🤖 LLM decided NO admin follow-ups needed")
-#             return False, []
-        
-#         # Extract follow-up questions
-#         followups = []
-#         lines = response_text.split('\n')
-#         for line in lines:
-#             if re.match(r'^\d+\.', line.strip()):
-#                 followup = re.sub(r'^\d+\.\s*', '', line.strip())
-#                 if followup:
-#                     followups.append(followup)
-        
-#         if followups:
-#             logger.info(f"🤖 LLM generated {len(followups)} admin follow-ups")
-#             return True, followups[:3]  # Max 3
-#         else:
-#             return False, []
-            
-#     except Exception as e:
-#         logger.error(f"Error in LLM admin follow-up generation: {e}")
-#         # Fallback to simple admin rules
-#         return should_generate_admin_followups_simple(user_question, bot_response, action)
 
 def should_generate_admin_followups_simple(user_question: str, bot_response: str, action: str = None) -> tuple[bool, List[str]]:
     """Fallback simple rules for admin follow-ups if LLM fails"""
@@ -2439,303 +2357,6 @@ async def check_admin_context(
 
 
 
-# @router.post("/chat/super-tenant-admin")
-# async def super_tenant_admin_chat(
-#     request: SmartChatRequest,
-#     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),
-#     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),
-#     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Super Tenant Admin Chat with Full LLM Intelligence
-#     Routes ALL interactions through LLM - no hardcoded responses
-#     """
-    
-#     async def stream_admin_response():
-#         try:
-#             logger.info(f"🤖 LLM-powered admin chat: {request.message[:50]}...")
-            
-#             # Security validation
-#             if super_tenant_context != "super_tenant_official_widget":
-#                 logger.warning(f"🚨 Unauthorized admin access attempt")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Admin features not available in this context', 'status_code': 403})}\n"
-#                 return
-            
-#             # Validate chatbot owner is super tenant
-#             try:
-#                 chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
-#                 SUPER_TENANT_IDS = [324112833]
-                
-#                 if not getattr(chatbot_owner, 'is_super_tenant', False) and chatbot_owner.id not in SUPER_TENANT_IDS:
-#                     logger.warning(f"🚨 Unauthorized super tenant access: {chatbot_owner.id}")
-#                     yield f"{json.dumps({'type': 'error', 'error': 'Unauthorized chatbot host', 'status_code': 403})}\n"
-#                     return
-                    
-#             except Exception as e:
-#                 logger.error(f"❌ Invalid chatbot API key: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot credentials', 'status_code': 403})}\n"
-#                 return
-            
-#             # Authenticate admin tenant
-#             try:
-#                 tenant = get_tenant_from_api_key(tenant_api_key, db)
-#                 check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-                
-#                 if not tenant.is_active:
-#                     yield f"{json.dumps({'type': 'error', 'error': 'Account inactive', 'status_code': 403})}\n"
-#                     return
-                    
-#             except Exception as e:
-#                 logger.error(f"❌ Tenant authentication failed: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Authentication failed', 'status_code': 403})}\n"
-#                 return
-            
-#             # Auto-generate user ID
-#             user_id = request.user_identifier
-#             auto_generated = False
-            
-#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#                 user_id = f"admin_auto_{str(uuid.uuid4())}"
-#                 auto_generated = True
-            
-#             # Send metadata
-#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'super_tenant_name': chatbot_owner.name})}\n"
-            
-#             # Initialize memory for conversation context
-#             from app.chatbot.simple_memory import SimpleChatbotMemory
-#             memory = SimpleChatbotMemory(db, tenant.id)
-#             conversation_history = memory.get_conversation_history(user_id, request.max_context)
-            
-#             # **SMART CHAT INTEGRATION: Use conversation context analysis like smart chat**
-#             context_analysis = None
-#             topic_change_response = None
-            
-#             # Initialize chatbot engine for FAQ/KB checking
-#             engine = ChatbotEngine(db)
-
-#             if conversation_history and len(conversation_history) > 1:
-#                 # Call the method from the engine instance (same as smart chat)
-#                 context_analysis = engine.analyze_conversation_context_llm(
-#                     request.message, 
-#                     conversation_history, 
-#                     tenant.name
-#                 )
-                
-#                 logger.info(f"🧠 Admin context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
-                
-#                 # Handle greeting types AND conversation questions (same as smart chat)
-#                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
-                
-#                 if context_analysis and context_analysis.get('type') in special_handling_types:
-#                     logger.info(f"🔄 Detected special handling type: {context_analysis.get('type')}")
-                    
-#                     # Generate appropriate response (same as smart chat)
-#                     topic_change_response = engine.handle_topic_change_response(
-#                         request.message,
-#                         context_analysis.get('previous_topic', ''),
-#                         context_analysis.get('suggested_approach', ''),
-#                         tenant.name,
-#                         context_analysis
-#                     )
-                    
-#                     if topic_change_response and len(topic_change_response.strip()) > 0:
-#                         logger.info(f"🔄 Generated admin greeting response: {topic_change_response[:50]}...")
-#                     else:
-#                         topic_change_response = None
-
-#             # If greeting detected, send that response instead (same as smart chat)
-#             if topic_change_response:
-#                 logger.info(f"🔄 Sending admin greeting response")
-                
-#                 # Store the conversation in memory
-#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
-#                 memory.store_message(session_id, request.message, True)
-#                 memory.store_message(session_id, topic_change_response, False)
-                
-#                 # Send greeting response as main response
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': topic_change_response,
-#                     'session_id': session_id,
-#                     'answered_by': 'ADMIN_GREETING_DETECTION',
-#                     'context_analysis': context_analysis,
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id
-#                 }
-#                 yield f"{json.dumps(main_response)}\n"
-                
-#                 # Wait a moment, then ask clarifying follow-up
-#                 await asyncio.sleep(1.5)
-                
-#                 clarifying_followup = {
-#                     'type': 'followup',
-#                     'content': "What would you like help with?",
-#                     'index': 0,
-#                     'is_last': True
-#                 }
-#                 yield f"{json.dumps(clarifying_followup)}\n"
-                
-#                 # Send completion
-#                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'admin_greeting_handled': True})}\n"
-                
-#                 # Track conversation
-#                 track_conversation_started_with_super_tenant(
-#                     tenant_id=tenant.id,
-#                     user_identifier=user_id,
-#                     platform="admin_web",
-#                     db=db
-#                 )
-                
-#                 return
-
-#             # **CRITICAL: Analyze message to determine admin vs normal chatbot response**
-#             admin_context_analysis = await analyze_admin_message_with_llm(
-#                 request.message, 
-#                 conversation_history, 
-#                 tenant,
-#                 chatbot_owner
-#             )
-            
-#             # **KEY DECISION: Route based on LLM analysis**
-#             if admin_context_analysis.get('requires_admin_engine', True):
-#                 # Use admin engine for specific admin tasks
-#                 admin_engine = get_super_tenant_admin_engine(db)
-                
-#                 result = admin_engine.process_admin_message(
-#                     user_message=request.message,
-#                     authenticated_tenant_id=tenant.id,
-#                     user_identifier=user_id,
-#                     session_context={
-#                         "admin_mode": True, 
-#                         "super_tenant_hosted": True, 
-#                         "chatbot_owner_id": chatbot_owner.id,
-#                         "llm_context": admin_context_analysis
-#                     }
-#                 )
-                
-#                 if not result.get("success"):
-#                     logger.error(f"❌ Admin engine failed: {result.get('error')}")
-#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-#                     return
-                
-#                 # Store conversation
-#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
-#                 memory.store_message(session_id, request.message, True)
-#                 memory.store_message(session_id, result["response"], False)
-                
-#                 # Send main response
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': result.get("response", ""),
-#                     'session_id': session_id,
-#                     'answered_by': result.get('action', 'ADMIN_ENGINE'),
-#                     'action': result.get('action'),
-#                     'requires_confirmation': result.get('requires_confirmation', False),
-#                     'requires_input': result.get('requires_input', False),
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id,
-#                     'context_analysis': context_analysis
-#                 }
-                
-#             else:
-#                 # **SMART CHAT CORE: Use the EXACT same FAQ/KB processing as smart chat**
-#                 logger.info(f"🔍 Using smart chat FAQ/KB processing for admin context")
-                
-#                 result = engine.process_web_message_with_advanced_feedback_llm(
-#                     api_key=tenant_api_key,  # Use tenant's API key
-#                     user_message=request.message,
-#                     user_identifier=user_id,
-#                     max_context=request.max_context,
-#                     use_smart_llm=True  # Same as smart chat
-#                 )
-                
-#                 if not result.get("success"):
-#                     logger.error(f"❌ Smart chat processing failed: {result.get('error')}")
-#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-#                     return
-                
-#                 # Enhanced response with admin context
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': result["response"],
-#                     'session_id': result.get('session_id'),
-#                     'answered_by': f"ADMIN_{result.get('answered_by', 'CHATBOT')}",
-#                     'email_captured': result.get('email_captured', False),
-#                     'feedback_triggered': result.get('feedback_triggered', False),
-#                     'faq_matched': result.get('faq_matched', False),
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id,
-#                     'context_analysis': context_analysis,
-#                     'admin_context_analysis': admin_context_analysis
-#                 }
-            
-#             yield f"{json.dumps(main_response)}\n"
-            
-#             # Track conversation
-#             track_conversation_started_with_super_tenant(
-#                 tenant_id=tenant.id,
-#                 user_identifier=user_id,
-#                 platform="admin_web",
-#                 db=db
-#             )
-            
-#             # Generate intelligent follow-ups using LLM (same logic as smart chat)
-#             await asyncio.sleep(1.5)
-            
-#             # Use the SAME follow-up generation as smart chat
-#             should_generate, followups = should_generate_followups_llm(
-#                 request.message, 
-#                 main_response['content'], 
-#                 tenant.name
-#             )
-            
-#             # If no regular follow-ups, generate admin-specific ones
-#             if not (should_generate and followups):
-#                 admin_followups = await generate_admin_followups_llm(
-#                     request.message,
-#                     main_response['content'],
-#                     tenant,
-#                     admin_context_analysis
-#                 )
-#                 followups = admin_followups
-#                 should_generate = bool(followups)
-            
-#             # Stream follow-ups (same as smart chat)
-#             if should_generate and followups:
-#                 for i, followup in enumerate(followups):
-#                     if i > 0:
-#                         await asyncio.sleep(calculate_followup_delay(followup))
-                    
-#                     followup_data = {
-#                         'type': 'followup',
-#                         'content': followup,
-#                         'index': i,
-#                         'is_last': i == len(followups) - 1,
-#                         'admin_followup': True
-#                     }
-#                     yield f"{json.dumps(followup_data)}\n"
-            
-#             # Send completion (same as smart chat)
-#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'admin_enhanced': True})}\n"
-            
-#         except HTTPException as e:
-#             logger.error(f"🚫 HTTP error: {e.detail}")
-#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-#         except Exception as e:
-#             logger.error(f"💥 Error: {str(e)}")
-#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-#     return StreamingResponse(
-#         stream_admin_response(),
-#         media_type="application/x-ndjson",
-#         headers={
-#             "Cache-Control": "no-cache",
-#             "Connection": "keep-alive",
-#             "X-Accel-Buffering": "no"
-#         }
-#     )
-
 
 
 
@@ -3242,3 +2863,236 @@ JSON Response:"""
         logger.error(f"Error generating admin follow-ups: {e}")
     
     return []
+
+
+
+
+
+
+
+@router.post("/chat/smart2")
+async def smart_chat_with_followup_streaming(
+    request: SmartChatRequest,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Smart chat with unified intelligent engine + streaming
+    """
+    
+    async def stream_with_followups():
+        try:
+            logger.info(f"🚀 Unified smart chat for: {request.user_identifier}")
+            
+            # Get tenant and check limits
+            tenant = get_tenant_from_api_key(api_key, db)
+            check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+            # ⭐ NEW: Initialize unified intelligent engine
+            engine = get_unified_intelligent_engine(db)
+            
+            # Auto-generate user ID if needed
+            user_id = request.user_identifier
+            auto_generated = False
+            
+            if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+                user_id = f"auto_{str(uuid.uuid4())}"
+                auto_generated = True
+            
+            # Send initial metadata
+            yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'engine': 'unified_intelligent'})}\n"
+            
+            # ⭐ SIMPLIFIED: Process with unified engine (single call)
+            start_time = time.time()
+            
+            result = engine.process_message(
+                api_key=api_key,
+                user_message=request.message,
+                user_identifier=user_id,
+                platform="web"
+            )
+            
+            if not result.get("success"):
+                logger.error(f"❌ Unified smart chat failed: {result.get('error')}")
+                yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+                return
+            
+            logger.info("✅ Unified engine response received successfully")
+            
+            # ⭐ INTELLIGENT DELAY: Based on response complexity
+            response_delay = 0
+            processing_time = time.time() - start_time
+            
+            # Simple delay calculation based on response length and intent
+            response_length = len(result.get("response", ""))
+            intent = result.get("intent", "general")
+            
+            # Base delay calculation
+            if intent == "casual":
+                base_delay = 0.5 + (response_length / 200)  # Quick for casual
+            elif intent in ["functional", "support"]:
+                base_delay = 1.0 + (response_length / 150)  # Thoughtful for complex
+            else:
+                base_delay = 0.8 + (response_length / 180)  # Standard
+            
+            # Add some natural variation
+            import random
+            actual_delay = max(0.3, (base_delay * random.uniform(0.8, 1.2)) - processing_time)
+            
+            logger.info(f"⏱️ Calculated delay: {actual_delay:.2f}s for {intent} intent")
+            await asyncio.sleep(actual_delay)
+            
+            # Track conversation
+            track_conversation_started_with_super_tenant(
+                tenant_id=tenant.id,
+                user_identifier=user_id,
+                platform="web",
+                db=db
+            )
+            
+            # Send main response with unified engine data
+            main_response = {
+                'type': 'main_response',
+                'content': result["response"],
+                'session_id': result.get('session_id'),
+                'answered_by': result.get('answered_by'),
+                'intent': result.get('intent'),
+                'context': result.get('context'),
+                'token_efficiency': result.get('token_efficiency'),
+                'architecture': result.get('architecture'),
+                'response_delay': actual_delay,
+                'processing_time': processing_time
+            }
+            yield f"{json.dumps(main_response)}\n"
+            
+            # ⭐ SMART FOLLOW-UP GENERATION
+            base_followup_delay = 1.5 + random.uniform(0.3, 0.8)
+            await asyncio.sleep(base_followup_delay)
+            
+            # Generate contextual follow-ups based on intent and response
+            followups = generate_intelligent_followups(
+                request.message, 
+                result["response"], 
+                result.get("intent", "general"),
+                result.get("context", "unknown"),
+                tenant.name
+            )
+            
+            if followups:
+                for i, followup in enumerate(followups):
+                    if i > 0:
+                        inter_followup_delay = 0.8 + random.uniform(0.2, 0.5)
+                        await asyncio.sleep(inter_followup_delay)
+                    
+                    followup_data = {
+                        'type': 'followup',
+                        'content': followup,
+                        'index': i,
+                        'is_last': i == len(followups) - 1,
+                        'intelligent': True
+                    }
+                    yield f"{json.dumps(followup_data)}\n"
+            
+            # Send completion signal
+            yield f"{json.dumps({
+                'type': 'complete', 
+                'total_followups': len(followups) if followups else 0, 
+                'engine': 'unified_intelligent',
+                'token_efficiency': result.get('token_efficiency', '~80% reduction')
+            })}\n"
+            
+            logger.info(f"✅ Unified smart chat completed with {len(followups) if followups else 0} follow-ups")
+            
+        except HTTPException as e:
+            logger.error(f"🚫 HTTP error in unified smart chat: {e.detail}")
+            yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+        except Exception as e:
+            logger.error(f"💥 Error in unified smart chat: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+    
+    return StreamingResponse(
+        stream_with_followups(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+def generate_intelligent_followups(user_message: str, bot_response: str, intent: str, context: str, company_name: str) -> List[str]:
+    """
+    Generate intelligent follow-ups using LLM based on conversation context
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain.prompts import PromptTemplate
+        
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo",
+            temperature=0.4,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        
+        prompt = PromptTemplate(
+            input_variables=["user_message", "bot_response", "intent", "context", "company"],
+            template="""Generate 2-3 intelligent follow-up questions for this conversation:
+
+User Question: "{user_message}"
+Bot Response: "{bot_response}"
+Intent: {intent}
+Context: {context}
+Company: {company}
+
+Generate follow-up questions that would genuinely help the user continue their interaction. Make them:
+- Specific and actionable
+- Relevant to the conversation topic
+- Natural and conversational
+- Focused on what they might logically want next
+
+Examples:
+- For pricing questions: "Would you like to see a demo?" or "Questions about our free trial?"
+- For setup issues: "Need help with the next step?" or "Want me to walk through troubleshooting?"
+- For feature questions: "Curious about related features?" or "Ready to get started with this?"
+
+Return exactly 2-3 follow-ups as a JSON array: ["question1", "question2", "question3"]
+
+Follow-ups:"""
+        )
+        
+        result = llm.invoke(prompt.format(
+            user_message=user_message,
+            bot_response=bot_response,
+            intent=intent,
+            context=context,
+            company=company_name
+        ))
+        
+        response_text = result.content.strip()
+        
+        # Parse JSON response
+        import json
+        import re
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            followups = json.loads(json_match.group())
+            # Validate and clean
+            valid_followups = [f.strip() for f in followups if isinstance(f, str) and len(f.strip()) > 5]
+            return valid_followups[:3]  # Max 3
+        
+    except Exception as e:
+        logger.error(f"LLM followup generation failed: {e}")
+    
+    # Fallback to simple contextual followups
+    return generate_fallback_followups(intent, company_name)
+
+def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
+    """Simple fallback when LLM fails"""
+    if intent == "functional":
+        return ["Need help with the next step?", f"Any other {company_name} features to explore?"]
+    elif intent == "support":
+        return ["Is this working for you now?", "Need additional assistance?"]
+    else:
+        return ["What else can I help with?", f"Other questions about {company_name}?"]
