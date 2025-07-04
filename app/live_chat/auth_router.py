@@ -7,7 +7,9 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timedelta
 import logging
-
+from fastapi.security import HTTPBearer
+from fastapi import Security
+from typing import Optional
 from fastapi import Depends
 
 from app.database import get_db
@@ -20,6 +22,7 @@ from app.live_chat.invitation_service import AgentInvitationService, AgentInvite
 
 
 
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 
@@ -795,14 +798,63 @@ async def agent_logout(
 # LIVE CHAT SETTINGS ENDPOINTS
 # =============================================================================
 
+# @router.get("/settings", response_model=LiveChatSettingsResponse)
+# async def get_live_chat_settings(
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get live chat settings for tenant"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         settings_service = LiveChatSettingsService(db)
+#         settings = settings_service.get_or_create_settings(tenant.id)
+        
+#         return settings
+        
+#     except Exception as e:
+#         logger.error(f"Error getting live chat settings: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get settings")
+
+
 @router.get("/settings", response_model=LiveChatSettingsResponse)
 async def get_live_chat_settings(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get live chat settings for tenant"""
+    """Get live chat settings for tenant - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         settings_service = LiveChatSettingsService(db)
         settings = settings_service.get_or_create_settings(tenant.id)
@@ -814,15 +866,74 @@ async def get_live_chat_settings(
         raise HTTPException(status_code=500, detail="Failed to get settings")
 
 
+
+
+# @router.put("/settings")
+# async def update_live_chat_settings(
+#     update_data: dict,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Update live chat settings"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         settings_service = LiveChatSettingsService(db)
+#         settings = settings_service.update_settings(tenant.id, update_data)
+        
+#         return {
+#             "success": True,
+#             "message": "Settings updated successfully",
+#             "settings": settings
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error updating live chat settings: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to update settings")
+
+
+
 @router.put("/settings")
 async def update_live_chat_settings(
     update_data: dict,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Update live chat settings"""
+    """Update live chat settings - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         settings_service = LiveChatSettingsService(db)
         settings = settings_service.update_settings(tenant.id, update_data)
@@ -839,19 +950,72 @@ async def update_live_chat_settings(
         logger.error(f"Error updating live chat settings: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update settings")
 
-
 # =============================================================================
 # EMAIL SERVICE TESTING ENDPOINTS
 # =============================================================================
 
+# @router.post("/test-email")
+# async def test_email_service(
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Test if email service is working (Admin endpoint)"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         from app.email.resend_service import email_service
+#         result = await email_service.test_email_connection()
+        
+#         return {
+#             "tenant_id": tenant.id,
+#             "email_service_status": result,
+#             "timestamp": datetime.utcnow().isoformat()
+#         }
+        
+#     except Exception as e:
+#         logger.error(f"Error testing email service: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Email service test failed")
+
+
+
 @router.post("/test-email")
 async def test_email_service(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Test if email service is working (Admin endpoint)"""
+    """Test if email service is working - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         from app.email.resend_service import email_service
         result = await email_service.test_email_connection()
@@ -867,15 +1031,108 @@ async def test_email_service(
         raise HTTPException(status_code=500, detail="Email service test failed")
 
 
+# @router.post("/resend-invitation/{agent_id}")
+# async def resend_agent_invitation(
+#     agent_id: int,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Resend invitation email to an agent"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Get agent
+#         agent = db.query(Agent).filter(
+#             Agent.id == agent_id,
+#             Agent.tenant_id == tenant.id,
+#             Agent.status == "invited"
+#         ).first()
+        
+#         if not agent:
+#             raise HTTPException(
+#                 status_code=404, 
+#                 detail="Agent not found or not in invited status"
+#             )
+        
+#         # Generate new invite token if expired
+#         if agent.invited_at < datetime.utcnow() - timedelta(days=7):
+#             agent.invite_token = secrets.token_urlsafe(32)
+#             agent.invited_at = datetime.utcnow()
+#             db.commit()
+        
+#         # Resend invitation
+#         from app.email.resend_service import email_service
+#         from app.config import settings
+        
+#         frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+#         invite_url = f"{frontend_url}/agent/accept-invite/{agent.invite_token}"
+        
+#         result = await email_service.send_agent_invitation(
+#             to_email=agent.email,
+#             agent_name=agent.full_name,
+#             business_name=tenant.business_name or tenant.name,
+#             invite_url=invite_url
+#         )
+        
+#         if result["success"]:
+#             return {
+#                 "success": True,
+#                 "message": f"Invitation resent to {agent.email}",
+#                 "email_id": result.get("email_id"),
+#                 "agent_id": agent_id
+#             }
+#         else:
+#             raise HTTPException(
+#                 status_code=500,
+#                 detail=f"Failed to resend invitation: {result.get('error')}"
+#             )
+            
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error resending invitation: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to resend invitation")
+
+
 @router.post("/resend-invitation/{agent_id}")
 async def resend_agent_invitation(
     agent_id: int,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Resend invitation email to an agent"""
+    """Resend invitation email to an agent - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id_from_token = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id_from_token),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Get agent
         agent = db.query(Agent).filter(

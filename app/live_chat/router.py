@@ -10,25 +10,29 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-
+from fastapi.security import HTTPBearer
+from fastapi import Security
 
 
 from app.database import get_db
 from app.live_chat.websocket_manager import websocket_manager, LiveChatMessageHandler
 from app.live_chat.queue_service import LiveChatQueueService
+from app.live_chat.agent_dashboard_service import AgentDashboardService  # Import AgentDashboardService
 from app.live_chat.agent_service import AgentSessionService
 from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType, AgentStatus, ChatQueue, AgentSession
 from app.tenants.router import get_tenant_from_api_key
 from app.tenants.models import Tenant
 from app.live_chat.customer_detection_service import CustomerDetectionService
+from app.live_chat.auth_utils import get_tenant_context, get_agent_or_tenant_context
+from app.live_chat.agent_dashboard_service import SharedDashboardService
+from app.pricing.integration_helpers import check_conversation_limit_dependency_with_super_tenant, track_conversation_started_with_super_tenant
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 
 
-# 🔥 PRICING INTEGRATION
-from app.pricing.integration_helpers import (
-    check_conversation_limit_dependency_with_super_tenant,
-    track_conversation_started_with_super_tenant
-)
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -176,16 +180,190 @@ class CustomerDetectionResponse(BaseModel):
 # CUSTOMER ENDPOINTS (API KEY AUTHENTICATION)
 # =============================================================================
 
+
+
+
+
+
+
+@router.get("/agent/enhanced-dashboard")
+async def get_enhanced_agent_dashboard(
+    current_agent: Agent = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    """Get enhanced agent dashboard with customer intelligence"""
+    try:
+        dashboard_service = AgentDashboardService(db)
+        
+        # Get enhanced queue
+        enhanced_queue = await dashboard_service.get_enhanced_queue_for_agent(current_agent)
+        
+        # Get agent's current workload
+        from app.live_chat.models import AgentSession
+        agent_session = db.query(AgentSession).filter(
+            and_(
+                AgentSession.agent_id == current_agent.id,
+                AgentSession.logout_at.is_(None)
+            )
+        ).first()
+        
+        current_workload = {
+            "active_conversations": agent_session.active_conversations if agent_session else 0,
+            "max_capacity": agent_session.max_concurrent_chats if agent_session else 3,
+            "is_accepting_chats": agent_session.is_accepting_chats if agent_session else True,
+            "status": agent_session.status if agent_session else "offline"
+        }
+        
+        # Get recent performance metrics
+        recent_conversations = db.query(LiveChatConversation).filter(
+            and_(
+                LiveChatConversation.assigned_agent_id == current_agent.id,
+                LiveChatConversation.created_at >= datetime.utcnow() - timedelta(days=7)
+            )
+        ).all()
+        
+        performance_metrics = {
+            "conversations_this_week": len(recent_conversations),
+            "average_satisfaction": sum([conv.customer_satisfaction for conv in recent_conversations 
+                                       if conv.customer_satisfaction]) / len(recent_conversations) if recent_conversations else 0,
+            "resolution_rate": sum([1 for conv in recent_conversations 
+                                  if conv.resolution_status == "resolved"]) / len(recent_conversations) if recent_conversations else 0
+        }
+        
+        return {
+            "success": True,
+            "agent_info": {
+                "agent_id": current_agent.id,
+                "display_name": current_agent.display_name,
+                "tenant_id": current_agent.tenant_id
+            },
+            "current_workload": current_workload,
+            "performance_metrics": performance_metrics,
+            "enhanced_queue": enhanced_queue,
+            "dashboard_timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting enhanced agent dashboard: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get dashboard data")
+    
+
+
+
+
+
+
+
+
+# @router.post("/start-chat", response_model=ChatResponse)
+# async def start_live_chat(
+#     request: StartChatRequest,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Start a new live chat conversation (customer-facing)"""
+#     try:
+#         # 🔒 PRICING CHECK - Check conversation limits
+#         tenant = get_tenant_from_api_key(api_key, db)
+#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+#         # Create new conversation
+#         conversation = LiveChatConversation(
+#             tenant_id=tenant.id,
+#             customer_identifier=request.customer_identifier,
+#             customer_name=request.customer_name,
+#             customer_email=request.customer_email,
+#             chatbot_session_id=request.chatbot_session_id,
+#             handoff_reason="manual" if not request.handoff_context else "triggered",
+#             handoff_context=json.dumps(request.handoff_context) if request.handoff_context else None,
+#             original_question=request.initial_message,
+#             status=ConversationStatus.QUEUED
+#         )
+        
+#         db.add(conversation)
+#         db.commit()
+#         db.refresh(conversation)
+        
+#         # Add to queue
+#         queue_service = LiveChatQueueService(db)
+#         queue_result = queue_service.add_to_queue(
+#             conversation_id=conversation.id,
+#             priority=1,  # Normal priority
+#             assignment_criteria={"source": "customer_request"}
+#         )
+        
+#         # 📊 PRICING TRACK - Track conversation usage
+#         track_conversation_started_with_super_tenant(
+#             tenant_id=tenant.id,
+#             user_identifier=request.customer_identifier,
+#             platform="live_chat",
+#             db=db
+#         )
+        
+#         # Generate WebSocket URL
+#         websocket_url = f"/live-chat/ws/customer/{conversation.id}?customer_id={request.customer_identifier}&tenant_id={tenant.id}"
+        
+#         logger.info(f"Live chat started: conversation {conversation.id} for tenant {tenant.id}")
+        
+#         return {
+#             "success": True,
+#             "conversation_id": conversation.id,
+#             "queue_position": queue_result.get("position"),
+#             "estimated_wait_time": queue_result.get("estimated_wait_time"),
+#             "websocket_url": websocket_url,
+#             "message": "Chat started! You are in the queue. An agent will join you shortly."
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error starting live chat: {str(e)}")
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail="Failed to start chat")
+
+
+
 @router.post("/start-chat", response_model=ChatResponse)
 async def start_live_chat(
     request: StartChatRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Start a new live chat conversation (customer-facing)"""
+    """Start a new live chat conversation - supports both API key and agent token"""
     try:
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
+        
         # 🔒 PRICING CHECK - Check conversation limits
-        tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         # Create new conversation
@@ -241,6 +419,7 @@ async def start_live_chat(
         logger.error(f"Error starting live chat: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to start chat")
+
 
 
 @router.websocket("/ws/customer/{conversation_id}")
@@ -299,22 +478,73 @@ async def customer_websocket_endpoint(
             await websocket_manager.disconnect(connection_id)
 
 
+# @router.get("/queue-status")
+# async def get_queue_status(
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get current queue status for tenant"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         queue_service = LiveChatQueueService(db)
+#         status = queue_service.get_queue_status(tenant.id)
+        
+#         return status
+        
+#     except HTTPException:
+#         raise  # ← Let HTTPException pass through with original status code
+#     except Exception as e:
+#         logger.error(f"Error getting queue status: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get queue status")
+
+
+
 @router.get("/queue-status")
 async def get_queue_status(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get current queue status for tenant"""
+    """Get current queue status - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
-        queue_service = LiveChatQueueService(db)
-        status = queue_service.get_queue_status(tenant.id)
-        
-        return status
+        service = SharedDashboardService(db, tenant.id)
+        result = service.get_queue_status()
+        return result
         
     except HTTPException:
-        raise  # ← Let HTTPException pass through with original status code
+        raise
     except Exception as e:
         logger.error(f"Error getting queue status: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get queue status")
@@ -573,61 +803,56 @@ async def admin_assign_conversation(
 
 @router.get("/admin/assignable-agents")
 async def get_assignable_agents(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get list of agents available for manual assignment"""
+    """Get list of agents available for manual assignment - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        
-        # Get active agents with their current load
-        agents = db.query(Agent).filter(
-            Agent.tenant_id == tenant.id,
-            Agent.status == AgentStatus.ACTIVE,
-            Agent.is_active == True
-        ).all()
-        
-        assignable_agents = []
-        for agent in agents:
-            # Get current session info
-            session = db.query(AgentSession).filter(
-                AgentSession.agent_id == agent.id,
-                AgentSession.logout_at.is_(None)
-            ).first()
+        # Try API key first
+        if api_key:
+            from app.tenants.router import get_tenant_from_api_key
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            # Extract the actual token string
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
             
-            is_online = session is not None
-            current_load = session.active_conversations if session else 0
-            max_capacity = session.max_concurrent_chats if session else agent.max_concurrent_chats
-            is_available = is_online and (current_load < max_capacity) and (session.is_accepting_chats if session else True)
+            from app.core.security import verify_token
+            from app.live_chat.models import AgentStatus
             
-            assignable_agents.append({
-                "agent_id": agent.id,
-                "display_name": agent.display_name,
-                "email": agent.email,
-                "is_online": is_online,
-                "is_available": is_available,
-                "current_conversations": current_load,
-                "max_concurrent_chats": max_capacity,
-                "utilization_percent": round((current_load / max_capacity * 100) if max_capacity > 0 else 0, 1)
-            })
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
-        # Sort by availability and utilization
-        assignable_agents.sort(key=lambda x: (not x["is_available"], x["utilization_percent"]))
-        
-        return {
-            "success": True,
-            "tenant_id": tenant.id,
-            "total_agents": len(assignable_agents),
-            "available_agents": sum(1 for a in assignable_agents if a["is_available"]),
-            "agents": assignable_agents
-        }
+        service = SharedDashboardService(db, tenant.id)
+        result = service.get_assignable_agents()
+        return result
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting assignable agents: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get agents")
-
+    
 
 @router.get("/conversations/active")
 async def get_active_conversations(
@@ -1003,18 +1228,87 @@ async def get_live_chat_analytics(
         raise HTTPException(status_code=500, detail="Failed to get analytics")
 
 
+# @router.get("/status")
+# async def get_live_chat_status(
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get overall live chat system status"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Get current queue status
+#         queue_service = LiveChatQueueService(db)
+#         queue_status = queue_service.get_queue_status(tenant.id)
+        
+#         # Get WebSocket connection stats
+#         connection_stats = websocket_manager.get_connection_stats(tenant.id)
+        
+#         # Get active agents
+#         session_service = AgentSessionService(db)
+#         active_agents = session_service.get_active_agents(tenant.id)
+        
+#         return {
+#             "success": True,
+#             "tenant_id": tenant.id,
+#             "live_chat_enabled": True,  # TODO: Get from settings
+#             "queue_status": queue_status,
+#             "connection_stats": connection_stats,
+#             "active_agents": active_agents,
+#             "system_health": "healthy",  # TODO: Add actual health checks
+#             "timestamp": datetime.utcnow().isoformat()
+#         }
+        
+#     except Exception as e:
+#         logger.error(f"Error getting live chat status: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get status")
+
+
+
+
 @router.get("/status")
 async def get_live_chat_status(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get overall live chat system status"""
+    """Get overall live chat system status - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
-        # Get current queue status
-        queue_service = LiveChatQueueService(db)
-        queue_status = queue_service.get_queue_status(tenant.id)
+        service = SharedDashboardService(db, tenant.id)
+        
+        # Get queue status
+        queue_status = service.get_queue_status()
         
         # Get WebSocket connection stats
         connection_stats = websocket_manager.get_connection_stats(tenant.id)
@@ -1026,11 +1320,11 @@ async def get_live_chat_status(
         return {
             "success": True,
             "tenant_id": tenant.id,
-            "live_chat_enabled": True,  # TODO: Get from settings
+            "live_chat_enabled": True,
             "queue_status": queue_status,
             "connection_stats": connection_stats,
             "active_agents": active_agents,
-            "system_health": "healthy",  # TODO: Add actual health checks
+            "system_health": "healthy",
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -1039,14 +1333,71 @@ async def get_live_chat_status(
         raise HTTPException(status_code=500, detail="Failed to get status")
 
 
-@router.post("/cleanup")
+# @router.post("/cleanup")
+# async def cleanup_expired_sessions(
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Clean up expired queue entries and inactive connections"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Cleanup queue
+#         queue_service = LiveChatQueueService(db)
+#         cleaned_queue = queue_service.cleanup_expired_queue_entries(tenant.id)
+        
+#         # Cleanup WebSocket connections
+#         await websocket_manager.cleanup_inactive_connections()
+        
+#         return {
+#             "success": True,
+#             "cleaned_queue_entries": cleaned_queue,
+#             "message": "Cleanup completed successfully"
+#         }
+        
+#     except Exception as e:
+#         logger.error(f"Error in cleanup: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Cleanup failed")
+    
+
+@router.get("/cleanup")
 async def cleanup_expired_sessions(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Clean up expired queue entries and inactive connections"""
+    """Clean up expired queue entries and inactive connections - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Cleanup queue
         queue_service = LiveChatQueueService(db)
@@ -1064,7 +1415,8 @@ async def cleanup_expired_sessions(
     except Exception as e:
         logger.error(f"Error in cleanup: {str(e)}")
         raise HTTPException(status_code=500, detail="Cleanup failed")
-    
+
+
 
 
 
@@ -1078,19 +1430,88 @@ async def cleanup_expired_sessions(
 
 
 
+# @router.post("/detect-customer")
+# async def detect_customer_profile(
+#     request: Request,
+#     customer_identifier: Optional[str] = None,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Comprehensive customer detection and profiling
+#     Returns geolocation, device info, visitor history, and routing suggestions
+#     """
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Initialize customer detection service
+#         detection_service = CustomerDetectionService(db)
+        
+#         # Perform comprehensive customer detection
+#         customer_data = await detection_service.detect_customer(
+#             request=request,
+#             tenant_id=tenant.id,
+#             customer_identifier=customer_identifier
+#         )
+        
+#         # Log successful detection (privacy-conscious)
+#         logger.info(f"Customer detection completed for tenant {tenant.id}")
+        
+#         return {
+#             "success": True,
+#             **customer_data,
+#             "detection_timestamp": datetime.utcnow().isoformat(),
+#             "tenant_id": tenant.id
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in customer detection: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Customer detection failed")
+
+
+
 @router.post("/detect-customer")
 async def detect_customer_profile(
     request: Request,
     customer_identifier: Optional[str] = None,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """
-    Comprehensive customer detection and profiling
-    Returns geolocation, device info, visitor history, and routing suggestions
-    """
+    """Comprehensive customer detection and profiling - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Initialize customer detection service
         detection_service = CustomerDetectionService(db)
@@ -1119,15 +1540,148 @@ async def detect_customer_profile(
         raise HTTPException(status_code=500, detail="Customer detection failed")
 
 
+
+# @router.get("/customer-profile/{customer_identifier}")
+# async def get_customer_profile(
+#     customer_identifier: str,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get existing customer profile and history"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Get customer profile
+#         from app.live_chat.customer_detection_service import CustomerProfile
+#         customer_profile = db.query(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerProfile.customer_identifier == customer_identifier
+#             )
+#         ).first()
+        
+#         if not customer_profile:
+#             raise HTTPException(status_code=404, detail="Customer profile not found")
+        
+#         # Get recent conversations
+#         recent_conversations = db.query(LiveChatConversation).filter(
+#             and_(
+#                 LiveChatConversation.tenant_id == tenant.id,
+#                 LiveChatConversation.customer_identifier == customer_identifier
+#             )
+#         ).order_by(desc(LiveChatConversation.created_at)).limit(20).all()
+        
+#         # Get customer devices
+#         from app.live_chat.customer_detection_service import CustomerDevice
+#         devices = db.query(CustomerDevice).filter(
+#             CustomerDevice.customer_profile_id == customer_profile.id
+#         ).all()
+        
+#         # Get customer preferences
+#         from app.live_chat.customer_detection_service import CustomerPreferences
+#         preferences = db.query(CustomerPreferences).filter(
+#             CustomerPreferences.customer_profile_id == customer_profile.id
+#         ).first()
+        
+#         # Format response
+#         profile_data = {
+#             "customer_profile": {
+#                 "id": customer_profile.id,
+#                 "identifier": customer_profile.customer_identifier,
+#                 "first_seen": customer_profile.first_seen.isoformat() if customer_profile.first_seen else None,
+#                 "last_seen": customer_profile.last_seen.isoformat() if customer_profile.last_seen else None,
+#                 "total_conversations": customer_profile.total_conversations,
+#                 "total_sessions": customer_profile.total_sessions,
+#                 "customer_satisfaction_avg": customer_profile.customer_satisfaction_avg,
+#                 "preferred_language": customer_profile.preferred_language,
+#                 "time_zone": customer_profile.time_zone
+#             },
+#             "conversations": [
+#                 {
+#                     "id": conv.id,
+#                     "created_at": conv.created_at.isoformat(),
+#                     "status": conv.status,
+#                     "resolution_status": conv.resolution_status,
+#                     "customer_satisfaction": conv.customer_satisfaction,
+#                     "agent_id": conv.assigned_agent_id,
+#                     "duration_minutes": conv.conversation_duration_seconds // 60 if conv.conversation_duration_seconds else None,
+#                     "message_count": conv.message_count
+#                 } for conv in recent_conversations
+#             ],
+#             "devices": [
+#                 {
+#                     "device_type": device.device_type,
+#                     "browser_name": device.browser_name,
+#                     "operating_system": device.operating_system,
+#                     "first_seen": device.first_seen.isoformat() if device.first_seen else None,
+#                     "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+#                     "total_sessions": device.total_sessions
+#                 } for device in devices
+#             ],
+#             "preferences": {
+#                 "preferred_language": preferences.preferred_language if preferences else "en",
+#                 "communication_style": preferences.preferred_communication_style if preferences else None,
+#                 "accessibility_required": preferences.requires_accessibility_features if preferences else False,
+#                 "privacy_preferences": {
+#                     "data_retention": preferences.data_retention_preference if preferences else "standard",
+#                     "email_notifications": preferences.email_notifications if preferences else False,
+#                     "marketing_consent": customer_profile.marketing_consent
+#                 }
+#             } if preferences else {}
+#         }
+        
+#         return {
+#             "success": True,
+#             **profile_data
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error getting customer profile: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get customer profile")
+
+
+
 @router.get("/customer-profile/{customer_identifier}")
 async def get_customer_profile(
     customer_identifier: str,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get existing customer profile and history"""
+    """Get existing customer profile and history - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Get customer profile
         from app.live_chat.customer_detection_service import CustomerProfile
@@ -1218,18 +1772,141 @@ async def get_customer_profile(
     except Exception as e:
         logger.error(f"Error getting customer profile: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get customer profile")
+    
+
+
+
+
+# @router.post("/update-customer-preferences/{customer_identifier}")
+# async def update_customer_preferences(
+#     customer_identifier: str,
+#     preferences_data: Dict[str, Any],
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Update customer preferences and privacy settings"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Get or create customer profile
+#         from app.live_chat.customer_detection_service import CustomerProfile, CustomerPreferences
+#         customer_profile = db.query(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerProfile.customer_identifier == customer_identifier
+#             )
+#         ).first()
+        
+#         if not customer_profile:
+#             # Create new customer profile
+#             customer_profile = CustomerProfile(
+#                 tenant_id=tenant.id,
+#                 customer_identifier=customer_identifier,
+#                 first_seen=datetime.utcnow(),
+#                 last_seen=datetime.utcnow()
+#             )
+#             db.add(customer_profile)
+#             db.commit()
+#             db.refresh(customer_profile)
+        
+#         # Get or create preferences
+#         preferences = db.query(CustomerPreferences).filter(
+#             CustomerPreferences.customer_profile_id == customer_profile.id
+#         ).first()
+        
+#         if not preferences:
+#             preferences = CustomerPreferences(
+#                 customer_profile_id=customer_profile.id
+#             )
+#             db.add(preferences)
+        
+#         # Update preferences
+#         if "preferred_language" in preferences_data:
+#             preferences.preferred_language = preferences_data["preferred_language"]
+#             customer_profile.preferred_language = preferences_data["preferred_language"]
+        
+#         if "communication_style" in preferences_data:
+#             preferences.preferred_communication_style = preferences_data["communication_style"]
+        
+#         if "accessibility_features" in preferences_data:
+#             preferences.requires_accessibility_features = preferences_data["accessibility_features"]
+        
+#         if "email_notifications" in preferences_data:
+#             preferences.email_notifications = preferences_data["email_notifications"]
+        
+#         if "data_retention" in preferences_data:
+#             preferences.data_retention_preference = preferences_data["data_retention"]
+        
+#         if "marketing_consent" in preferences_data:
+#             customer_profile.marketing_consent = preferences_data["marketing_consent"]
+#             customer_profile.last_consent_update = datetime.utcnow()
+        
+#         if "data_collection_consent" in preferences_data:
+#             customer_profile.data_collection_consent = preferences_data["data_collection_consent"]
+#             customer_profile.last_consent_update = datetime.utcnow()
+        
+#         preferences.updated_at = datetime.utcnow()
+#         customer_profile.updated_at = datetime.utcnow()
+        
+#         db.commit()
+        
+#         return {
+#             "success": True,
+#             "message": "Customer preferences updated successfully",
+#             "customer_id": customer_profile.id
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error updating customer preferences: {str(e)}")
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail="Failed to update preferences")
+
+
+
 
 
 @router.post("/update-customer-preferences/{customer_identifier}")
 async def update_customer_preferences(
     customer_identifier: str,
     preferences_data: Dict[str, Any],
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Update customer preferences and privacy settings"""
+    """Update customer preferences and privacy settings - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Get or create customer profile
         from app.live_chat.customer_detection_service import CustomerProfile, CustomerPreferences
@@ -1305,6 +1982,9 @@ async def update_customer_preferences(
         logger.error(f"Error updating customer preferences: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update preferences")
+
+
+
 
 
 @router.get("/agent-routing-suggestions/{customer_identifier}")
@@ -1441,15 +2121,193 @@ async def get_agent_routing_suggestions(
         raise HTTPException(status_code=500, detail="Failed to get routing suggestions")
 
 
+
+
+# @router.get("/customer-analytics")
+# async def get_customer_analytics(
+#     days: int = Query(30, ge=1, le=365),
+#     api_key: Optional[str] = Header(None, alias="X-API-Key"),
+#     token: Optional[str] = Security(bearer_scheme),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get customer analytics and insights for the tenant - supports both API key and agent token"""
+#     try:
+#         # Try API key first
+#         if api_key:
+#             tenant = get_tenant_from_api_key(api_key, db)
+#         # Try bearer token
+#         elif token:
+#             actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+#             from app.core.security import verify_token
+            
+#             payload = verify_token(actual_token)
+#             agent_id = payload.get("sub")
+#             user_type = payload.get("type")
+            
+#             if user_type == "agent":
+#                 agent = db.query(Agent).filter(
+#                     Agent.id == int(agent_id),
+#                     Agent.status == AgentStatus.ACTIVE,
+#                     Agent.is_active == True
+#                 ).first()
+                
+#                 if agent:
+#                     tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+#                     if not tenant:
+#                         raise HTTPException(status_code=404, detail="Agent's tenant not found")
+#                 else:
+#                     raise HTTPException(status_code=401, detail="Invalid agent token")
+#             else:
+#                 raise HTTPException(status_code=401, detail="Invalid token type")
+#         else:
+#             raise HTTPException(status_code=401, detail="API key or agent authentication required")
+        
+#         from_date = datetime.utcnow() - timedelta(days=days)
+        
+#         # Get customer profiles stats
+#         from app.live_chat.customer_detection_service import CustomerProfile, CustomerSession
+        
+#         total_customers = db.query(CustomerProfile).filter(
+#             CustomerProfile.tenant_id == tenant.id
+#         ).count()
+        
+#         new_customers = db.query(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerProfile.first_seen >= from_date
+#             )
+#         ).count()
+        
+#         returning_customers = db.query(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerProfile.total_conversations > 1
+#             )
+#         ).count()
+        
+#         # Geographic distribution
+#         from sqlalchemy import func
+#         geographic_data = db.query(
+#             CustomerSession.country,
+#             func.count(CustomerSession.id).label('count')
+#         ).join(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerSession.started_at >= from_date,
+#                 CustomerSession.country.isnot(None)
+#             )
+#         ).group_by(CustomerSession.country).order_by(desc('count')).limit(10).all()
+        
+#         # Device type distribution
+#         device_data = db.query(
+#             CustomerSession.user_agent,
+#             func.count(CustomerSession.id).label('count')
+#         ).join(CustomerProfile).filter(
+#             and_(
+#                 CustomerProfile.tenant_id == tenant.id,
+#                 CustomerSession.started_at >= from_date
+#             )
+#         ).group_by(CustomerSession.user_agent).all()
+        
+#         # Analyze device types
+#         device_counts = {"mobile": 0, "desktop": 0, "tablet": 0, "unknown": 0}
+#         for session_ua, count in device_data:
+#             if session_ua:
+#                 try:
+#                     from user_agents import parse as parse_user_agent
+#                     parsed_ua = parse_user_agent(session_ua)
+#                     if parsed_ua.is_mobile:
+#                         device_counts["mobile"] += count
+#                     elif parsed_ua.is_tablet:
+#                         device_counts["tablet"] += count
+#                     elif parsed_ua.is_pc:
+#                         device_counts["desktop"] += count
+#                     else:
+#                         device_counts["unknown"] += count
+#                 except:
+#                     device_counts["unknown"] += count
+        
+#         # Customer satisfaction trends
+#         satisfaction_data = db.query(
+#             func.avg(LiveChatConversation.customer_satisfaction).label('avg_satisfaction'),
+#             func.count(LiveChatConversation.id).label('total_rated')
+#         ).filter(
+#             and_(
+#                 LiveChatConversation.tenant_id == tenant.id,
+#                 LiveChatConversation.created_at >= from_date,
+#                 LiveChatConversation.customer_satisfaction.isnot(None)
+#             )
+#         ).first()
+        
+#         return {
+#             "success": True,
+#             "period_days": days,
+#             "customer_metrics": {
+#                 "total_customers": total_customers,
+#                 "new_customers": new_customers,
+#                 "returning_customers": returning_customers,
+#                 "return_rate": round((returning_customers / total_customers * 100) if total_customers > 0 else 0, 2)
+#             },
+#             "geographic_distribution": [
+#                 {"country": country, "count": count}
+#                 for country, count in geographic_data
+#             ],
+#             "device_distribution": device_counts,
+#             "satisfaction_metrics": {
+#                 "average_satisfaction": round(satisfaction_data.avg_satisfaction or 0, 2),
+#                 "total_rated_conversations": satisfaction_data.total_rated or 0
+#             }
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error getting customer analytics: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get customer analytics")
+
+
+
+
 @router.get("/customer-analytics")
 async def get_customer_analytics(
     days: int = Query(30, ge=1, le=365),
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get customer analytics and insights for the tenant"""
+    """Get customer analytics and insights for the tenant - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         from_date = datetime.utcnow() - timedelta(days=days)
         
@@ -1554,25 +2412,163 @@ async def get_customer_analytics(
         logger.error(f"Error getting customer analytics: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get customer analytics")
 
-
 # =============================================================================
 # ENHANCED START CHAT WITH AUTOMATIC DETECTION
 # =============================================================================
+
+# @router.post("/start-chat-with-detection", response_model=ChatResponse)
+# async def start_live_chat_with_detection(
+#     request: StartChatRequest,
+#     http_request: Request,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Enhanced start chat endpoint with automatic customer detection
+#     Includes geolocation, device fingerprinting, and visitor recognition
+#     """
+#     try:
+#         # 🔒 PRICING CHECK
+#         tenant = get_tenant_from_api_key(api_key, db)
+#         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+        
+#         # Initialize customer detection service
+#         detection_service = CustomerDetectionService(db)
+        
+#         # Perform comprehensive customer detection
+#         customer_data = await detection_service.detect_customer(
+#             request=http_request,
+#             tenant_id=tenant.id,
+#             customer_identifier=request.customer_identifier
+#         )
+        
+#         # Create conversation with enhanced customer data
+#         conversation = LiveChatConversation(
+#             tenant_id=tenant.id,
+#             customer_identifier=request.customer_identifier,
+#             customer_name=request.customer_name,
+#             customer_email=request.customer_email,
+#             chatbot_session_id=request.chatbot_session_id,
+#             handoff_reason="manual" if not request.handoff_context else "triggered",
+#             handoff_context=json.dumps(request.handoff_context) if request.handoff_context else None,
+#             original_question=request.initial_message,
+#             status=ConversationStatus.QUEUED,
+            
+#             # Enhanced customer data from detection
+#             customer_ip=customer_data["geolocation"]["ip_address"],
+#             customer_user_agent=customer_data["device_info"]["user_agent"]
+#         )
+        
+#         db.add(conversation)
+#         db.commit()
+#         db.refresh(conversation)
+        
+#         # Add to queue with intelligent routing
+#         queue_service = LiveChatQueueService(db)
+        
+#         # Determine priority based on customer data
+#         priority = 1  # Normal priority
+#         if customer_data["visitor_history"]["is_returning"]:
+#             if customer_data["visitor_history"].get("conversation_outcomes", {}).get("abandoned", 0) > 1:
+#                 priority = 2  # Higher priority for customers with abandonment history
+        
+#         queue_result = queue_service.add_to_queue(
+#             conversation_id=conversation.id,
+#             priority=priority,
+#             assignment_criteria={
+#                 "source": "customer_request_with_detection",
+#                 "customer_type": "returning" if customer_data["visitor_history"]["is_returning"] else "new",
+#                 "device_type": customer_data["device_info"]["device_type"],
+#                 "geographic_region": customer_data["geolocation"].get("country", "unknown")
+#             }
+#         )
+        
+#         # 📊 PRICING TRACK
+#         track_conversation_started_with_super_tenant(
+#             tenant_id=tenant.id,
+#             user_identifier=request.customer_identifier,
+#             platform="live_chat_enhanced",
+#             db=db
+#         )
+        
+#         # Generate WebSocket URL
+#         websocket_url = f"/live-chat/ws/customer/{conversation.id}?customer_id={request.customer_identifier}&tenant_id={tenant.id}"
+        
+#         # Enhanced response with customer insights
+#         response_message = "Chat started!"
+#         if customer_data["visitor_history"]["is_returning"]:
+#             response_message += " Welcome back! We have your previous conversation history."
+        
+#         logger.info(f"Enhanced live chat started: conversation {conversation.id} for tenant {tenant.id}")
+        
+#         return {
+#             "success": True,
+#             "conversation_id": conversation.id,
+#             "queue_position": queue_result.get("position"),
+#             "estimated_wait_time": queue_result.get("estimated_wait_time"),
+#             "websocket_url": websocket_url,
+#             "message": response_message,
+            
+#             # Additional customer insights for the frontend
+#             "customer_insights": {
+#                 "is_returning_visitor": customer_data["visitor_history"]["is_returning"],
+#                 "device_type": customer_data["device_info"]["device_type"],
+#                 "location": customer_data["geolocation"].get("city", "Unknown"),
+#                 "preferred_language": customer_data["customer_profile"].get("preferred_language", "en"),
+#                 "routing_priority": "high" if priority > 1 else "normal"
+#             }
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error starting enhanced live chat: {str(e)}")
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail="Failed to start chat")
+
 
 @router.post("/start-chat-with-detection", response_model=ChatResponse)
 async def start_live_chat_with_detection(
     request: StartChatRequest,
     http_request: Request,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """
-    Enhanced start chat endpoint with automatic customer detection
-    Includes geolocation, device fingerprinting, and visitor recognition
-    """
+    """Enhanced start chat endpoint with automatic customer detection - supports both API key and agent token"""
     try:
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
+        
         # 🔒 PRICING CHECK
-        tenant = get_tenant_from_api_key(api_key, db)
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
         
         # Initialize customer detection service
@@ -1668,4 +2664,3 @@ async def start_live_chat_with_detection(
         logger.error(f"Error starting enhanced live chat: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to start chat")
-        

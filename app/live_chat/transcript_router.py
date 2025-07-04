@@ -1,17 +1,28 @@
 # app/live_chat/transcript_router.py
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Security
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
+
+from fastapi.security import HTTPBearer
+from typing import Optional
+
+
+
 from app.database import get_db
 from app.live_chat.auth_router import get_current_agent
 from app.live_chat.email_transcript_service import EmailTranscriptService
 from app.live_chat.models import Agent, LiveChatConversation
+from app.tenants.models import Tenant
 from app.tenants.router import get_tenant_from_api_key
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -373,15 +384,120 @@ async def get_transcript_history(
 # ADMIN ENDPOINTS (API Key Authentication)
 # =============================================================================
 
+# @router.post("/admin/send-transcript")
+# async def admin_send_transcript(
+#     request: SendTranscriptRequest,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Admin endpoint to send conversation transcript"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Verify conversation belongs to tenant
+#         conversation = db.query(LiveChatConversation).filter(
+#             LiveChatConversation.id == request.conversation_id,
+#             LiveChatConversation.tenant_id == tenant.id
+#         ).first()
+        
+#         if not conversation:
+#             raise HTTPException(
+#                 status_code=404, 
+#                 detail="Conversation not found"
+#             )
+        
+#         # Get a representative agent (could be the assigned agent or any active agent)
+#         agent = None
+#         if conversation.assigned_agent_id:
+#             agent = db.query(Agent).filter(Agent.id == conversation.assigned_agent_id).first()
+        
+#         if not agent:
+#             # Get any active agent from this tenant
+#             agent = db.query(Agent).filter(
+#                 Agent.tenant_id == tenant.id,
+#                 Agent.is_active == True
+#             ).first()
+        
+#         if not agent:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail="No agents found for this tenant"
+#             )
+        
+#         # Initialize transcript service
+#         transcript_service = EmailTranscriptService(db)
+        
+#         # Send transcript
+#         result = await transcript_service.send_conversation_transcript(
+#             conversation_id=request.conversation_id,
+#             agent_id=agent.id,
+#             recipient_email=request.recipient_email,
+#             subject=request.subject,
+#             include_agent_notes=request.include_agent_notes,
+#             include_system_messages=request.include_system_messages
+#         )
+        
+#         if result["success"]:
+#             return {
+#                 "success": True,
+#                 "message": result["message"],
+#                 "email_id": result.get("email_id"),
+#                 "conversation_id": request.conversation_id,
+#                 "sent_by": "admin"
+#             }
+#         else:
+#             raise HTTPException(
+#                 status_code=500,
+#                 detail=result["error"]
+#             )
+            
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in admin send transcript: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to send transcript")
+
+
+
 @router.post("/admin/send-transcript")
 async def admin_send_transcript(
     request: SendTranscriptRequest,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Admin endpoint to send conversation transcript"""
+    """Admin endpoint to send conversation transcript - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Verify conversation belongs to tenant
         conversation = db.query(LiveChatConversation).filter(
@@ -396,18 +512,18 @@ async def admin_send_transcript(
             )
         
         # Get a representative agent (could be the assigned agent or any active agent)
-        agent = None
+        agent_for_transcript = None
         if conversation.assigned_agent_id:
-            agent = db.query(Agent).filter(Agent.id == conversation.assigned_agent_id).first()
+            agent_for_transcript = db.query(Agent).filter(Agent.id == conversation.assigned_agent_id).first()
         
-        if not agent:
+        if not agent_for_transcript:
             # Get any active agent from this tenant
-            agent = db.query(Agent).filter(
+            agent_for_transcript = db.query(Agent).filter(
                 Agent.tenant_id == tenant.id,
                 Agent.is_active == True
             ).first()
         
-        if not agent:
+        if not agent_for_transcript:
             raise HTTPException(
                 status_code=404,
                 detail="No agents found for this tenant"
@@ -419,7 +535,7 @@ async def admin_send_transcript(
         # Send transcript
         result = await transcript_service.send_conversation_transcript(
             conversation_id=request.conversation_id,
-            agent_id=agent.id,
+            agent_id=agent_for_transcript.id,
             recipient_email=request.recipient_email,
             subject=request.subject,
             include_agent_notes=request.include_agent_notes,
@@ -447,15 +563,121 @@ async def admin_send_transcript(
         raise HTTPException(status_code=500, detail="Failed to send transcript")
 
 
+
+
+# @router.get("/admin/conversation/{conversation_id}/transcript-options")
+# async def admin_get_transcript_options(
+#     conversation_id: int,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get transcript options and metadata for admin"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+        
+#         # Verify conversation
+#         conversation = db.query(LiveChatConversation).filter(
+#             LiveChatConversation.id == conversation_id,
+#             LiveChatConversation.tenant_id == tenant.id
+#         ).first()
+        
+#         if not conversation:
+#             raise HTTPException(status_code=404, detail="Conversation not found")
+        
+#         # Get message statistics
+#         from app.live_chat.models import LiveChatMessage, SenderType
+#         from sqlalchemy import func
+        
+#         message_stats = db.query(
+#             LiveChatMessage.sender_type,
+#             func.count(LiveChatMessage.id).label('count')
+#         ).filter(
+#             LiveChatMessage.conversation_id == conversation_id
+#         ).group_by(LiveChatMessage.sender_type).all()
+        
+#         stats_dict = {stat.sender_type: stat.count for stat in message_stats}
+        
+#         # Get available options
+#         return {
+#             "success": True,
+#             "conversation_id": conversation_id,
+#             "conversation_info": {
+#                 "customer_name": conversation.customer_name,
+#                 "customer_email": conversation.customer_email,
+#                 "status": conversation.status,
+#                 "created_at": conversation.created_at.isoformat(),
+#                 "closed_at": conversation.closed_at.isoformat() if conversation.closed_at else None,
+#                 "assigned_agent_id": conversation.assigned_agent_id,
+#                 "has_agent_notes": bool(conversation.agent_notes),
+#                 "has_internal_notes": bool(conversation.internal_notes)
+#             },
+#             "message_statistics": {
+#                 "total_messages": sum(stats_dict.values()),
+#                 "customer_messages": stats_dict.get(SenderType.CUSTOMER, 0),
+#                 "agent_messages": stats_dict.get(SenderType.AGENT, 0),
+#                 "system_messages": stats_dict.get(SenderType.SYSTEM, 0)
+#             },
+#             "transcript_options": {
+#                 "can_include_agent_notes": bool(conversation.agent_notes),
+#                 "can_include_internal_notes": bool(conversation.internal_notes),
+#                 "can_filter_by_sender": True,
+#                 "can_select_date_range": True,
+#                 "available_formats": ["html", "plain_text"]
+#             },
+#             "suggested_recipients": [
+#                 conversation.customer_email
+#             ] if conversation.customer_email else []
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error getting transcript options: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Failed to get options")
+
+
+
+
+
 @router.get("/admin/conversation/{conversation_id}/transcript-options")
 async def admin_get_transcript_options(
     conversation_id: int,
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
     db: Session = Depends(get_db)
 ):
-    """Get transcript options and metadata for admin"""
+    """Get transcript options and metadata for admin - supports both API key and agent token"""
     try:
-        tenant = get_tenant_from_api_key(api_key, db)
+        # Try API key first
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        # Try bearer token
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
         
         # Verify conversation
         conversation = db.query(LiveChatConversation).filter(

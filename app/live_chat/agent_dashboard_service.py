@@ -6,12 +6,12 @@ from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc, func
 
-from app.live_chat.models import (
-    LiveChatConversation, Agent, LiveChatMessage, ConversationStatus
-)
-from app.live_chat.customer_detection_service import (
-    CustomerDetectionService, CustomerProfile, CustomerSession, CustomerDevice
-)
+
+
+
+
+from app.live_chat.customer_detection_service import CustomerDetectionService, CustomerProfile, CustomerSession, CustomerDevice
+from app.live_chat.models import Agent, AgentSession, LiveChatConversation, ConversationStatus, AgentStatus, ChatQueue, LiveChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -889,65 +889,222 @@ class AgentDashboardService:
         return stats
 
 
+
+
+
+class SharedDashboardService:
+    """Shared service layer for dashboard operations - used by both admin and agent endpoints"""
+    
+    def __init__(self, db: Session, tenant_id: int):
+        self.db = db
+        self.tenant_id = tenant_id
+    
+    def get_assignable_agents(self) -> Dict[str, Any]:
+        """Get agents available for assignment"""
+        try:
+            agents = self.db.query(Agent).filter(
+                Agent.tenant_id == self.tenant_id,
+                Agent.status == AgentStatus.ACTIVE,
+                Agent.is_active == True
+            ).all()
+            
+            assignable_agents = []
+            for agent in agents:
+                session = self.db.query(AgentSession).filter(
+                    AgentSession.agent_id == agent.id,
+                    AgentSession.logout_at.is_(None)
+                ).first()
+                
+                is_online = session is not None
+                current_load = session.active_conversations if session else 0
+                max_capacity = session.max_concurrent_chats if session else agent.max_concurrent_chats
+                is_available = is_online and (current_load < max_capacity) and (session.is_accepting_chats if session else True)
+                
+                assignable_agents.append({
+                    "agent_id": agent.id,
+                    "display_name": agent.display_name,
+                    "email": agent.email,
+                    "is_online": is_online,
+                    "is_available": is_available,
+                    "current_conversations": current_load,
+                    "max_concurrent_chats": max_capacity,
+                    "utilization_percent": round((current_load / max_capacity * 100) if max_capacity > 0 else 0, 1)
+                })
+            
+            assignable_agents.sort(key=lambda x: (not x["is_available"], x["utilization_percent"]))
+            
+            return {
+                "success": True,
+                "tenant_id": self.tenant_id,
+                "total_agents": len(assignable_agents),
+                "available_agents": sum(1 for a in assignable_agents if a["is_available"]),
+                "agents": assignable_agents
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting assignable agents: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def get_active_conversations(self, requesting_agent_id: Optional[int] = None) -> Dict[str, Any]:
+        """Get active conversations - can filter by requesting agent"""
+        try:
+            query = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.status.in_([
+                    ConversationStatus.QUEUED,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.ACTIVE
+                ])
+            )
+            
+            # If requesting agent provided, show their conversations first
+            if requesting_agent_id:
+                query = query.order_by(
+                    (LiveChatConversation.assigned_agent_id == requesting_agent_id).desc(),
+                    LiveChatConversation.created_at.desc()
+                )
+            else:
+                query = query.order_by(LiveChatConversation.created_at.desc())
+            
+            conversations = query.all()
+            
+            conversation_list = []
+            current_time = datetime.utcnow()
+            
+            for conv in conversations:
+                agent_name = None
+                if conv.assigned_agent_id:
+                    agent = self.db.query(Agent).filter(Agent.id == conv.assigned_agent_id).first()
+                    agent_name = agent.display_name if agent else "Unknown Agent"
+                
+                wait_time = None
+                if conv.queue_entry_time:
+                    if conv.assigned_at:
+                        time_diff = conv.assigned_at - conv.queue_entry_time
+                        wait_time = int(time_diff.total_seconds() / 60)
+                    else:
+                        time_diff = current_time - conv.queue_entry_time
+                        wait_time = int(time_diff.total_seconds() / 60)
+                
+                conversation_list.append({
+                    "conversation_id": conv.id,
+                    "customer_identifier": conv.customer_identifier,
+                    "customer_name": conv.customer_name,
+                    "customer_email": conv.customer_email,
+                    "status": conv.status,
+                    "assigned_agent_id": conv.assigned_agent_id,
+                    "agent_name": agent_name,
+                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                    "last_activity_at": conv.last_activity_at.isoformat() if conv.last_activity_at else None,
+                    "message_count": conv.message_count,
+                    "wait_time_minutes": wait_time,
+                    "queue_position": conv.queue_position,
+                    "is_mine": conv.assigned_agent_id == requesting_agent_id if requesting_agent_id else False
+                })
+            
+            return {
+                "success": True,
+                "conversations": conversation_list,
+                "total_count": len(conversation_list),
+                "my_conversations": len([c for c in conversation_list if c.get("is_mine")]) if requesting_agent_id else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting active conversations: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def get_analytics_summary(self, days: int = 30) -> Dict[str, Any]:
+        """Get analytics summary for tenant"""
+        try:
+            from_date = datetime.utcnow() - timedelta(days=days)
+            
+            # Basic conversation stats
+            total_conversations = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date
+            ).count()
+            
+            completed_conversations = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.status == ConversationStatus.CLOSED
+            ).count()
+            
+            abandoned_conversations = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.status == ConversationStatus.ABANDONED
+            ).count()
+            
+            # Calculate averages
+            avg_wait_time = self.db.query(func.avg(LiveChatConversation.wait_time_seconds)).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.wait_time_seconds.isnot(None)
+            ).scalar() or 0
+            
+            avg_duration = self.db.query(func.avg(LiveChatConversation.conversation_duration_seconds)).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.conversation_duration_seconds.isnot(None)
+            ).scalar() or 0
+            
+            avg_satisfaction = self.db.query(func.avg(LiveChatConversation.customer_satisfaction)).filter(
+                LiveChatConversation.tenant_id == self.tenant_id,
+                LiveChatConversation.created_at >= from_date,
+                LiveChatConversation.customer_satisfaction.isnot(None)
+            ).scalar() or 0
+            
+            return {
+                "success": True,
+                "period_days": days,
+                "summary": {
+                    "total_conversations": total_conversations,
+                    "completed_conversations": completed_conversations,
+                    "abandoned_conversations": abandoned_conversations,
+                    "completion_rate": round((completed_conversations / total_conversations * 100) if total_conversations > 0 else 0, 2),
+                    "abandonment_rate": round((abandoned_conversations / total_conversations * 100) if total_conversations > 0 else 0, 2),
+                    "avg_wait_time_minutes": round(avg_wait_time / 60, 2),
+                    "avg_conversation_duration_minutes": round(avg_duration / 60, 2),
+                    "avg_customer_satisfaction": round(avg_satisfaction, 2)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting analytics: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    def get_queue_status(self) -> Dict[str, Any]:
+        """Get current queue status"""
+        try:
+            waiting_count = self.db.query(ChatQueue).filter(
+                ChatQueue.status == "waiting",
+                ChatQueue.tenant_id == self.tenant_id
+            ).count()
+
+            assigned_count = self.db.query(ChatQueue).filter(
+                ChatQueue.status == "assigned",
+                ChatQueue.tenant_id == self.tenant_id
+            ).count()
+
+            return {
+                "success": True,
+                "waiting": waiting_count,
+                "assigned": assigned_count,
+                "tenant_id": self.tenant_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting queue status: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+
+
+
+
+
+
+
+
 # Add this endpoint to your live_chat/router.py
 
-@router.get("/agent/enhanced-dashboard")
-async def get_enhanced_agent_dashboard(
-    current_agent: Agent = Depends(get_current_agent),
-    db: Session = Depends(get_db)
-):
-    """Get enhanced agent dashboard with customer intelligence"""
-    try:
-        dashboard_service = AgentDashboardService(db)
-        
-        # Get enhanced queue
-        enhanced_queue = await dashboard_service.get_enhanced_queue_for_agent(current_agent)
-        
-        # Get agent's current workload
-        from app.live_chat.models import AgentSession
-        agent_session = db.query(AgentSession).filter(
-            and_(
-                AgentSession.agent_id == current_agent.id,
-                AgentSession.logout_at.is_(None)
-            )
-        ).first()
-        
-        current_workload = {
-            "active_conversations": agent_session.active_conversations if agent_session else 0,
-            "max_capacity": agent_session.max_concurrent_chats if agent_session else 3,
-            "is_accepting_chats": agent_session.is_accepting_chats if agent_session else True,
-            "status": agent_session.status if agent_session else "offline"
-        }
-        
-        # Get recent performance metrics
-        recent_conversations = db.query(LiveChatConversation).filter(
-            and_(
-                LiveChatConversation.assigned_agent_id == current_agent.id,
-                LiveChatConversation.created_at >= datetime.utcnow() - timedelta(days=7)
-            )
-        ).all()
-        
-        performance_metrics = {
-            "conversations_this_week": len(recent_conversations),
-            "average_satisfaction": sum([conv.customer_satisfaction for conv in recent_conversations 
-                                       if conv.customer_satisfaction]) / len(recent_conversations) if recent_conversations else 0,
-            "resolution_rate": sum([1 for conv in recent_conversations 
-                                  if conv.resolution_status == "resolved"]) / len(recent_conversations) if recent_conversations else 0
-        }
-        
-        return {
-            "success": True,
-            "agent_info": {
-                "agent_id": current_agent.id,
-                "display_name": current_agent.display_name,
-                "tenant_id": current_agent.tenant_id
-            },
-            "current_workload": current_workload,
-            "performance_metrics": performance_metrics,
-            "enhanced_queue": enhanced_queue,
-            "dashboard_timestamp": datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting enhanced agent dashboard: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to get dashboard data")
