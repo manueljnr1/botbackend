@@ -70,6 +70,8 @@ class TenantDataManager:
                 f"resource belonging to tenant {resource_tenant_id}"
             )
             raise TenantSecurityError("Access denied: Resource belongs to different tenant")
+        
+
     
     # =================== FAQ OPERATIONS ===================
     
@@ -82,6 +84,7 @@ class TenantDataManager:
         logger.info(f"📋 Retrieved {len(faqs)} FAQs for tenant {self.tenant_id}")
         return faqs
     
+
     def get_faq_by_id(self, faq_id: int) -> Optional[FAQ]:
         """Get specific FAQ with security validation"""
         faq = self.db.query(FAQ).filter(
@@ -98,6 +101,9 @@ class TenantDataManager:
         
         return faq
     
+
+
+
     def create_faq(self, question: str, answer: str) -> FAQ:
         """Create new FAQ for authenticated tenant"""
         try:
@@ -118,6 +124,7 @@ class TenantDataManager:
             self.db.rollback()
             logger.error(f"❌ Failed to create FAQ for tenant {self.tenant_id}: {e}")
             raise
+    
     
     def update_faq(self, faq_id: int, question: str = None, answer: str = None) -> Optional[FAQ]:
         """Update FAQ with security validation"""

@@ -340,7 +340,7 @@ async def create_website_knowledge_base_sync(
                 detail=f"Include patterns {website_data.include_patterns} don't match base URL {base_url}"
             )
     
-    # Create database record
+    
     kb = KnowledgeBase(
         tenant_id=tenant_id,
         name=website_data.name,
@@ -357,12 +357,12 @@ async def create_website_knowledge_base_sync(
     db.commit()
     db.refresh(kb)
     
-    # Process synchronously with timeout
+    
     processor = DocumentProcessor(tenant_id)
     try:
         logger.info(f"Starting sync crawl for KB {kb.id}...")
         
-        # Process with timeout
+       
         result = await asyncio.wait_for(
         processor.process_website(
             base_url=base_url,

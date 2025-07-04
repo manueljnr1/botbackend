@@ -11,6 +11,10 @@ from app.knowledge_base.models import FAQ, KnowledgeBase, ProcessingStatus
 from app.knowledge_base.processor import DocumentProcessor
 from app.tenants.models import Tenant
 from app.config import settings
+from app.chatbot.security import SecurityPromptManager, build_secure_chatbot_prompt
+from app.chatbot.security import fix_response_formatting
+
+from app.chatbot.security import check_message_security
 
 try:
     from langchain_openai import ChatOpenAI
@@ -56,6 +60,21 @@ class UnifiedIntelligentEngine:
             if not tenant:
                 return {"error": "Invalid API key", "success": False}
             
+            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+            if not is_safe:
+                logger.warning(f"🔒 Security risk blocked in unified engine: {user_message[:50]}...")
+                return {
+                    "success": True,  # Don't reveal it was blocked
+                    "response": SecurityPromptManager.get_security_decline_message(
+                        SecurityPromptManager._identify_risk_type(""), 
+                        tenant.business_name or tenant.name
+                    ),
+                    "session_id": "security_block",
+                    "answered_by": "security_system",
+                    "intent": "security_risk",
+                    "architecture": "unified_intelligent_security"
+                }
+            
             # Initialize memory
             memory = SimpleChatbotMemory(self.db, tenant.id)
             session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
@@ -81,7 +100,9 @@ class UnifiedIntelligentEngine:
             final_response = self._check_sufficiency_and_enhance(
                 user_message, response, tenant, context_result
             )
-            
+                
+            final_response['content'] = fix_response_formatting(final_response['content'])
+
             # Store response
             memory.store_message(session_id, final_response['content'], False)
             
@@ -395,9 +416,57 @@ Answer:"""
         
         return self._generate_custom_response(user_message, tenant, "company_info", company_info)
     
+#     def _generate_custom_response(self, user_message: str, tenant: Tenant, response_type: str, extra_context: Dict = None) -> Dict[str, Any]:
+#         """
+#         Generate response with tenant's custom prompt and context
+#         """
+#         if not self.llm_available:
+#             return {
+#                 "content": "I'm here to help! Could you please provide more details?",
+#                 "source": "fallback",
+#                 "confidence": 0.3
+#             }
+        
+#         try:
+#             # Build prompt with tenant customization
+#             base_prompt = tenant.system_prompt or f"You are a helpful assistant for {tenant.business_name or tenant.name}."
+            
+#             if response_type == "general_knowledge":
+#                 instruction = "Answer this general question while maintaining your helpful personality."
+#             elif response_type == "company_info":
+#                 instruction = f"Answer about {tenant.business_name or tenant.name} using available information."
+#             else:
+#                 instruction = "Provide helpful information about our product or service."
+            
+#             prompt_template = f"""{base_prompt}
+
+# {instruction}
+
+# User Question: {{message}}
+
+# Your response:"""
+            
+#             prompt = PromptTemplate(input_variables=["message"], template=prompt_template)
+#             result = self.llm.invoke(prompt.format(message=user_message))
+            
+#             return {
+#                 "content": result.content.strip(),
+#                 "source": f"Custom_{response_type}",
+#                 "confidence": 0.7
+#             }
+            
+#         except Exception as e:
+#             logger.error(f"Custom response error: {e}")
+#             return {
+#                 "content": "I apologize, but I'm having trouble processing your request right now.",
+#                 "source": "error_fallback",
+#                 "confidence": 0.1
+#             }
+    
+
     def _generate_custom_response(self, user_message: str, tenant: Tenant, response_type: str, extra_context: Dict = None) -> Dict[str, Any]:
         """
-        Generate response with tenant's custom prompt and context
+        Generate response with tenant's custom prompt and context - NOW WITH SECURITY
         """
         if not self.llm_available:
             return {
@@ -407,8 +476,13 @@ Answer:"""
             }
         
         try:
-            # Build prompt with tenant customization
-            base_prompt = tenant.system_prompt or f"You are a helpful assistant for {tenant.business_name or tenant.name}."
+            # 🔒 BUILD SECURE PROMPT (replaces old tenant.system_prompt usage)
+            secure_prompt = build_secure_chatbot_prompt(
+                tenant_prompt=tenant.system_prompt,
+                company_name=tenant.business_name or tenant.name,
+                faq_info="",  # Not needed for this context
+                knowledge_base_info=""
+            )
             
             if response_type == "general_knowledge":
                 instruction = "Answer this general question while maintaining your helpful personality."
@@ -417,20 +491,21 @@ Answer:"""
             else:
                 instruction = "Provide helpful information about our product or service."
             
-            prompt_template = f"""{base_prompt}
+            # 🔒 USE SECURE PROMPT INSTEAD OF RAW TENANT PROMPT
+            prompt_template = f"""{secure_prompt}
 
-{instruction}
+    {instruction}
 
-User Question: {{message}}
+    User Question: {{message}}
 
-Your response:"""
+    Your response:"""
             
             prompt = PromptTemplate(input_variables=["message"], template=prompt_template)
             result = self.llm.invoke(prompt.format(message=user_message))
             
             return {
                 "content": result.content.strip(),
-                "source": f"Custom_{response_type}",
+                "source": f"Secure_{response_type}",
                 "confidence": 0.7
             }
             
@@ -441,7 +516,10 @@ Your response:"""
                 "source": "error_fallback",
                 "confidence": 0.1
             }
-    
+
+
+
+
     def _check_sufficiency_and_enhance(self, user_message: str, response: Dict, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
         """
         Check if response is sufficient, enhance if needed
@@ -473,11 +551,55 @@ Your response:"""
         """
         return f"I understand you're asking about {user_message}. Let me connect you with more specific help for {tenant.business_name or tenant.name}."
     
+#     def _apply_custom_prompt_filter(self, content: str, tenant: Tenant) -> str:
+#         """
+#         Apply tenant's custom prompt as a filter to ensure brand voice
+#         """
+#         if not self.llm_available or not tenant.system_prompt:
+#             return content
+        
+#         try:
+#             prompt = PromptTemplate(
+#                 input_variables=["response", "brand_voice"],
+#                 template="""Adjust this response to match the brand voice:
+
+# Brand Voice: {brand_voice}
+
+# Response: {response}
+
+# Adjusted Response:"""
+#             )
+            
+#             result = self.llm.invoke(prompt.format(
+#                 response=content,
+#                 brand_voice=tenant.system_prompt
+#             ))
+            
+#             return result.content.strip()
+            
+#         except Exception as e:
+#             logger.error(f"Prompt filter error: {e}")
+#             return content
+
+
+
+
     def _apply_custom_prompt_filter(self, content: str, tenant: Tenant) -> str:
         """
-        Apply tenant's custom prompt as a filter to ensure brand voice
+        Apply tenant's custom prompt as a filter to ensure brand voice - WITH SECURITY
         """
-        if not self.llm_available or not tenant.system_prompt:
+        if not self.llm_available:
+            return content
+        
+        # 🔒 USE SECURE PROMPT BUILDING
+        if tenant.system_prompt:
+            secure_brand_voice = build_secure_chatbot_prompt(
+                tenant_prompt=tenant.system_prompt,
+                company_name=tenant.business_name or tenant.name,
+                faq_info="",
+                knowledge_base_info=""
+            )
+        else:
             return content
         
         try:
@@ -485,16 +607,16 @@ Your response:"""
                 input_variables=["response", "brand_voice"],
                 template="""Adjust this response to match the brand voice:
 
-Brand Voice: {brand_voice}
+    Brand Voice: {brand_voice}
 
-Response: {response}
+    Response: {response}
 
-Adjusted Response:"""
+    Adjusted Response:"""
             )
             
             result = self.llm.invoke(prompt.format(
                 response=content,
-                brand_voice=tenant.system_prompt
+                brand_voice=secure_brand_voice
             ))
             
             return result.content.strip()
@@ -502,6 +624,8 @@ Adjusted Response:"""
         except Exception as e:
             logger.error(f"Prompt filter error: {e}")
             return content
+
+
     
     def _enhance_faq_response(self, faq_answer: str) -> str:
         """
