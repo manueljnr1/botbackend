@@ -27,7 +27,7 @@ from app.live_chat.auth_utils import get_tenant_context, get_agent_or_tenant_con
 from app.live_chat.agent_dashboard_service import SharedDashboardService
 from app.pricing.integration_helpers import check_conversation_limit_dependency_with_super_tenant, track_conversation_started_with_super_tenant
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
+from app.live_chat.models import AgentSession
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -199,7 +199,7 @@ async def get_enhanced_agent_dashboard(
         enhanced_queue = await dashboard_service.get_enhanced_queue_for_agent(current_agent)
         
         # Get agent's current workload
-        from app.live_chat.models import AgentSession
+        # from app.live_chat.models import AgentSession
         agent_session = db.query(AgentSession).filter(
             and_(
                 AgentSession.agent_id == current_agent.id,

@@ -17,7 +17,11 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 from app.chatbot.models import ChatSession
 from app.knowledge_base.models import FAQ 
+from app.tenants.models import Tenant
 import os
+from app.config import settings
+from app.chatbot.email_scraper_engine import EmailScraperEngine, ScrapedEmail
+
 
 # Supabase integration
 try:
@@ -90,7 +94,8 @@ class AdvancedSmartFeedbackManager:
         
         # Initialize Supabase
         self.supabase_url = os.getenv("SUPABASE_URL")
-        self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
+        # self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
+        self.supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
         if not self.supabase_url or not self.supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be set")
         
@@ -128,10 +133,21 @@ class AdvancedSmartFeedbackManager:
         ]
         
         logger.info(f"✅ Advanced Smart Feedback Manager initialized for tenant {tenant_id} with 30-day email memory")
-    
+
+        # Check LLM availability properly
+        try:
+            from langchain_openai import ChatOpenAI
+            LLM_AVAILABLE = True
+        except ImportError:
+            LLM_AVAILABLE = False
+
+        self.llm_available = LLM_AVAILABLE and bool(settings.OPENAI_API_KEY)
+        logger.info(f"🔍 LLM available: {self.llm_available}, OpenAI key exists: {bool(settings.OPENAI_API_KEY)}")
+
+            
     def should_request_email(self, session_id: str, user_identifier: str) -> bool:
         """
-        Check if we should ask for email with 30-day memory logic
+        Check if we should ask for email with 30-day memory logic + LOOP PREVENTION
         """
         try:
             from app.chatbot.simple_memory import SimpleChatbotMemory
@@ -173,38 +189,168 @@ class AdvancedSmartFeedbackManager:
                     self.db.commit()
                     return True
             
-            # Check if conversation is new (no meaningful history)
+            # 🔥 CRITICAL FIX: Check if we already asked for email in this conversation
+            if conversation_history and len(conversation_history) > 1:
+                # Look for recent email requests in conversation
+                recent_messages = conversation_history[-4:]  # Last 4 messages
+                for msg in recent_messages:
+                    if not msg.get('is_from_user', True):  # Bot message
+                        content = msg.get('content', '').lower()
+                        email_request_indicators = [
+                            'email address', 'your email', 'share your email', 
+                            'provide your email', 'email for', 'may i have your email',
+                            'could you share', 'kindly provide', 'email address for'
+                        ]
+                        
+                        # If we recently asked for email, don't ask again
+                        if any(indicator in content for indicator in email_request_indicators):
+                            logger.info(f"📧 Recently asked for email in conversation, not asking again")
+                            return False
+            
+            # Check if conversation is truly new (no meaningful history)
             if len(conversation_history) <= 1:  # Only greeting or first message
                 logger.info(f"🆕 New conversation for {user_identifier}, requesting email")
                 return True
+            else:
+                # Has conversation history but no email request detected - this might be a returning user
+                # Only ask for email if it's been a while since last conversation
+                logger.info(f"📧 Existing conversation for {user_identifier}, skipping email request")
+                return False
                 
-            return False
-            
         except Exception as e:
             logger.error(f"❌ Error checking email request: {e}")
             return False
-    
-    def generate_email_request_message(self, tenant_name: str) -> str:
-        """Generate a natural, professional email request with memory context"""
-        messages = [
-            f"Hi! I'm {tenant_name}'s AI assistant. To provide you with the best possible support and follow-up, could you please share your email address?",
-            f"Hello! Welcome to {tenant_name}. For quality service and follow-up support, may I have your email address?",
-            f"Hi there! I'm here to help you with {tenant_name}. To ensure I can provide complete assistance, could you share your email with me?",
-            f"Welcome! I'm {tenant_name}'s virtual assistant. For better service and support follow-up, would you mind sharing your email address?",
-            f"Good to see you! I'm {tenant_name}'s AI assistant. For the best experience and follow-up support, could you please provide your email?"
+        
+
+
+    def generate_email_request_message(self, business_name: str, conversation_context: List[Dict] = None) -> str:
+        """
+        Generate email request message - FIXED OPTION 2: Corrected validation logic
+        """
+        # Simple fallback templates
+        simple_requests = [
+                "Hi, to provide better support, could you share your email address?",
+                f"Hello, for quality {business_name} service, may I have your email?",
+                "Hi there, to ensure we assist you fully, could you share your email?",
+                "Welcome, for better service and follow-up, would you mind sharing your email?",
+                f"Hello, to give you the best {business_name} experience, could you provide your email?",
+                "Could you let me know your email so we can follow up if needed?",
+                "To keep in touch and assist you better, would you be open to sharing your email?",
+                "Mind dropping your email so we can make sure everything goes smoothly?",
+                "Just so we can support you properly, could you share your email?",
+                "If you're comfortable, could you leave your email so we can help further?"
         ]
+        
         import random
-        return random.choice(messages)
-    
+        selected_request = random.choice(simple_requests)
+        
+        if not self.llm_available:
+            logger.info(f"📧 LLM unavailable, using simple email request for {business_name}")
+            return selected_request
+        
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain.prompts import PromptTemplate
+            
+            prompt = PromptTemplate(
+                input_variables=["business_name"],
+                template='''You are a customer service assistant for {business_name}. Generate a brief, friendly message asking a new customer for their email address.
+
+    Requirements:
+    - Ask for email address politely
+    - Maximum 15 words
+    - Professional but casual tone
+    - No exclamation marks
+    - Don't mention any previous conversation
+
+    Examples:
+    "Hi, To provide better support, could you share your email address?"
+    "Hello, For quality service, may I have your email?"
+    "Hi there... Could you share your email for better assistance?"
+
+    Your email request:'''
+            )
+            
+            llm = ChatOpenAI(
+                model_name="gpt-3.5-turbo",
+                temperature=0.3,
+                openai_api_key=settings.OPENAI_API_KEY,
+            )
+            
+            result = llm.invoke(prompt.format(business_name=business_name))
+            email_message = result.content.strip()
+            
+            # FIXED: More targeted validation - only block actual problems
+            serious_issues = [
+                # Debug leak indicators (keep these)
+                "user provided", "extracted", "detected", "system", "backend", 
+                "debug", "log", "conversation_context", "in response to", "assistant's request",
+                
+                # Specific business context leakage (only if it appears with business context)
+                "test lyra local", "testing lyra", "lyra local",  # Full phrases only
+                "thank you in advance",  # Full phrase that indicates echoing
+                
+                # Clear non-email-request responses
+                "how can i help you", "what can i do for you", "how may i assist"
+            ]
+            
+            # Check if response is actually asking for email
+            email_request_indicators = ["email", "e-mail", "contact information", "contact details"]
+            has_email_request = any(indicator in email_message.lower() for indicator in email_request_indicators)
+            
+            # Check for serious issues only
+            for issue in serious_issues:
+                if issue.lower() in email_message.lower():
+                    logger.warning(f"🚨 Serious issue detected (contains '{issue}'), using fallback")
+                    return selected_request
+            
+            # Must actually ask for email
+            if not has_email_request:
+                logger.warning(f"🚨 Response doesn't ask for email: '{email_message}', using fallback")
+                return selected_request
+            
+            # Length validation (more generous)
+            if len(email_message) > 100 or len(email_message) < 5:
+                logger.warning(f"🚨 Email request length out of bounds ({len(email_message)} chars), using fallback")
+                return selected_request
+            
+            # SUCCESS: Valid email request generated
+            logger.info(f"📧 Generated valid LLM email request for {business_name}: '{email_message}'")
+            return email_message
+            
+        except Exception as e:
+            logger.error(f"❌ LLM email request generation failed: {e}")
+            return selected_request
+
+    # def _generate_fallback_email_request(self, business_name: str) -> str:
+    #     """Fallback method when LLM is unavailable"""
+    #     messages = [
+    #         f"Hi, I'm {business_name}'s assistant. To provide better support and follow-up, could you share your email?",
+    #         f"Hello, Welcome to {business_name}. For quality service, may I have your email address?",
+    #         f"Hi there, To ensure complete assistance with {business_name}, could you share your email?",
+    #         f"Welcome, For better service and follow-up support, would you mind sharing your email?",
+    #         f"Hello, For the best {business_name} experience, could you please provide your email?"
+    #     ]
+    #     import random
+    #     return random.choice(messages)
+
+
+
     def extract_email_from_message(self, message: str) -> Optional[str]:
-        """Extract and validate email address from user message"""
+        """Extract and validate email address from user message - CLEAN VERSION"""
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         matches = re.findall(email_pattern, message)
-        return matches[0] if matches else None
+        
+        if matches:
+            email = matches[0].lower().strip()
+            logger.info(f"📧 Email extracted: {email}")
+            return email
+        
+        return None
     
     def store_user_email(self, session_id: str, email: str) -> bool:
         """
-        Store user email with 30-day expiration tracking
+        Store user email with 30-day expiration tracking - FIXED TO PREVENT LEAKS
         """
         try:
             session = self.db.query(ChatSession).filter(
@@ -222,18 +368,49 @@ class AdvancedSmartFeedbackManager:
                 
                 self.db.commit()
                 
-                # Track in Supabase for analytics
+                # Track in Supabase for analytics (backend only)
                 self._track_email_capture(session_id, email)
                 
-                # Log memory duration
+                # Log for debugging (backend only)
                 expiry_date = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
                 logger.info(f"✅ Stored email {email} for session {session_id} (expires: {expiry_date.strftime('%Y-%m-%d')})")
                 return True
+                
         except Exception as e:
             logger.error(f"❌ Error storing email: {e}")
             self.db.rollback()
+        
         return False
     
+    def generate_clean_email_acknowledgment(self, email: str, business_name: str) -> str:
+        """
+        Generate a clean email acknowledgment WITHOUT any debug information
+        This replaces the LLM-based generation that was leaking debug info
+        """
+        # Use simple, predefined responses to avoid any debug leakage
+        acknowledgment_templates = [
+            "Perfect... I've noted your email as email. How can I assist you today?",
+            "Great, I have noted your email. Let's rock and roll?",
+            "Thanks, I've saved your email as email. What can I help you with?",
+            "Great... I have your email as email. What will I be helping you with today?",
+            "Cool, your email has been saved. What would you like to know?",
+            "Got it! I've recorded your email as email. How may I assist you?",
+            "Awesome, email is in. What do you need help with today?",
+            "Email saved. What would you like us to sort out?",
+            "Alright, email locked in. What’s next on your mind?",
+            "Noted your email. How can I be of help right now?"
+        ]
+        
+        # Simple rotation to add variety without LLM complexity
+        import random
+        selected_template = random.choice(acknowledgment_templates)
+        
+        logger.info(f"📧 Generated clean email acknowledgment for {email}")
+        return selected_template
+
+
+
+
     def get_email_memory_status(self, session_id: str) -> Dict[str, Any]:
         """Get email memory status for debugging"""
         try:
@@ -315,7 +492,7 @@ class AdvancedSmartFeedbackManager:
         inadequate_score = 0
         matched_patterns = []
         
-        # Pattern matching with scoring
+        
         for pattern in self.inadequate_response_patterns:
             if re.search(pattern, response_lower):
                 inadequate_score += 1

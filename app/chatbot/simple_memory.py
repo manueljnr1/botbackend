@@ -54,7 +54,7 @@ class SimpleChatbotMemory:
         logger.info(f"Created new session {session_id} for {user_identifier}")
         return session_id, True
     
-    def get_conversation_history(self, user_identifier: str, max_messages: int = 20) -> List[Dict]:
+    def get_conversation_history(self, user_identifier: str, max_messages: int = 30) -> List[Dict]:
         """
         Get recent conversation history for the user - simplified
         Returns messages in chronological order (oldest first)
@@ -151,7 +151,7 @@ class SimpleChatbotMemory:
         
         return "\n".join(prompt_parts)
     
-    def cleanup_old_sessions(self, days_old: int = 90) -> int:
+    def cleanup_old_sessions(self, days_old: int = 30) -> int:
         """
         Clean up old inactive sessions - simplified and less aggressive
         """
