@@ -385,7 +385,7 @@ async def start_live_chat(
         
         # Add to queue
         queue_service = LiveChatQueueService(db)
-        queue_result = queue_service.add_to_queue(
+        queue_result = await queue_service.add_to_queue_with_smart_routing(
             conversation_id=conversation.id,
             priority=1,  # Normal priority
             assignment_criteria={"source": "customer_request"}
@@ -2611,7 +2611,7 @@ async def start_live_chat_with_detection(
             if customer_data["visitor_history"].get("conversation_outcomes", {}).get("abandoned", 0) > 1:
                 priority = 2  # Higher priority for customers with abandonment history
         
-        queue_result = queue_service.add_to_queue(
+        queue_result = await queue_service.add_to_queue_with_smart_routing(
             conversation_id=conversation.id,
             priority=priority,
             assignment_criteria={
