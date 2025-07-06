@@ -17,7 +17,7 @@ from fastapi import Security
 from app.database import get_db
 from app.live_chat.websocket_manager import websocket_manager, LiveChatMessageHandler
 from app.live_chat.queue_service import LiveChatQueueService
-from app.live_chat.agent_dashboard_service import AgentDashboardService  # Import AgentDashboardService
+from app.live_chat.agent_dashboard_service import AgentDashboardService
 from app.live_chat.agent_service import AgentSessionService
 from app.live_chat.models import LiveChatConversation, Agent, ConversationStatus, LiveChatMessage, MessageType, SenderType, AgentStatus, ChatQueue, AgentSession
 from app.tenants.router import get_tenant_from_api_key
@@ -199,7 +199,7 @@ async def get_enhanced_agent_dashboard(
         enhanced_queue = await dashboard_service.get_enhanced_queue_for_agent(current_agent)
         
         # Get agent's current workload
-        # from app.live_chat.models import AgentSession
+        from app.live_chat.models import AgentSession
         agent_session = db.query(AgentSession).filter(
             and_(
                 AgentSession.agent_id == current_agent.id,

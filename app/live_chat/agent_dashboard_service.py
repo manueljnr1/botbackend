@@ -632,7 +632,6 @@ class AgentDashboardService:
             ).first()
             
             if preferred_agent:
-                from app.live_chat.models import AgentSession
                 session = self.db.query(AgentSession).filter(
                     and_(
                         AgentSession.agent_id == preferred_agent.id,

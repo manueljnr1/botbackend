@@ -742,6 +742,8 @@ Answer:"""
 
 
     def analyze_conversation_context(
+        self,
+        *,  # Force keyword-only arguments
         current_message: str,
         conversation_history: List[Dict[str, Any]],
         tenant: Tenant,
@@ -752,20 +754,6 @@ Answer:"""
         
         Analyzes if the current message relates to previous conversation exchanges
         and provides contextual understanding to prevent the bot from losing track.
-        
-        Args:
-            current_message: The user's current question/message
-            conversation_history: List of recent messages [{"role": "user/bot", "content": "...", "timestamp": ...}]
-            tenant: Tenant object for company context
-            llm_instance: LLM instance for analysis
-        
-        Returns:
-            Dict containing:
-            - is_contextual: bool (True if current message relates to previous exchanges)
-            - relevant_context: str (The specific previous context that's relevant)
-            - context_type: str (Type of contextual relationship)
-            - enhanced_message: str (Current message enhanced with context)
-            - confidence: float (0.0-1.0 confidence in the analysis)
         """
         
         # Return default if no history or LLM
@@ -789,46 +777,44 @@ Answer:"""
                 history_text += f"{role}: {msg.get('content', '')}\n"
             
             # Create the analysis prompt
-            from langchain.prompts import PromptTemplate
-            
             analysis_prompt = PromptTemplate(
                 input_variables=["current_message", "history", "company"],
                 template="""Analyze if the current user message relates to the previous conversation context.
 
-    Company: {company}
+Company: {company}
 
-    Recent Conversation:
-    {history}
+Recent Conversation:
+{history}
 
-    Current User Message: "{current_message}"
+Current User Message: "{current_message}"
 
-    ANALYSIS TASK:
-    Determine if the current message is a follow-up question that relates to something previously discussed.
+ANALYSIS TASK:
+Determine if the current message is a follow-up question that relates to something previously discussed.
 
-    Look for these patterns:
-    1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
-    2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
-    3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
-    4. CONTINUATION: Building on a previous topic without re-stating context
+Look for these patterns:
+1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
+2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
+3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
+4. CONTINUATION: Building on a previous topic without re-stating context
 
-    Examples:
-    - Previous: "We offer loyalty rewards - a trip to Dubai"
-    - Current: "Who goes to Dubai?" → CONTEXTUAL (refers to loyalty program)
+Examples:
+- Previous: "We offer loyalty rewards - a trip to Dubai"
+- Current: "Who goes to Dubai?" → CONTEXTUAL (refers to loyalty program)
 
-    - Previous: "Our app has dark mode"  
-    - Current: "How do I enable it?" → CONTEXTUAL (refers to dark mode)
+- Previous: "Our app has dark mode"  
+- Current: "How do I enable it?" → CONTEXTUAL (refers to dark mode)
 
-    - Previous: "Password reset takes 5 minutes"
-    - Current: "What's the weather?" → NOT CONTEXTUAL (unrelated topic)
+- Previous: "Password reset takes 5 minutes"
+- Current: "What's the weather?" → NOT CONTEXTUAL (unrelated topic)
 
-    RESPONSE FORMAT:
-    CONTEXTUAL: YES|NO
-    CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
-    RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
-    ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
-    CONFIDENCE: [0.1-1.0]
+RESPONSE FORMAT:
+CONTEXTUAL: YES|NO
+CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
+RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
+ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
+CONFIDENCE: [0.1-1.0]
 
-    Analysis:"""
+Analysis:"""
             )
             
             # Get LLM analysis
@@ -893,8 +879,8 @@ Answer:"""
             
             # Log the analysis for debugging
             logger.info(f"Context Analysis - Contextual: {analysis_result['is_contextual']}, "
-                    f"Type: {analysis_result['context_type']}, "
-                    f"Confidence: {analysis_result['confidence']}")
+                       f"Type: {analysis_result['context_type']}, "
+                       f"Confidence: {analysis_result['confidence']}")
             
             return analysis_result
             
