@@ -176,6 +176,14 @@ class SmartChatRequest(BaseModel):
     max_context: int = 200
 
 
+class DiscordSmartChatRequest(BaseModel):
+    message: str
+    discord_user_id: str
+    channel_id: str
+    guild_id: str
+    max_context: int = 20
+
+
 def detect_handoff_triggers(user_message: str) -> bool:
     '''Detect if user message should trigger handoff to live chat'''
     handoff_triggers = [
@@ -3495,9 +3503,14 @@ Follow-ups:"""
 
 
 
+
+
+
+
+
 #===== Discord & Telegram
 
-@router.post("/chat/smart2", response_model=ChatResponse)
+@router.post("/chat/smart2dd", response_model=ChatResponse)
 async def smart_chat_unified(
     request: SmartChatRequest,
     api_key: str = Header(..., alias="X-API-Key"),
@@ -3582,3 +3595,5 @@ async def smart_chat_unified(
             status_code=500, 
             detail="An internal server error occurred. Please try again later."
         )
+    
+

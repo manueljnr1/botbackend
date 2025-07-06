@@ -1,8 +1,4 @@
 # app/instagram/service.py
-"""
-Instagram API Service
-Handles all Instagram API interactions and webhook processing
-"""
 
 import logging
 import requests
@@ -10,6 +6,7 @@ import json
 import uuid
 import hashlib
 import hmac
+import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -470,101 +467,133 @@ class InstagramWebhookProcessor:
 
 
 class InstagramConversationManager:
-    """Manage Instagram conversations and integrate with chatbot engine"""
+    """🔥 ENHANCED: Manage Instagram conversations with unified intelligent engine"""
     
     def __init__(self, db: Session):
         self.db = db
+        self.memory_managers = {}  # Cache per tenant
+    
+    def _get_memory_manager(self, tenant_id: int):
+        """Get or create memory manager for tenant"""
+        if tenant_id not in self.memory_managers:
+            from app.instagram.memory import InstagramMemoryManager
+            self.memory_managers[tenant_id] = InstagramMemoryManager(self.db, tenant_id)
+        return self.memory_managers[tenant_id]
     
     def process_incoming_message(self, conversation: InstagramConversation, 
                                message: InstagramMessage) -> Optional[str]:
-        """Process incoming message and generate chatbot response"""
+        """🔥 ENHANCED: Process incoming message with unified intelligent engine"""
         try:
-            from app.chatbot.engine import ChatbotEngine
+            # Get memory manager for this tenant
+            memory_manager = self._get_memory_manager(conversation.tenant_id)
             
-            # Initialize chatbot engine
-            chatbot_engine = ChatbotEngine(self.db)
-            
-            # Get tenant API key
-            tenant = conversation.tenant
-            if not tenant or not tenant.api_key:
-                logger.error(f"No API key found for tenant {conversation.tenant_id}")
-                return None
-            
-            # Process message with chatbot engine
-            user_identifier = conversation.get_user_identifier()
-            message_content = message.get_display_content()
-            
-            result = chatbot_engine.process_message_simple_memory(
-                api_key=tenant.api_key,
-                user_message=message_content,
-                user_identifier=user_identifier,
-                platform="instagram",
-                max_context=20
+            # Process with unified engine + Instagram formatting
+            formatted_response = memory_manager.process_with_unified_engine(
+                conversation, message
             )
             
-            if result.get("success"):
-                bot_response = result.get("response")
-                
-                # Send response via Instagram API
-                api_service = InstagramAPIService(conversation.integration, self.db)
-                success, instagram_message_id = api_service.send_message(
-                    conversation.instagram_user_id,
-                    bot_response
+            if not formatted_response:
+                logger.error(f"❌ No response from unified engine")
+                return None
+            
+            # Send response via Instagram API
+            api_service = InstagramAPIService(conversation.integration, self.db)
+            
+            success, instagram_message_id = api_service.send_message(
+                conversation.instagram_user_id,
+                formatted_response["content"],
+                formatted_response["message_type"],
+                formatted_response.get("quick_replies")
+            )
+            
+            if success:
+                # Store bot message in Instagram system
+                bot_message = InstagramMessage(
+                    conversation_id=conversation.id,
+                    tenant_id=conversation.tenant_id,
+                    instagram_message_id=instagram_message_id,
+                    message_uuid=str(uuid.uuid4()),
+                    message_type=formatted_response["message_type"],
+                    content=formatted_response["content"],
+                    is_from_user=False,
+                    message_status="sent",
+                    instagram_timestamp=datetime.utcnow()
                 )
                 
-                if success:
-                    # Store bot message
-                    bot_message = InstagramMessage(
-                        conversation_id=conversation.id,
-                        tenant_id=conversation.tenant_id,
-                        instagram_message_id=instagram_message_id,
-                        message_uuid=str(uuid.uuid4()),
-                        message_type="text",
-                        content=bot_response,
-                        is_from_user=False,
-                        message_status="sent",
-                        instagram_timestamp=datetime.utcnow()
-                    )
-                    
-                    self.db.add(bot_message)
-                    
-                    # Update conversation stats
-                    conversation.update_message_stats(is_from_user=False)
-                    
-                    self.db.commit()
-                    
-                    logger.info(f"✅ Bot response sent to Instagram user: {conversation.instagram_user_id}")
-                    return bot_response
-                else:
-                    logger.error(f"❌ Failed to send bot response to Instagram")
-                    return None
+                self.db.add(bot_message)
+                conversation.update_message_stats(is_from_user=False)
+                
+                # Sync to core memory
+                memory_manager.sync_instagram_message_to_core(bot_message)
+                
+                self.db.commit()
+                
+                logger.info(f"✅ Unified engine response sent to Instagram user: {conversation.instagram_user_id}")
+                logger.info(f"🎯 Response source: {formatted_response.get('answered_by')} | Intent: {formatted_response.get('intent')} | Architecture: {formatted_response.get('architecture')}")
+                
+                return formatted_response["content"]
             else:
-                error_msg = result.get("error", "Unknown chatbot error")
-                logger.error(f"❌ Chatbot engine error: {error_msg}")
+                logger.error(f"❌ Failed to send Instagram response")
                 return None
                 
         except Exception as e:
-            logger.error(f"💥 Error processing incoming message: {str(e)}")
+            logger.error(f"💥 Error processing Instagram message with unified engine: {str(e)}")
+            return None
+    
+    async def process_incoming_message_chunked(self, conversation: InstagramConversation, 
+                                             message: InstagramMessage) -> Optional[str]:
+        """🔥 NEW: Process with chunked response support for long responses"""
+        try:
+            # Get memory manager and API service
+            memory_manager = self._get_memory_manager(conversation.tenant_id)
+            api_service = InstagramAPIService(conversation.integration, self.db)
+            
+            # Process with chunked response handling
+            final_response = await memory_manager.process_with_chunked_response(
+                conversation, message, api_service
+            )
+            
+            if final_response:
+                # Update conversation stats and sync to core memory
+                conversation.update_message_stats(is_from_user=False)
+                
+                # Create a combined message record for chunked responses
+                combined_message = InstagramMessage(
+                    conversation_id=conversation.id,
+                    tenant_id=conversation.tenant_id,
+                    instagram_message_id=f"chunked_{uuid.uuid4()}",
+                    message_uuid=str(uuid.uuid4()),
+                    message_type="text",
+                    content=final_response,
+                    is_from_user=False,
+                    message_status="sent",
+                    instagram_timestamp=datetime.utcnow()
+                )
+                
+                self.db.add(combined_message)
+                memory_manager.sync_instagram_message_to_core(combined_message)
+                self.db.commit()
+                
+                logger.info(f"✅ Chunked response sent to Instagram user: {conversation.instagram_user_id}")
+                
+                return final_response
+            else:
+                logger.error(f"❌ Failed to send chunked response")
+                return None
+                
+        except Exception as e:
+            logger.error(f"💥 Error processing chunked Instagram message: {str(e)}")
             return None
     
     def get_conversation_history(self, conversation: InstagramConversation, 
                                limit: int = 20) -> List[Dict]:
-        """Get conversation history for context"""
-        messages = self.db.query(InstagramMessage).filter(
-            InstagramMessage.conversation_id == conversation.id
-        ).order_by(InstagramMessage.created_at.desc()).limit(limit).all()
-        
-        # Convert to chatbot format (chronological order)
-        history = []
-        for message in reversed(messages):
-            role = "user" if message.is_from_user else "assistant"
-            history.append({
-                "role": role,
-                "content": message.get_display_content(),
-                "timestamp": message.created_at.isoformat()
-            })
-        
-        return history
+        """🔥 ENHANCED: Get conversation history with unified memory"""
+        try:
+            memory_manager = self._get_memory_manager(conversation.tenant_id)
+            return memory_manager.get_conversation_history_unified(conversation, limit)
+        except Exception as e:
+            logger.error(f"Error getting conversation history: {str(e)}")
+            return []
     
     def close_conversation(self, conversation_id: str, reason: str = "user_request") -> bool:
         """Close a conversation"""
