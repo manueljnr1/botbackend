@@ -57,7 +57,7 @@ class UnifiedIntelligentEngine:
     ) -> Dict[str, Any]:
         """
         Main processing pipeline following your architecture diagram:
-        Message → Intent → Context Check → Unified Response
+        Message → Conversation Context → Intent → Context Check → Unified Response → Flow Enhancement
         """
         try:
             # --- PRE-PROCESSING & SECURITY ---
@@ -70,7 +70,7 @@ class UnifiedIntelligentEngine:
             if not is_safe:
                 logger.warning(f"🔒 Security risk blocked in unified engine: {user_message[:50]}...")
                 return {
-                    "success": True,  # Return success to not reveal the block to the user
+                    "success": True,
                     "response": security_response,
                     "session_id": "security_violation",
                     "answered_by": "security_system",
@@ -81,7 +81,31 @@ class UnifiedIntelligentEngine:
             # Initialize memory and store user's message
             memory = SimpleChatbotMemory(self.db, tenant.id)
             session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
-            memory.store_message(session_id, user_message, True)
+            
+            # --- STEP 0.5: CONVERSATION CONTEXT ANALYSIS ---
+            conversation_context = {"is_contextual": False, "enhanced_message": user_message}
+            original_user_message = user_message
+            conversation_history = []
+            
+            if not is_new_session and self.llm_available:
+                # Get recent conversation history for context analysis
+                conversation_history = memory.get_recent_messages(session_id, limit=6)
+                
+                if conversation_history and len(conversation_history) >= 2:
+                    conversation_context = self.analyze_conversation_context(
+                        current_message=user_message,
+                        conversation_history=conversation_history,
+                        tenant=tenant,
+                        llm_instance=self.llm
+                    )
+                    
+                    # Use enhanced message if contextual relationship found
+                    if conversation_context['is_contextual']:
+                        user_message = conversation_context['enhanced_message']
+                        logger.info(f"🔗 Contextual message detected. Enhanced: {user_message}")
+
+            # Store the original user message
+            memory.store_message(session_id, original_user_message, True)
 
             # --- STEP 1: Intent Classification (Lightweight LLM) ---
             intent_result = self._classify_intent(user_message, tenant)
@@ -98,23 +122,43 @@ class UnifiedIntelligentEngine:
                 response = self._handle_general_knowledge(user_message, tenant, intent_result)
 
             # --- STEP 4: Sufficiency Check & Enhancement ---
-            final_response = self._check_sufficiency_and_enhance(
+            base_response = self._check_sufficiency_and_enhance(
                 user_message, response, tenant, context_result
             )
 
-            final_response['content'] = fix_response_formatting(final_response['content'])
+            base_response['content'] = fix_response_formatting(base_response['content'])
+
+            # --- 🆕 STEP 5: CONVERSATION FLOW ENHANCEMENT ---
+            flow_enhancement = {"enhanced_response": base_response['content'], "flow_type": "no_enhancement"}
+            
+            if self.llm_available and not is_new_session:
+                flow_enhancement = self.enhance_conversation_flow(
+                    current_response=base_response['content'],
+                    user_message=original_user_message,  # Use original message for flow analysis
+                    conversation_history=conversation_history,
+                    intent_result=intent_result,
+                    response_source=base_response.get('source', 'unknown'),
+                    tenant=tenant
+                )
+            
+            # Use the flow-enhanced response as final response
+            final_response_content = flow_enhancement['enhanced_response']
 
             # Store the final bot response in memory
-            memory.store_message(session_id, final_response['content'], False)
+            memory.store_message(session_id, final_response_content, False)
 
             return {
                 "success": True,
-                "response": final_response['content'],
+                "response": final_response_content,
                 "session_id": session_id,
                 "is_new_session": is_new_session,
-                "answered_by": final_response['source'],
+                "answered_by": base_response.get('source', 'unknown'),
                 "intent": intent_result['intent'],
                 "context": context_result['context_type'],
+                "conversation_context": conversation_context['context_type'],
+                "was_contextual": conversation_context['is_contextual'],
+                "flow_enhancement": flow_enhancement['flow_type'],  # 🆕 Added flow info
+                "engagement_level": flow_enhancement.get('engagement_level', 'unknown'),  # 🆕 Added engagement
                 "token_efficiency": "~80% reduction",
                 "architecture": "unified_intelligent"
             }
@@ -123,7 +167,6 @@ class UnifiedIntelligentEngine:
             import traceback
             logger.error(f"Error in unified processing pipeline: {e}\n{traceback.format_exc()}")
             return {"error": str(e), "success": False}
-
 
 
     
@@ -695,6 +738,416 @@ Answer:"""
         )
 
         return final_prompt
+    
+
+
+    def analyze_conversation_context(
+        current_message: str,
+        conversation_history: List[Dict[str, Any]],
+        tenant: Tenant,
+        llm_instance: Any = None
+    ) -> Dict[str, Any]:
+        """
+        BRILLIANT Conversation Context Tracker
+        
+        Analyzes if the current message relates to previous conversation exchanges
+        and provides contextual understanding to prevent the bot from losing track.
+        
+        Args:
+            current_message: The user's current question/message
+            conversation_history: List of recent messages [{"role": "user/bot", "content": "...", "timestamp": ...}]
+            tenant: Tenant object for company context
+            llm_instance: LLM instance for analysis
+        
+        Returns:
+            Dict containing:
+            - is_contextual: bool (True if current message relates to previous exchanges)
+            - relevant_context: str (The specific previous context that's relevant)
+            - context_type: str (Type of contextual relationship)
+            - enhanced_message: str (Current message enhanced with context)
+            - confidence: float (0.0-1.0 confidence in the analysis)
+        """
+        
+        # Return default if no history or LLM
+        if not conversation_history or len(conversation_history) < 2 or not llm_instance:
+            return {
+                "is_contextual": False,
+                "relevant_context": "",
+                "context_type": "standalone",
+                "enhanced_message": current_message,
+                "confidence": 0.0
+            }
+        
+        try:
+            # Get last 6 messages (3 exchanges) for context analysis
+            recent_history = conversation_history[-6:] if len(conversation_history) >= 6 else conversation_history
+            
+            # Build conversation history string
+            history_text = ""
+            for i, msg in enumerate(recent_history):
+                role = "User" if msg.get("role") == "user" or msg.get("is_user", True) else "Bot"
+                history_text += f"{role}: {msg.get('content', '')}\n"
+            
+            # Create the analysis prompt
+            from langchain.prompts import PromptTemplate
+            
+            analysis_prompt = PromptTemplate(
+                input_variables=["current_message", "history", "company"],
+                template="""Analyze if the current user message relates to the previous conversation context.
+
+    Company: {company}
+
+    Recent Conversation:
+    {history}
+
+    Current User Message: "{current_message}"
+
+    ANALYSIS TASK:
+    Determine if the current message is a follow-up question that relates to something previously discussed.
+
+    Look for these patterns:
+    1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
+    2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
+    3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
+    4. CONTINUATION: Building on a previous topic without re-stating context
+
+    Examples:
+    - Previous: "We offer loyalty rewards - a trip to Dubai"
+    - Current: "Who goes to Dubai?" → CONTEXTUAL (refers to loyalty program)
+
+    - Previous: "Our app has dark mode"  
+    - Current: "How do I enable it?" → CONTEXTUAL (refers to dark mode)
+
+    - Previous: "Password reset takes 5 minutes"
+    - Current: "What's the weather?" → NOT CONTEXTUAL (unrelated topic)
+
+    RESPONSE FORMAT:
+    CONTEXTUAL: YES|NO
+    CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
+    RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
+    ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
+    CONFIDENCE: [0.1-1.0]
+
+    Analysis:"""
+            )
+            
+            # Get LLM analysis
+            result = llm_instance.invoke(analysis_prompt.format(
+                current_message=current_message,
+                history=history_text,
+                company=tenant.business_name or tenant.name
+            ))
+            
+            response_text = result.content.strip()
+            
+            # Parse the structured response
+            analysis_result = {
+                "is_contextual": False,
+                "relevant_context": "",
+                "context_type": "standalone", 
+                "enhanced_message": current_message,
+                "confidence": 0.0
+            }
+            
+            # Extract structured data from response
+            lines = response_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                
+                if line.startswith('CONTEXTUAL:'):
+                    is_contextual = 'YES' in line.upper()
+                    analysis_result["is_contextual"] = is_contextual
+                    
+                elif line.startswith('CONTEXT_TYPE:'):
+                    context_type = line.split(':', 1)[1].strip()
+                    analysis_result["context_type"] = context_type
+                    
+                elif line.startswith('RELEVANT_CONTEXT:'):
+                    relevant_context = line.split(':', 1)[1].strip()
+                    analysis_result["relevant_context"] = relevant_context
+                    
+                elif line.startswith('ENHANCED_MESSAGE:'):
+                    enhanced_message = line.split(':', 1)[1].strip()
+                    analysis_result["enhanced_message"] = enhanced_message
+                    
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':', 1)[1].strip())
+                        analysis_result["confidence"] = max(0.0, min(1.0, confidence))
+                    except:
+                        analysis_result["confidence"] = 0.5
+            
+            # Validation and cleanup
+            if analysis_result["is_contextual"]:
+                # Ensure we have meaningful context
+                if not analysis_result["relevant_context"] or len(analysis_result["relevant_context"]) < 10:
+                    analysis_result["is_contextual"] = False
+                    analysis_result["context_type"] = "standalone"
+                    analysis_result["confidence"] = 0.1
+                
+                # Ensure enhanced message is actually enhanced
+                if analysis_result["enhanced_message"] == current_message:
+                    # Create a basic enhancement if LLM didn't provide one
+                    if analysis_result["relevant_context"]:
+                        analysis_result["enhanced_message"] = f"Regarding {analysis_result['relevant_context']}: {current_message}"
+            
+            # Log the analysis for debugging
+            logger.info(f"Context Analysis - Contextual: {analysis_result['is_contextual']}, "
+                    f"Type: {analysis_result['context_type']}, "
+                    f"Confidence: {analysis_result['confidence']}")
+            
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"Conversation context analysis failed: {e}")
+            # Safe fallback
+            return {
+                "is_contextual": False,
+                "relevant_context": "",
+                "context_type": "error_fallback",
+                "enhanced_message": current_message,
+                "confidence": 0.0
+            }
+
+
+
+
+    def get_available_knowledge_topics(self, tenant_id: int) -> Dict[str, List[str]]:
+        """
+        Get all available topics from FAQ and Knowledge Base to ground flow suggestions
+        
+        Returns:
+            Dict with 'faq_topics' and 'kb_topics' lists
+        """
+        try:
+            available_topics = {
+                "faq_topics": [],
+                "kb_topics": []
+            }
+            
+            # Get FAQ topics
+            faqs = self.db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
+            for faq in faqs:
+                # Extract key topics from FAQ questions
+                topic = faq.question.lower().strip()
+                if len(topic) > 10:  # Only meaningful topics
+                    available_topics["faq_topics"].append(topic)
+            
+            # Get Knowledge Base topics (if you have topic/title fields)
+            kbs = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.tenant_id == tenant_id,
+                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED
+            ).all()
+            
+            for kb in kbs:
+                if kb.title and len(kb.title.strip()) > 5:
+                    available_topics["kb_topics"].append(kb.title.lower().strip())
+            
+            # Limit to most relevant topics to avoid token overflow
+            available_topics["faq_topics"] = available_topics["faq_topics"][:15]
+            available_topics["kb_topics"] = available_topics["kb_topics"][:10]
+            
+            logger.info(f"Retrieved {len(available_topics['faq_topics'])} FAQ topics and {len(available_topics['kb_topics'])} KB topics")
+            return available_topics
+            
+        except Exception as e:
+            logger.error(f"Error getting available knowledge topics: {e}")
+            return {"faq_topics": [], "kb_topics": []}
+
+
+    def enhance_conversation_flow(
+        self,
+        current_response: str,
+        user_message: str,
+        conversation_history: List[Dict[str, Any]],
+        intent_result: Dict[str, Any],
+        response_source: str,
+        tenant: Tenant
+    ) -> Dict[str, Any]:
+        """
+        Knowledge-Grounded Conversation Flow Manager
+        
+        Only suggests topics that actually exist in the knowledge base.
+        Prevents hallucinated suggestions and false promises.
+        """
+        
+        if not self.llm_available:
+            return {
+                "enhanced_response": current_response,
+                "flow_type": "no_enhancement",
+                "engagement_level": "unknown",
+                "suggestions_added": False
+            }
+        
+        try:
+            # STEP 1: Get available knowledge topics to ground suggestions
+            available_topics = self.get_available_knowledge_topics(tenant.id)
+            
+            # Build conversation context
+            conversation_context = ""
+            if conversation_history and len(conversation_history) >= 2:
+                recent_messages = conversation_history[-6:]
+                for msg in recent_messages:
+                    role = "User" if msg.get("is_user", True) else "Bot"
+                    conversation_context += f"{role}: {msg.get('content', '')}\n"
+            
+            # Format available topics for LLM
+            available_topics_text = ""
+            if available_topics["faq_topics"]:
+                available_topics_text += "AVAILABLE FAQ TOPICS:\n"
+                for i, topic in enumerate(available_topics["faq_topics"], 1):
+                    available_topics_text += f"{i}. {topic}\n"
+            
+            if available_topics["kb_topics"]:
+                available_topics_text += "\nAVAILABLE KNOWLEDGE BASE TOPICS:\n"
+                for i, topic in enumerate(available_topics["kb_topics"], 1):
+                    available_topics_text += f"{i}. {topic}\n"
+            
+            if not available_topics_text:
+                available_topics_text = "No additional topics available in knowledge base."
+            
+            # STEP 2: Create knowledge-grounded flow analysis prompt
+            flow_analysis_prompt = PromptTemplate(
+                input_variables=["company", "conversation", "current_user_message", "bot_response", "intent", "source", "available_topics"],
+                template="""You are a conversation flow expert for {company}. Enhance the bot response with natural transitions, but ONLY suggest topics that exist in our knowledge base.
+
+    COMPANY: {company}
+    RESPONSE SOURCE: {source}
+    USER INTENT: {intent}
+
+    {available_topics}
+
+    RECENT CONVERSATION:
+    {conversation}
+
+    CURRENT EXCHANGE:
+    User: {current_user_message}
+    Bot: {bot_response}
+
+    ANALYSIS TASKS:
+
+    1. ENGAGEMENT LEVEL DETECTION:
+    - HIGH: Detailed questions, follow-ups, specific interest
+    - MEDIUM: Basic questions, some interaction  
+    - LOW: Short answers ("ok", "thanks"), confusion, disinterest
+
+    2. KNOWLEDGE-GROUNDED ENHANCEMENT:
+    CRITICAL RULES:
+    - ONLY suggest topics from the "AVAILABLE TOPICS" list above
+    - If no relevant available topics exist, focus on enhancing current response delivery
+    - NEVER mention features, services, or topics not in the available list
+    - When in doubt, use generic helpful transitions instead of specific suggestions
+
+    3. ENHANCEMENT STRATEGIES:
+    - **Conversation Transition**: Connect to related available topics
+    - **Proactive Assistance**: Offer relevant available information  
+    - **Engagement Recovery**: Clarify current topic or offer simpler explanation
+    - **Maintain Current**: Enhance delivery without adding new topics
+
+    RESPONSE FORMAT:
+    ENGAGEMENT_LEVEL: HIGH|MEDIUM|LOW
+    FLOW_TYPE: knowledge_transition|generic_transition|engagement_recovery|maintain_current
+    ENHANCEMENT_NEEDED: YES|NO
+    ENHANCED_RESPONSE: [Original response + knowledge-grounded enhancement]
+
+    ENHANCEMENT EXAMPLES:
+    ✅ Good: "Since you asked about pricing, would you like to know about our refund policy?" (if refund policy is in available topics)
+    ❌ Bad: "You might also want to know about our premium features" (if premium features not in available topics)
+    ✅ Good: "Would you like me to explain any part of this in more detail?" (generic but helpful)
+    ✅ Good: "Is there anything specific about [current topic] you'd like to know more about?" (stays on current topic)
+
+    Analysis:"""
+            )
+            
+            # STEP 3: Get LLM analysis with knowledge constraints
+            result = self.llm.invoke(flow_analysis_prompt.format(
+                company=tenant.business_name or tenant.name,
+                conversation=conversation_context,
+                current_user_message=user_message,
+                bot_response=current_response,
+                intent=intent_result.get('intent', 'unknown'),
+                source=response_source,
+                available_topics=available_topics_text
+            ))
+            
+            response_text = result.content.strip()
+            
+            # STEP 4: Parse and validate LLM response
+            flow_result = {
+                "enhanced_response": current_response,
+                "flow_type": "maintain_current",
+                "engagement_level": "medium",
+                "suggestions_added": False,
+                "knowledge_grounded": True  # New field to track grounding
+            }
+            
+            # Extract structured data from LLM response
+            lines = response_text.split('\n')
+            enhanced_response_started = False
+            enhanced_response_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                
+                if line.startswith('ENGAGEMENT_LEVEL:'):
+                    engagement = line.split(':', 1)[1].strip().lower()
+                    if engagement in ['high', 'medium', 'low']:
+                        flow_result["engagement_level"] = engagement
+                        
+                elif line.startswith('FLOW_TYPE:'):
+                    flow_type = line.split(':', 1)[1].strip().lower()
+                    valid_types = ['knowledge_transition', 'generic_transition', 'engagement_recovery', 'maintain_current']
+                    if flow_type in valid_types:
+                        flow_result["flow_type"] = flow_type
+                        
+                elif line.startswith('ENHANCEMENT_NEEDED:'):
+                    enhancement_needed = 'YES' in line.upper()
+                    
+                elif line.startswith('ENHANCED_RESPONSE:'):
+                    enhanced_response_started = True
+                    enhanced_start = line.split(':', 1)[1].strip()
+                    if enhanced_start:
+                        enhanced_response_lines.append(enhanced_start)
+                        
+                elif enhanced_response_started and line:
+                    enhanced_response_lines.append(line)
+            
+            # STEP 5: Build and validate enhanced response
+            if enhanced_response_lines:
+                enhanced_response = '\n'.join(enhanced_response_lines).strip()
+                
+                # Quality and safety check
+                if (len(enhanced_response) >= len(current_response) and 
+                    enhanced_response != current_response and
+                    len(enhanced_response) < len(current_response) * 2.5):  # Prevent excessive enhancement
+                    
+                    flow_result["enhanced_response"] = enhanced_response
+                    flow_result["suggestions_added"] = True
+                else:
+                    # Keep original if enhancement seems problematic
+                    flow_result["enhanced_response"] = current_response
+            
+            # Log for debugging and monitoring
+            logger.info(f"Knowledge-Grounded Flow - Type: {flow_result['flow_type']}, "
+                    f"Engagement: {flow_result['engagement_level']}, "
+                    f"Enhanced: {flow_result['suggestions_added']}, "
+                    f"Available Topics: FAQ={len(available_topics['faq_topics'])}, KB={len(available_topics['kb_topics'])}")
+            
+            return flow_result
+            
+        except Exception as e:
+            logger.error(f"Knowledge-grounded conversation flow enhancement failed: {e}")
+            # Safe fallback
+            return {
+                "enhanced_response": current_response,
+                "flow_type": "error_fallback",
+                "engagement_level": "unknown",
+                "suggestions_added": False,
+                "knowledge_grounded": False
+            }
+
+        
+
     # Factory function
 def get_unified_intelligent_engine(db: Session) -> UnifiedIntelligentEngine:
     """Factory function to create the unified engine"""

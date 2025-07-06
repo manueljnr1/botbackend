@@ -350,30 +350,52 @@ class DocumentProcessor:
             # Log column names for debugging
             logger.info(f"FAQ sheet columns: {df.columns.tolist()}")
             
-            # Expected columns: question, answer
-            if 'question' not in df.columns or 'answer' not in df.columns:
-                # Try to find close matches (case insensitive)
-                column_map = {}
-                for col in df.columns:
-                    if col.lower() == 'question':
-                        column_map['question'] = col
-                    elif col.lower() == 'answer':
-                        column_map['answer'] = col
+            # Expected columns: question/questions, answer/answers
+            question_col = None
+            answer_col = None
+            
+            # Look for question and answer columns (case insensitive, singular or plural)
+            for col in df.columns:
+                col_lower = col.lower().strip()
+                if col_lower in ['question', 'questions']:
+                    question_col = col
+                elif col_lower in ['answer', 'answers']:
+                    answer_col = col
+            
+            if question_col is None or answer_col is None:
+                missing_cols = []
+                if question_col is None:
+                    missing_cols.append("'question' or 'questions'")
+                if answer_col is None:
+                    missing_cols.append("'answer' or 'answers'")
                 
-                if len(column_map) == 2:
-                    logger.info(f"Found alternate column names: {column_map}")
-                    df = df.rename(columns=column_map)
-                else:
-                    raise ValueError("FAQ sheet must contain 'question' and 'answer' columns")
+                raise ValueError(
+                    f"FAQ sheet must contain {' and '.join(missing_cols)} columns. "
+                    f"Found columns: {df.columns.tolist()}"
+                )
+            
+            logger.info(f"Using columns: question='{question_col}', answer='{answer_col}'")
+            
+            # Rename columns to standardized names for processing
+            df = df.rename(columns={question_col: 'question', answer_col: 'answer'})
             
             # Convert to list of dictionaries
             faqs = []
-            for _, row in df.iterrows():
+            for idx, row in df.iterrows():
                 if pd.notna(row['question']) and pd.notna(row['answer']):
-                    faqs.append({
-                        'question': row['question'].strip(),
-                        'answer': row['answer'].strip()
-                    })
+                    question_text = str(row['question']).strip()
+                    answer_text = str(row['answer']).strip()
+                    
+                    # Skip empty strings after stripping
+                    if question_text and answer_text:
+                        faqs.append({
+                            'question': question_text,
+                            'answer': answer_text
+                        })
+                    else:
+                        logger.warning(f"Skipping row {idx + 1}: empty question or answer after stripping whitespace")
+                else:
+                    logger.warning(f"Skipping row {idx + 1}: missing question or answer")
             
             logger.info(f"Processed {len(faqs)} FAQ items")
             return faqs

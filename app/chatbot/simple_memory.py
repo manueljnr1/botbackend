@@ -4,7 +4,7 @@ Simplified Memory System for Single-Platform Chatbot
 Focuses on basic conversation memory within the same platform/session
 """
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -218,3 +218,50 @@ class SimpleChatbotMemory:
             "created_at": session.created_at.isoformat(),
             "platform": session.platform
         }
+    
+
+    def get_recent_messages(self, session_id: str, limit: int = 6) -> List[Dict[str, Any]]:
+        """
+        Get recent messages from conversation history for context analysis
+        
+        Args:
+            session_id: The session ID string to get messages for
+            limit: Maximum number of messages to return (default 6 for 3 exchanges)
+        
+        Returns:
+            List of message dictionaries with keys: content, is_user, role, timestamp
+        """
+        try:
+            # Get session by session_id (string)
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if not session:
+                logger.warning(f"Session {session_id} not found for recent messages")
+                return []
+            
+            # Get recent messages from this session
+            messages = self.db.query(ChatMessage).filter(
+                ChatMessage.session_id == session.id  # Use session.id (primary key)
+            ).order_by(ChatMessage.created_at.desc()).limit(limit).all()
+            
+            if not messages:
+                return []
+            
+            # Convert to format expected by context analyzer
+            message_list = []
+            for msg in reversed(messages):  # Reverse to get chronological order
+                message_list.append({
+                    "content": msg.content,
+                    "is_user": msg.is_from_user,
+                    "role": "user" if msg.is_from_user else "bot",
+                    "timestamp": msg.created_at
+                })
+            
+            logger.info(f"Retrieved {len(message_list)} recent messages for context analysis")
+            return message_list
+            
+        except Exception as e:
+            logger.error(f"Error getting recent messages for context analysis: {e}")
+            return []
