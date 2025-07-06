@@ -468,52 +468,7 @@ Answer:"""
         
         return self._generate_custom_response(user_message, tenant, "company_info", company_info)
     
-#     def _generate_custom_response(self, user_message: str, tenant: Tenant, response_type: str, extra_context: Dict = None) -> Dict[str, Any]:
-#         """
-#         Generate response with tenant's custom prompt and context
-#         """
-#         if not self.llm_available:
-#             return {
-#                 "content": "I'm here to help! Could you please provide more details?",
-#                 "source": "fallback",
-#                 "confidence": 0.3
-#             }
-        
-#         try:
-#             # Build prompt with tenant customization
-#             base_prompt = tenant.system_prompt or f"You are a helpful assistant for {tenant.business_name or tenant.name}."
-            
-#             if response_type == "general_knowledge":
-#                 instruction = "Answer this general question while maintaining your helpful personality."
-#             elif response_type == "company_info":
-#                 instruction = f"Answer about {tenant.business_name or tenant.name} using available information."
-#             else:
-#                 instruction = "Provide helpful information about our product or service."
-            
-#             prompt_template = f"""{base_prompt}
 
-# {instruction}
-
-# User Question: {{message}}
-
-# Your response:"""
-            
-#             prompt = PromptTemplate(input_variables=["message"], template=prompt_template)
-#             result = self.llm.invoke(prompt.format(message=user_message))
-            
-#             return {
-#                 "content": result.content.strip(),
-#                 "source": f"Custom_{response_type}",
-#                 "confidence": 0.7
-#             }
-            
-#         except Exception as e:
-#             logger.error(f"Custom response error: {e}")
-#             return {
-#                 "content": "I apologize, but I'm having trouble processing your request right now.",
-#                 "source": "error_fallback",
-#                 "confidence": 0.1
-#             }
     
 
     def _generate_custom_response(self, user_message: str, tenant: Tenant, response_type: str, extra_context: Dict = None) -> Dict[str, Any]:
@@ -603,35 +558,7 @@ Answer:"""
         """
         return f"I understand you're asking about {user_message}. Let me connect you with more specific help for {tenant.business_name or tenant.name}."
     
-#     def _apply_custom_prompt_filter(self, content: str, tenant: Tenant) -> str:
-#         """
-#         Apply tenant's custom prompt as a filter to ensure brand voice
-#         """
-#         if not self.llm_available or not tenant.system_prompt:
-#             return content
-        
-#         try:
-#             prompt = PromptTemplate(
-#                 input_variables=["response", "brand_voice"],
-#                 template="""Adjust this response to match the brand voice:
 
-# Brand Voice: {brand_voice}
-
-# Response: {response}
-
-# Adjusted Response:"""
-#             )
-            
-#             result = self.llm.invoke(prompt.format(
-#                 response=content,
-#                 brand_voice=tenant.system_prompt
-#             ))
-            
-#             return result.content.strip()
-            
-#         except Exception as e:
-#             logger.error(f"Prompt filter error: {e}")
-#             return content
 
 
 
@@ -678,14 +605,53 @@ Answer:"""
             return content
 
 
-    
+
     def _enhance_faq_response(self, faq_answer: str) -> str:
         """
-        Make FAQ answers more conversational
+        Make FAQ answers more conversational using LLM with fallback
         """
+        if not self.llm_available:
+            # Fallback to random starters if LLM not available
+            starters = ["Great question! ", "Happy to help! ", "Here's what you need to know: "]
+            import random
+            return random.choice(starters) + faq_answer
+        
+        try:
+            from langchain.prompts import PromptTemplate
+            
+            prompt = PromptTemplate(
+                input_variables=["answer"],
+                template="""Transform this FAQ answer into a warm, conversational response. Keep the same information but make it sound naturally helpful and engaging. Don't add unnecessary details, just improve the tone.
+
+    Original: {answer}
+
+    Enhanced response:"""
+            )
+            
+            result = self.llm.invoke(prompt.format(answer=faq_answer))
+            enhanced = result.content.strip()
+            
+            # Return LLM result if it's good quality
+            if len(enhanced) > 10:
+                return enhanced
+            
+        except Exception as e:
+            logger.error(f"FAQ enhancement error: {e}")
+        
+        # Final fallback to random starters if LLM fails or returns poor result
         starters = ["Great question! ", "Happy to help! ", "Here's what you need to know: "]
         import random
         return random.choice(starters) + faq_answer
+        
+    # def _enhance_faq_response(self, faq_answer: str) -> str:
+    #     """
+    #     Make FAQ answers more conversational
+    #     """
+    #     starters = ["Great question! ", "Happy to help! ", "Here's what you need to know: "]
+    #     import random
+    #     return random.choice(starters) + faq_answer
+    
+    
     
     def _get_tenant_by_api_key(self, api_key: str) -> Optional[Tenant]:
         """Get tenant by API key"""
