@@ -43,7 +43,7 @@ from app.telegram.router import router as telegram_router
 from app.telegram.bot_manager import get_telegram_bot_manager
 from app.live_chat.auth_router import router as live_chat_auth_router
 from app.live_chat.router import router as live_chat_main_router
-from app.live_chat.customer_detection_config import CustomerDetectionMiddleware
+from app.live_chat.customer_detection_config import CustomerDetectionMiddleware, detection_config
 from app.live_chat.transcript_router import router as transcript_router
 
 from app.chatbot.admin_router import router as enhanced_admin_router

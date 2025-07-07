@@ -1,15 +1,13 @@
 # app/live_chat/agent_dashboard_service.py
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc, func
+from dataclasses import dataclass
 import traceback
-
-
-
-
 
 from app.live_chat.customer_detection_service import CustomerDetectionService, CustomerProfile, CustomerSession, CustomerDevice
 from app.live_chat.models import Agent, AgentSession, LiveChatConversation, ConversationStatus, AgentStatus, ChatQueue, LiveChatMessage
@@ -29,12 +27,283 @@ def safe_subtract(dt1, dt2):
         return timedelta(0)
     return make_naive(dt1) - make_naive(dt2)
 
+
+@dataclass
+class PreviewResult:
+    """Result of text preview generation"""
+    snippet: str
+    contextual_preview: str
+    detected_keywords: List[str]
+    is_truncated: bool
+    original_length: int
+    preview_type: str  # 'snippet', 'contextual', 'full'
+
+
+class TextPreviewService:
+    """Service for generating customer message previews and contextual snippets"""
+    
+    # Priority keywords for contextual preview
+    PRIORITY_KEYWORDS = {
+        "urgent": ["urgent", "emergency", "asap", "immediately", "critical", "broken", "down", "not working"],
+        "billing": ["bill", "billing", "charge", "payment", "invoice", "refund", "money", "cost"],
+        "technical": ["bug", "error", "crash", "broken", "not working", "issue", "problem", "glitch"],
+        "authentication": ["login", "password", "access", "account", "locked out", "forgot", "reset"],
+        "sales": ["buy", "purchase", "order", "product", "demo", "trial", "upgrade", "pricing"],
+        "account": ["account", "profile", "settings", "update", "change", "modify"],
+        "general": ["help", "support", "question", "how to", "information"]
+    }
+    
+    # Common sentence endings to help with smart truncation
+    SENTENCE_ENDINGS = ['.', '!', '?', '\n']
+    
+    @classmethod
+    def generate_message_preview(cls, text: str, 
+                                max_snippet_length: int = 150,
+                                max_contextual_length: int = 200,
+                                context_window: int = 50) -> PreviewResult:
+        """
+        Generate both snippet and contextual preview for a message
+        
+        Args:
+            text: Original message text
+            max_snippet_length: Maximum length for simple snippet
+            max_contextual_length: Maximum length for contextual preview
+            context_window: Characters to show around important keywords
+            
+        Returns:
+            PreviewResult with both preview types
+        """
+        if not text or not text.strip():
+            return PreviewResult(
+                snippet="",
+                contextual_preview="",
+                detected_keywords=[],
+                is_truncated=False,
+                original_length=0,
+                preview_type="empty"
+            )
+        
+        # Clean and normalize text
+        cleaned_text = cls._clean_text(text)
+        original_length = len(cleaned_text)
+        
+        # Detect important keywords
+        detected_keywords = cls._detect_keywords(cleaned_text)
+        
+        # Generate snippet preview
+        snippet = cls._generate_snippet(cleaned_text, max_snippet_length)
+        
+        # Generate contextual preview
+        contextual_preview = cls._generate_contextual_preview(
+            cleaned_text, detected_keywords, max_contextual_length, context_window
+        )
+        
+        # Determine preview type
+        preview_type = "full" if original_length <= max_snippet_length else "contextual" if detected_keywords else "snippet"
+        
+        return PreviewResult(
+            snippet=snippet,
+            contextual_preview=contextual_preview,
+            detected_keywords=detected_keywords,
+            is_truncated=original_length > max_snippet_length,
+            original_length=original_length,
+            preview_type=preview_type
+        )
+    
+    @classmethod
+    def _clean_text(cls, text: str) -> str:
+        """Clean and normalize text for processing"""
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text.strip())
+        
+        # Remove common chat artifacts
+        text = re.sub(r'^\s*-+\s*', '', text)  # Remove leading dashes
+        text = re.sub(r'\s*-+\s*$', '', text)  # Remove trailing dashes
+        
+        return text
+    
+    @classmethod
+    def _detect_keywords(cls, text: str) -> List[str]:
+        """Detect important keywords in text for contextual preview"""
+        text_lower = text.lower()
+        detected = []
+        
+        for category, keywords in cls.PRIORITY_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    detected.append(keyword)
+        
+        return list(set(detected))  # Remove duplicates
+    
+    @classmethod
+    def _generate_snippet(cls, text: str, max_length: int) -> str:
+        """Generate simple snippet (first X characters with ellipsis)"""
+        if len(text) <= max_length:
+            return text
+        
+        # Try to break at a word boundary
+        truncated = text[:max_length]
+        
+        # Find the last space to avoid cutting words
+        last_space = truncated.rfind(' ')
+        if last_space > max_length * 0.8:  # Only use word boundary if it's not too short
+            truncated = truncated[:last_space]
+        
+        # Try to end at sentence boundary if possible
+        for ending in cls.SENTENCE_ENDINGS:
+            sentence_end = truncated.rfind(ending)
+            if sentence_end > max_length * 0.6:  # Must be reasonably long
+                truncated = truncated[:sentence_end + 1]
+                break
+        
+        return truncated + "..." if len(text) > len(truncated) else truncated
+    
+    @classmethod
+    def _generate_contextual_preview(cls, text: str, keywords: List[str], 
+                                   max_length: int, context_window: int) -> str:
+        """Generate contextual preview highlighting important parts"""
+        if not keywords:
+            # No keywords found, return smart snippet
+            return cls._generate_snippet(text, max_length)
+        
+        text_lower = text.lower()
+        
+        # Find all keyword positions
+        keyword_positions = []
+        for keyword in keywords:
+            start = 0
+            while True:
+                pos = text_lower.find(keyword.lower(), start)
+                if pos == -1:
+                    break
+                keyword_positions.append((pos, pos + len(keyword), keyword))
+                start = pos + 1
+        
+        if not keyword_positions:
+            return cls._generate_snippet(text, max_length)
+        
+        # Sort by position
+        keyword_positions.sort()
+        
+        # Create context segments around keywords
+        segments = []
+        used_ranges = []
+        
+        for start_pos, end_pos, keyword in keyword_positions:
+            # Define context window around keyword
+            context_start = max(0, start_pos - context_window)
+            context_end = min(len(text), end_pos + context_window)
+            
+            # Check if this overlaps with already used ranges
+            overlaps = False
+            for used_start, used_end in used_ranges:
+                if not (context_end < used_start or context_start > used_end):
+                    overlaps = True
+                    break
+            
+            if not overlaps:
+                # Extract context
+                context_text = text[context_start:context_end].strip()
+                
+                # Clean up the start and end
+                if context_start > 0:
+                    # Find word boundary at start
+                    space_pos = context_text.find(' ')
+                    if space_pos > 0 and space_pos < context_window // 2:
+                        context_text = "..." + context_text[space_pos:]
+                    else:
+                        context_text = "..." + context_text
+                
+                if context_end < len(text):
+                    # Find word boundary at end
+                    last_space = context_text.rfind(' ')
+                    if last_space > len(context_text) - context_window // 2:
+                        context_text = context_text[:last_space] + "..."
+                    else:
+                        context_text = context_text + "..."
+                
+                segments.append(context_text)
+                used_ranges.append((context_start, context_end))
+                
+                # Check if we're approaching max length
+                current_length = sum(len(seg) for seg in segments) + len(segments) * 3  # Account for separators
+                if current_length > max_length * 0.8:
+                    break
+        
+        if not segments:
+            return cls._generate_snippet(text, max_length)
+        
+        # Combine segments
+        contextual_preview = " | ".join(segments)
+        
+        # Ensure we don't exceed max length
+        if len(contextual_preview) > max_length:
+            contextual_preview = contextual_preview[:max_length - 3] + "..."
+        
+        return contextual_preview
+    
+    @classmethod
+    def analyze_urgency(cls, text: str) -> Dict[str, Any]:
+        """Analyze text for urgency indicators"""
+        urgency_indicators = [
+            "urgent", "emergency", "asap", "immediate", "critical", "help",
+            "broken", "not working", "error", "problem", "issue",
+            "frustrated", "angry", "stuck", "can't", "won't"
+        ]
+        
+        text_lower = text.lower()
+        found_indicators = [indicator for indicator in urgency_indicators if indicator in text_lower]
+        
+        urgency_score = len(found_indicators)
+        urgency_level = "low"
+        
+        if urgency_score >= 3:
+            urgency_level = "high"
+        elif urgency_score >= 1:
+            urgency_level = "medium"
+        
+        return {
+            "urgency_level": urgency_level,
+            "urgency_score": urgency_score,
+            "indicators": found_indicators
+        }
+    
+    @classmethod
+    def extract_entities(cls, text: str) -> Dict[str, List[str]]:
+        """Extract entities like emails, phone numbers, order IDs"""
+        entities = {
+            "emails": [],
+            "phone_numbers": [],
+            "order_ids": [],
+            "account_numbers": []
+        }
+        
+        # Email regex
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        entities["emails"] = re.findall(email_pattern, text)
+        
+        # Phone number regex (simple)
+        phone_pattern = r'\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b'
+        entities["phone_numbers"] = re.findall(phone_pattern, text)
+        
+        # Order ID pattern (common formats)
+        order_pattern = r'\b(?:order|order#|order id|ref|reference)[\s#:]*([A-Z0-9]{6,})\b'
+        entities["order_ids"] = re.findall(order_pattern, text, re.IGNORECASE)
+        
+        # Account number pattern
+        account_pattern = r'\b(?:account|account#|account number)[\s#:]*([A-Z0-9]{4,})\b'
+        entities["account_numbers"] = re.findall(account_pattern, text, re.IGNORECASE)
+        
+        return entities
+
+
 class AgentDashboardService:
-    """Enhanced agent dashboard with customer intelligence"""
+    """Enhanced agent dashboard with customer intelligence and text preview"""
     
     def __init__(self, db: Session):
         self.db = db
         self.detection_service = CustomerDetectionService(db)
+        self.text_preview_service = TextPreviewService()
     
     async def get_enhanced_queue_for_agent(self, agent: Agent) -> Dict[str, Any]:
         """Get queue with enhanced customer intelligence for agent dashboard"""
@@ -59,8 +328,8 @@ class AgentDashboardService:
                     agent.tenant_id
                 )
                 
-                # Get conversation preview
-                preview = await self._get_conversation_preview(conversation.id)
+                # Get enhanced conversation preview with text preview service
+                preview = await self._get_enhanced_conversation_preview(conversation.id)
                 
                 # Calculate urgency score
                 urgency_score = self._calculate_urgency_score(conversation, customer_intel)
@@ -110,6 +379,90 @@ class AgentDashboardService:
             logger.error(f"Error getting enhanced queue: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return {"success": False, "error": str(e)}
+    
+    async def _get_enhanced_conversation_preview(self, conversation_id: int) -> Dict[str, Any]:
+        """Get enhanced conversation preview with text preview service"""
+        try:
+            # Get conversation and first customer message
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == conversation_id
+            ).first()
+            
+            if not conversation:
+                return {"has_messages": False, "error": "Conversation not found"}
+            
+            # Get first customer message
+            first_message = self.db.query(LiveChatMessage).filter(
+                and_(
+                    LiveChatMessage.conversation_id == conversation_id,
+                    LiveChatMessage.sender_type == "customer"
+                )
+            ).order_by(LiveChatMessage.sent_at.asc()).first()
+            
+            preview = {
+                "has_messages": False,
+                "preview_text": "Customer is waiting to start conversation",
+                "message_count": 0,
+                "urgency_keywords": [],
+                "sentiment": "neutral"
+            }
+            
+            # Use original question if no messages yet
+            message_text = None
+            if first_message:
+                message_text = first_message.content
+                preview["sent_at"] = first_message.sent_at.isoformat()
+            elif conversation.original_question:
+                message_text = conversation.original_question
+                preview["sent_at"] = conversation.created_at.isoformat()
+            
+            if message_text:
+                # Generate enhanced preview using TextPreviewService
+                preview_result = self.text_preview_service.generate_message_preview(
+                    text=message_text,
+                    max_snippet_length=120,
+                    max_contextual_length=180,
+                    context_window=40
+                )
+                
+                # Analyze urgency and extract entities
+                urgency_analysis = self.text_preview_service.analyze_urgency(message_text)
+                entities = self.text_preview_service.extract_entities(message_text)
+                
+                preview.update({
+                    "has_messages": True,
+                    "message_count": self.db.query(LiveChatMessage).filter(
+                        LiveChatMessage.conversation_id == conversation_id
+                    ).count(),
+                    
+                    # Text preview results
+                    "snippet": preview_result.snippet,
+                    "contextual_preview": preview_result.contextual_preview,
+                    "preview_type": preview_result.preview_type,
+                    "is_truncated": preview_result.is_truncated,
+                    "original_length": preview_result.original_length,
+                    "detected_keywords": preview_result.detected_keywords,
+                    
+                    # Full message for agent reference
+                    "full_message": message_text,
+                    
+                    # Urgency analysis
+                    "urgency_analysis": urgency_analysis,
+                    
+                    # Extracted entities
+                    "entities": entities,
+                    
+                    # Legacy fields for backward compatibility
+                    "preview_text": preview_result.contextual_preview or preview_result.snippet,
+                    "urgency_keywords": urgency_analysis["indicators"],
+                    "sentiment": self._analyze_sentiment(message_text)
+                })
+            
+            return preview
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced conversation preview: {str(e)}")
+            return {"has_messages": False, "error": str(e)}
     
     async def _get_customer_intelligence(self, customer_identifier: str, tenant_id: int) -> Dict[str, Any]:
         """Get comprehensive customer intelligence"""
@@ -483,69 +836,6 @@ class AgentDashboardService:
         
         return insights
     
-    async def _get_conversation_preview(self, conversation_id: int) -> Dict[str, Any]:
-        """Get conversation preview for agent dashboard"""
-        try:
-            # Get first customer message
-            first_message = self.db.query(LiveChatMessage).filter(
-                and_(
-                    LiveChatMessage.conversation_id == conversation_id,
-                    LiveChatMessage.sender_type == "customer"
-                )
-            ).order_by(LiveChatMessage.sent_at.asc()).first()
-            
-            preview = {
-                "has_messages": False,
-                "preview_text": "Customer is waiting to start conversation",
-                "message_count": 0,
-                "urgency_keywords": [],
-                "sentiment": "neutral"
-            }
-            
-            if first_message:
-                preview.update({
-                    "has_messages": True,
-                    "preview_text": self._truncate_message(first_message.content, 100),
-                    "full_message": first_message.content,
-                    "sent_at": first_message.sent_at.isoformat(),
-                    "urgency_keywords": self._detect_urgency_keywords(first_message.content),
-                    "sentiment": self._analyze_sentiment(first_message.content)
-                })
-                
-                # Count total messages
-                message_count = self.db.query(LiveChatMessage).filter(
-                    LiveChatMessage.conversation_id == conversation_id
-                ).count()
-                preview["message_count"] = message_count
-            
-            return preview
-            
-        except Exception as e:
-            logger.error(f"Error getting conversation preview: {str(e)}")
-            return {"has_messages": False, "error": str(e)}
-    
-    def _truncate_message(self, text: str, max_length: int) -> str:
-        """Truncate message for preview"""
-        if len(text) <= max_length:
-            return text
-        return text[:max_length - 3] + "..."
-    
-    def _detect_urgency_keywords(self, text: str) -> List[str]:
-        """Detect urgency keywords in customer messages"""
-        if not text:
-            return []
-        
-        urgency_keywords = [
-            "urgent", "emergency", "asap", "immediate", "critical", "important",
-            "problem", "issue", "bug", "error", "broken", "not working",
-            "help", "stuck", "frustrated", "angry", "disappointed",
-            "refund", "cancel", "complaint", "escalate"
-        ]
-        
-        text_lower = text.lower()
-        found_keywords = [keyword for keyword in urgency_keywords if keyword in text_lower]
-        return found_keywords
-    
     def _analyze_sentiment(self, text: str) -> str:
         """Simple sentiment analysis"""
         if not text:
@@ -869,7 +1159,7 @@ class AgentDashboardService:
             "total": len(queue),
             "by_priority": {"high": 0, "medium": 0, "low": 0},
             "by_customer_type": {"new": 0, "returning": 0, "premium": 0},
-            "by_risk": {"high": 0, "medium": 0, "low": 0, "unknown": 0},  # ← Add "unknown"
+            "by_risk": {"high": 0, "medium": 0, "low": 0, "unknown": 0},
             "average_wait_time": 0,
             "longest_waiting": 0
         }
@@ -901,9 +1191,6 @@ class AgentDashboardService:
             stats["longest_waiting"] = max(wait_times)
         
         return stats
-
-
-
 
 
 class SharedDashboardService:
@@ -1111,14 +1398,3 @@ class SharedDashboardService:
         except Exception as e:
             logger.error(f"Error getting queue status: {str(e)}")
             return {"success": False, "error": str(e)}
-
-
-
-
-
-
-
-
-
-# Add this endpoint to your live_chat/router.py
-

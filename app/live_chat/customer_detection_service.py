@@ -15,6 +15,7 @@ from user_agents import parse as parse_user_agent
 import geoip2.database
 import geoip2.errors
 from pathlib import Path
+from app.live_chat.free_geolocation_service import FreeGeolocationService
 
 from app.live_chat.models import (
     LiveChatConversation, CustomerProfile, CustomerSession, 
@@ -32,7 +33,7 @@ class CustomerDetectionService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.geoip_reader = self._initialize_geoip()
+        self.geolocation_service = FreeGeolocationService()
         self.session_timeout_hours = 24
         self.device_fingerprint_ttl_days = 30
     

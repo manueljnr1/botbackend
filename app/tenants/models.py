@@ -15,8 +15,12 @@ import re
 if TYPE_CHECKING:
     # from app.pricing.models import TenantSubscription
     from app.live_chat.models import Agent, LiveChatConversation, LiveChatSettings
-    from app.instagram.models import InstagramIntegration
     from app.telegram.models import TelegramIntegration
+    
+    
+
+
+from app.instagram.models import InstagramIntegration
 
 class Tenant(Base):
     __tablename__ = "tenants"
@@ -84,7 +88,7 @@ class Tenant(Base):
     tenant_credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, overlaps="credentials", cascade="all, delete-orphan")
     credentials = relationship("TenantCredentials", back_populates="tenant", uselist=False, cascade="all, delete-orphan", overlaps="tenant_credentials")
     subscription = relationship("TenantSubscription", uselist=False)
-    instagram_integration = relationship("InstagramIntegration", uselist=False, cascade="all, delete-orphan")
+    instagram_integration = relationship("InstagramIntegration", uselist=False, cascade="all, delete-orphan", overlaps="tenant")
     telegram_integration = relationship("TelegramIntegration", uselist=False, cascade="all, delete-orphan")
 
     

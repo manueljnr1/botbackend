@@ -1,16 +1,648 @@
+# app/live_chat/customer_detection_service.py
 
-from typing import Optional, List, Dict
 import os
+import logging
+import hashlib
+import json
+import uuid
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, desc
+from fastapi import Request
+import httpx
+import asyncio
 from pathlib import Path
+import time
+import ipaddress
+import re
+from fastapi import Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+
+# Import the free geolocation service
+from app.live_chat.free_geolocation_service import FreeGeolocationService
+
+from app.live_chat.models import (
+    LiveChatConversation, CustomerProfile, CustomerSession, 
+    CustomerDevice, CustomerPreferences
+)
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+class CustomerDetectionService:
+    """
+    Comprehensive customer detection and profiling service
+    Uses free APIs for geolocation instead of local database
+    """
+    
+    def __init__(self, db: Session):
+        self.db = db
+        # Use free geolocation service instead of local GeoIP database
+        self.geolocation_service = FreeGeolocationService()
+        self.session_timeout_hours = 24
+        self.device_fingerprint_ttl_days = 30
+    
+    async def detect_customer(self, request: Request, tenant_id: int, 
+                            customer_identifier: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Main customer detection method
+        Returns comprehensive customer profile with geolocation, device info, and history
+        """
+        try:
+            # Extract request information
+            request_info = self._extract_request_info(request)
+            
+            # Generate or use customer identifier
+            if not customer_identifier:
+                customer_identifier = self._generate_customer_identifier(request_info)
+            
+            # Get or create customer profile
+            customer_profile = await self._get_or_create_customer_profile(
+                tenant_id, customer_identifier, request_info
+            )
+            
+            # Detect geolocation using free APIs
+            geolocation = await self._detect_geolocation(request_info['ip_address'])
+            
+            # Analyze device and browser
+            device_info = self._analyze_device(request_info['user_agent'])
+            
+            # Check for returning visitor
+            visitor_history = await self._get_visitor_history(
+                tenant_id, customer_identifier, request_info
+            )
+            
+            # Create or update customer session
+            session_info = await self._create_customer_session(
+                customer_profile.id, request_info, device_info, geolocation
+            )
+            
+            # Get customer preferences
+            preferences = await self._get_customer_preferences(customer_profile.id)
+            
+            # Determine routing suggestions
+            routing_suggestions = await self._get_routing_suggestions(
+                tenant_id, geolocation, device_info, visitor_history
+            )
+            
+            # Compile comprehensive customer data
+            customer_data = {
+                "customer_profile": {
+                    "id": customer_profile.id,
+                    "identifier": customer_identifier,
+                    "is_returning_visitor": visitor_history["is_returning"],
+                    "first_seen": customer_profile.first_seen.isoformat() if customer_profile.first_seen else None,
+                    "last_seen": customer_profile.last_seen.isoformat() if customer_profile.last_seen else None,
+                    "total_conversations": customer_profile.total_conversations,
+                    "total_sessions": customer_profile.total_sessions,
+                    "customer_satisfaction_avg": customer_profile.customer_satisfaction_avg,
+                    "preferred_language": customer_profile.preferred_language,
+                    "time_zone": customer_profile.time_zone
+                },
+                "current_session": session_info,
+                "geolocation": geolocation,
+                "device_info": device_info,
+                "visitor_history": visitor_history,
+                "preferences": preferences,
+                "routing_suggestions": routing_suggestions,
+                "privacy_compliance": {
+                    "data_collection_consent": customer_profile.data_collection_consent,
+                    "marketing_consent": customer_profile.marketing_consent,
+                    "last_consent_update": customer_profile.last_consent_update.isoformat() if customer_profile.last_consent_update else None
+                }
+            }
+            
+            logger.info(f"Customer detection completed for {customer_identifier}")
+            return customer_data
+            
+        except Exception as e:
+            logger.error(f"Error in customer detection: {str(e)}")
+            # Return minimal fallback data
+            return self._create_fallback_customer_data(customer_identifier, request)
+    
+    async def _detect_geolocation(self, ip_address: str) -> Dict[str, Any]:
+        """
+        Detect customer geolocation using free APIs
+        """
+        try:
+            logger.info(f"🌍 Detecting geolocation for IP: {ip_address}")
+            
+            # Use the free geolocation service
+            geolocation = await self.geolocation_service.get_location(ip_address)
+            
+            logger.info(f"✅ Geolocation detected: {geolocation.get('country', 'Unknown')} - {geolocation.get('city', 'Unknown')}")
+            return geolocation
+            
+        except Exception as e:
+            logger.error(f"Geolocation detection failed: {str(e)}")
+            # Return fallback data
+            return {
+                "ip_address": ip_address,
+                "country": None,
+                "country_code": None,
+                "region": None,
+                "city": None,
+                "latitude": None,
+                "longitude": None,
+                "timezone": None,
+                "isp": None,
+                "detection_method": "failed",
+                "accuracy": "none",
+                "error": str(e)
+            }
+    
+    def _extract_request_info(self, request: Request) -> Dict[str, Any]:
+        """Extract comprehensive information from HTTP request"""
+        try:
+            # Get client IP (handle proxies and load balancers)
+            client_ip = self._get_client_ip(request)
+            
+            # Extract headers
+            user_agent = request.headers.get('user-agent', '')
+            accept_language = request.headers.get('accept-language', '')
+            accept_encoding = request.headers.get('accept-encoding', '')
+            dnt = request.headers.get('dnt', '0')  # Do Not Track
+            
+            # Extract additional context
+            referer = request.headers.get('referer', '')
+            
+            return {
+                "ip_address": client_ip,
+                "user_agent": user_agent,
+                "accept_language": accept_language,
+                "accept_encoding": accept_encoding,
+                "referer": referer,
+                "do_not_track": dnt == '1',
+                "request_time": datetime.utcnow(),
+                "headers": dict(request.headers)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error extracting request info: {str(e)}")
+            return {
+                "ip_address": "127.0.0.1",
+                "user_agent": "",
+                "accept_language": "en",
+                "request_time": datetime.utcnow(),
+                "headers": {}
+            }
+    
+    def _get_client_ip(self, request: Request) -> str:
+        """Get real client IP handling proxies and load balancers"""
+        # Check common proxy headers in order of preference
+        proxy_headers = [
+            'cf-connecting-ip',      # Cloudflare
+            'x-real-ip',            # Nginx
+            'x-forwarded-for',      # Standard proxy header
+            'x-client-ip',          # Apache
+            'x-cluster-client-ip',  # Cluster
+            'forwarded-for',        # Alternative
+            'forwarded'             # RFC 7239
+        ]
+        
+        for header in proxy_headers:
+            ip = request.headers.get(header)
+            if ip:
+                # Handle comma-separated IPs (take first one)
+                ip = ip.split(',')[0].strip()
+                if self._is_valid_ip(ip):
+                    return ip
+        
+        # Fallback to direct client IP
+        client_host = getattr(request.client, 'host', '127.0.0.1')
+        return client_host if self._is_valid_ip(client_host) else '127.0.0.1'
+    
+    def _is_valid_ip(self, ip: str) -> bool:
+        """Validate IP address format"""
+        try:
+            import ipaddress
+            ipaddress.ip_address(ip)
+            return True  # Allow both public and private IPs for testing
+        except ValueError:
+            return False
+    
+    def _generate_customer_identifier(self, request_info: Dict) -> str:
+        """Generate anonymous customer identifier"""
+        # Create hash from IP + User Agent + Date (for privacy)
+        identifier_string = f"{request_info['ip_address']}:{request_info['user_agent']}:{datetime.utcnow().date()}"
+        return hashlib.sha256(identifier_string.encode()).hexdigest()[:16]
+    
+    def _analyze_device(self, user_agent: str) -> Dict[str, Any]:
+        """Comprehensive device and browser analysis with better error handling"""
+        try:
+            logger.debug(f"🔍 Analyzing user agent: '{user_agent}'")
+            
+            # Try importing user_agents with fallback
+            try:
+                from user_agents import parse as parse_user_agent
+                parsed_ua = parse_user_agent(user_agent)
+                logger.debug(f"✅ User agent parsed successfully")
+            except ImportError:
+                logger.warning("⚠️ user_agents library not installed, using fallback")
+                return self._fallback_device_analysis(user_agent)
+            except Exception as e:
+                logger.warning(f"⚠️ Error parsing user agent: {str(e)}, using fallback")
+                return self._fallback_device_analysis(user_agent)
+            
+            # Determine device type
+            device_type = "desktop"
+            if parsed_ua.is_mobile:
+                device_type = "mobile"
+            elif parsed_ua.is_tablet:
+                device_type = "tablet"
+            elif parsed_ua.is_pc:
+                device_type = "desktop"
+            
+            # Extract browser capabilities
+            capabilities = self._analyze_browser_capabilities(user_agent)
+            
+            # Generate device fingerprint (for returning visitor detection)
+            device_fingerprint = self._generate_device_fingerprint(user_agent)
+            
+            result = {
+                "device_type": device_type,
+                "browser": {
+                    "name": parsed_ua.browser.family or "Unknown",
+                    "version": parsed_ua.browser.version_string or "Unknown",
+                    "engine": getattr(parsed_ua.browser, 'engine', 'unknown')
+                },
+                "operating_system": {
+                    "name": parsed_ua.os.family or "Unknown",
+                    "version": parsed_ua.os.version_string or "Unknown"
+                },
+                "device": {
+                    "brand": getattr(parsed_ua.device, 'brand', None),
+                    "model": getattr(parsed_ua.device, 'model', None),
+                    "family": getattr(parsed_ua.device, 'family', 'Other')
+                },
+                "capabilities": capabilities,
+                "is_mobile": parsed_ua.is_mobile,
+                "is_tablet": parsed_ua.is_tablet,
+                "is_bot": parsed_ua.is_bot,
+                "device_fingerprint": device_fingerprint,
+                "user_agent": user_agent
+            }
+            
+            logger.debug(f"✅ Device analysis completed: {device_type}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"🚨 Device analysis error: {str(e)}")
+            return self._fallback_device_analysis(user_agent)
+
+    def _fallback_device_analysis(self, user_agent: str) -> Dict[str, Any]:
+        """Fallback device analysis when user_agents library fails"""
+        logger.debug(f"Using fallback device analysis for: '{user_agent}'")
+        
+        # Simple regex-based detection
+        is_mobile = any(keyword in user_agent.lower() for keyword in [
+            'mobile', 'android', 'iphone', 'ipad', 'blackberry', 'windows phone'
+        ])
+        
+        is_tablet = any(keyword in user_agent.lower() for keyword in [
+            'ipad', 'tablet', 'kindle'
+        ])
+        
+        # Simple browser detection
+        browser_name = "Unknown"
+        browser_version = "Unknown"
+        
+        if 'chrome' in user_agent.lower():
+            browser_name = "Chrome"
+            import re
+            version_match = re.search(r'chrome/(\d+\.\d+)', user_agent.lower())
+            if version_match:
+                browser_version = version_match.group(1)
+        elif 'firefox' in user_agent.lower():
+            browser_name = "Firefox"
+        elif 'safari' in user_agent.lower() and 'chrome' not in user_agent.lower():
+            browser_name = "Safari"
+        elif 'edge' in user_agent.lower():
+            browser_name = "Edge"
+        
+        # Simple OS detection
+        os_name = "Unknown"
+        if 'windows' in user_agent.lower():
+            os_name = "Windows"
+        elif 'mac os' in user_agent.lower() or 'macos' in user_agent.lower():
+            os_name = "macOS"
+        elif 'linux' in user_agent.lower():
+            os_name = "Linux"
+        elif 'android' in user_agent.lower():
+            os_name = "Android"
+        elif 'ios' in user_agent.lower() or 'iphone' in user_agent.lower():
+            os_name = "iOS"
+        
+        device_type = "mobile" if is_mobile else "tablet" if is_tablet else "desktop"
+        
+        return {
+            "device_type": device_type,
+            "browser": {
+                "name": browser_name,
+                "version": browser_version,
+                "engine": "unknown"
+            },
+            "operating_system": {
+                "name": os_name,
+                "version": "unknown"
+            },
+            "device": {
+                "brand": None,
+                "model": None,
+                "family": "Other"
+            },
+            "capabilities": self._analyze_browser_capabilities(user_agent),
+            "is_mobile": is_mobile,
+            "is_tablet": is_tablet,
+            "is_bot": self._detect_bot_traffic(user_agent, ""),
+            "device_fingerprint": self._generate_device_fingerprint(user_agent),
+            "user_agent": user_agent
+        }
+    
+    def _analyze_browser_capabilities(self, user_agent: str) -> Dict[str, bool]:
+        """Analyze browser capabilities for compatibility"""
+        capabilities = {
+            "supports_websockets": True,  # Assume modern browser
+            "supports_webrtc": True,
+            "supports_file_upload": True,
+            "supports_notifications": True,
+            "supports_geolocation": True,
+            "supports_local_storage": True
+        }
+        
+        # Check for older browsers with limited capabilities
+        ua_lower = user_agent.lower()
+        
+        if 'msie' in ua_lower or 'trident' in ua_lower:
+            # Internet Explorer
+            capabilities.update({
+                "supports_websockets": "msie 10" in ua_lower or "rv:11" in ua_lower,
+                "supports_webrtc": False,
+                "supports_notifications": False
+            })
+        
+        return capabilities
+    
+    def _generate_device_fingerprint(self, user_agent: str) -> str:
+        """Generate device fingerprint for returning visitor detection"""
+        # Create a stable but privacy-conscious fingerprint
+        fingerprint_data = f"{user_agent}"
+        return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
+    
+    def _detect_bot_traffic(self, user_agent: str, ip_address: str) -> bool:
+        """Detect if traffic is from bots/crawlers"""
+        if not user_agent:
+            return True
+        
+        bot_indicators = [
+            'bot', 'crawler', 'spider', 'scraper', 'wget', 'curl',
+            'python-requests', 'urllib', 'httpx', 'axios',
+            'googlebot', 'bingbot', 'slurp', 'facebookexternalhit'
+        ]
+        
+        user_agent_lower = user_agent.lower()
+        for indicator in bot_indicators:
+            if indicator in user_agent_lower:
+                return True
+        
+        return False
+    
+    # ... rest of the methods remain the same
+    async def _get_visitor_history(self, tenant_id: int, customer_identifier: str, 
+                                 request_info: Dict) -> Dict[str, Any]:
+        """Get comprehensive visitor history and previous conversations"""
+        try:
+            # Check for existing customer profile
+            existing_profile = self.db.query(CustomerProfile).filter(
+                and_(
+                    CustomerProfile.tenant_id == tenant_id,
+                    CustomerProfile.customer_identifier == customer_identifier
+                )
+            ).first()
+            
+            history = {
+                "is_returning": False,
+                "previous_conversations": [],
+                "last_conversation": None,
+                "total_visits": 0,
+                "first_visit": None,
+                "last_visit": None,
+                "preferred_agents": [],
+                "conversation_outcomes": {
+                    "resolved": 0,
+                    "unresolved": 0,
+                    "abandoned": 0
+                }
+            }
+            
+            if existing_profile:
+                history["is_returning"] = True
+                history["first_visit"] = existing_profile.first_seen.isoformat()
+                history["last_visit"] = existing_profile.last_seen.isoformat()
+                history["total_visits"] = existing_profile.total_sessions
+            
+            return history
+            
+        except Exception as e:
+            logger.error(f"Error getting visitor history: {str(e)}")
+            return {"is_returning": False, "error": str(e)}
+    
+    async def _get_or_create_customer_profile(self, tenant_id: int, customer_identifier: str, request_info: Dict) -> 'CustomerProfile':
+        """Get existing customer profile or create new one"""
+        try:
+            from app.live_chat.models import CustomerProfile
+            
+            # Try to find existing profile
+            customer_profile = self.db.query(CustomerProfile).filter(
+                and_(
+                    CustomerProfile.tenant_id == tenant_id,
+                    CustomerProfile.customer_identifier == customer_identifier
+                )
+            ).first()
+            
+            if customer_profile:
+                # Update last seen
+                customer_profile.last_seen = datetime.utcnow()
+                customer_profile.total_sessions += 1
+                self.db.commit()
+                return customer_profile
+            
+            # Create new profile
+            customer_profile = CustomerProfile(
+                tenant_id=tenant_id,
+                customer_identifier=customer_identifier,
+                first_seen=datetime.utcnow(),
+                last_seen=datetime.utcnow(),
+                total_conversations=0,
+                total_sessions=1,
+                data_collection_consent=True,
+                marketing_consent=False
+            )
+            
+            self.db.add(customer_profile)
+            self.db.commit()
+            self.db.refresh(customer_profile)
+            
+            logger.info(f"Created new customer profile for {customer_identifier}")
+            return customer_profile
+            
+        except Exception as e:
+            logger.error(f"Error creating customer profile: {str(e)}")
+            from app.live_chat.models import CustomerProfile
+            return CustomerProfile(
+                tenant_id=tenant_id,
+                customer_identifier=customer_identifier,
+                first_seen=datetime.utcnow(),
+                last_seen=datetime.utcnow(),
+                total_conversations=0,
+                total_sessions=0
+            )
+        
+    async def _create_customer_session(self, customer_profile_id: int, request_info: Dict, 
+                                    device_info: Dict, geolocation: Dict) -> Dict:
+        """Create customer session record"""
+        try:
+            from app.live_chat.models import CustomerSession
+            
+            session = CustomerSession(
+                customer_profile_id=customer_profile_id,
+                session_id=f"sess_{uuid.uuid4().hex[:16]}",
+                started_at=datetime.utcnow(),
+                ip_address=request_info.get('ip_address'),
+                user_agent=request_info.get('user_agent'),
+                device_fingerprint=device_info.get('device_fingerprint'),
+                country=geolocation.get('country'),
+                region=geolocation.get('region'),
+                city=geolocation.get('city'),
+                page_views=1,
+                conversations_started=0
+            )
+            
+            self.db.add(session)
+            self.db.commit()
+            
+            return {
+                "session_id": session.session_id,
+                "started_at": session.started_at.isoformat(),
+                "ip_address": session.ip_address,
+                "country": session.country,
+                "city": session.city
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating customer session: {str(e)}")
+            return {
+                "session_id": f"temp_{uuid.uuid4().hex[:8]}",
+                "started_at": datetime.utcnow().isoformat(),
+                "error": "session_creation_failed"
+            }
+
+    async def _get_customer_preferences(self, customer_profile_id: int) -> Dict:
+        """Get customer preferences"""
+        try:
+            from app.live_chat.models import CustomerPreferences
+            
+            preferences = self.db.query(CustomerPreferences).filter(
+                CustomerPreferences.customer_profile_id == customer_profile_id
+            ).first()
+            
+            if preferences:
+                return {
+                    "preferred_language": preferences.preferred_language,
+                    "communication_style": preferences.preferred_communication_style,
+                    "accessibility_required": preferences.requires_accessibility_features,
+                    "email_notifications": preferences.email_notifications,
+                    "data_retention": preferences.data_retention_preference
+                }
+            
+            return {
+                "preferred_language": "en",
+                "communication_style": "standard",
+                "accessibility_required": False,
+                "email_notifications": False,
+                "data_retention": "standard"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting customer preferences: {str(e)}")
+            return {}
+
+    async def _get_routing_suggestions(self, tenant_id: int, geolocation: Dict,
+                                     device_info: Dict, visitor_history: Dict) -> Dict[str, Any]:
+        """Generate intelligent agent routing suggestions"""
+        try:
+            suggestions = {
+                "recommended_agents": [],
+                "routing_criteria": [],
+                "priority_score": 1.0,
+                "special_considerations": []
+            }
+            
+            # Geographic routing
+            if geolocation.get("country"):
+                suggestions["routing_criteria"].append(f"Geographic: {geolocation['country']}")
+            
+            # Device-specific routing
+            if device_info.get("device_type") == "mobile":
+                suggestions["special_considerations"].append("Mobile user - prefer agents with mobile support expertise")
+            
+            # Add fallback recommendation
+            suggestions["recommended_agents"].append({
+                "agent_id": None,
+                "agent_name": "Next Available Agent",
+                "reason": "Auto-assignment to next available agent",
+                "priority": 0.5
+            })
+            
+            return suggestions
+            
+        except Exception as e:
+            logger.error(f"Error generating routing suggestions: {str(e)}")
+            return {
+                "recommended_agents": [],
+                "routing_criteria": ["Error generating suggestions"],
+                "priority_score": 1.0,
+                "special_considerations": ["System error - use default routing"],
+                "error": str(e)
+            }
+            
+    def _create_fallback_customer_data(self, customer_identifier: Optional[str], 
+                                     request: Request) -> Dict[str, Any]:
+        """Create minimal fallback customer data when detection fails"""
+        return {
+            "customer_profile": {
+                "identifier": customer_identifier or "unknown",
+                "is_returning_visitor": False,
+                "error": "Detection failed"
+            },
+            "current_session": {"error": "Session creation failed"},
+            "geolocation": {"detection_method": "failed"},
+            "device_info": {"device_type": "unknown"},
+            "visitor_history": {"is_returning": False},
+            "preferences": {},
+            "routing_suggestions": {"error": "Routing unavailable"},
+            "privacy_compliance": {"data_collection_consent": None}
+        }
+    
+
 
 class CustomerDetectionConfig:
     """Configuration for customer detection features"""
     
-    # GeoIP Configuration
+    # GeoIP Configuration - Updated to prefer free APIs
     GEOIP_ENABLED: bool = True
+    GEOIP_METHOD: str = os.getenv("GEOIP_METHOD", "free_api")  # "free_api" or "local_database"
     GEOIP_DATABASE_PATH: Optional[str] = os.getenv("GEOIP_DATABASE_PATH", "data/GeoLite2-City.mmdb")
     GEOIP_FALLBACK_API_ENABLED: bool = True
     GEOIP_API_RATE_LIMIT: int = 1000  # requests per month
+    
+    # Free API Configuration
+    FREE_GEOLOCATION_ENABLED: bool = True
+    FREE_GEOLOCATION_CACHE_TTL: int = 86400  # 24 hours
+    FREE_GEOLOCATION_TIMEOUT: int = 5  # 5 seconds timeout
     
     # Privacy and Compliance
     PRIVACY_MODE: str = os.getenv("PRIVACY_MODE", "standard")  # minimal, standard, enhanced
@@ -28,11 +660,11 @@ class CustomerDetectionConfig:
     VISITOR_TRACKING_ENABLED: bool = True
     CROSS_DEVICE_TRACKING: bool = False  # More privacy-conscious default
     
-    # External APIs
+    # External APIs - Updated with working free APIs
     EXTERNAL_GEOLOCATION_APIS: List[str] = [
-        "ip-api.com",  # Free tier: 1000/month
-        "ipstack.com",  # Requires API key
-        "ipgeolocation.io"  # Requires API key
+        "ip-api.com",        # Free tier: 45 requests/minute, 1000/month
+        "ipinfo.io",         # Free tier: 50k requests/month
+        "freeipapi.com"      # Free tier: 60 requests/minute, 1000/month
     ]
     
     # Security
@@ -85,20 +717,53 @@ class CustomerDetectionConfig:
         return settings.get(privacy_mode, settings["standard"])
 
 
-# Initialize configuration
-detection_config = CustomerDetectionConfig()
+class CustomerDetectionMiddleware(BaseHTTPMiddleware):
+    """Middleware for automatic customer detection and tracking"""
+    
+    def __init__(self, app, enabled: bool = True):
+        super().__init__(app)
+        self.enabled = enabled
+    
+    async def dispatch(self, request: Request, call_next):
+        if not self.enabled:
+            return await call_next(request)
+        
+        start_time = time.time()
+        
+        # Add customer detection context to request
+        request.state.customer_detection = {
+            "start_time": start_time,
+            "ip_address": self._get_client_ip(request),
+            "user_agent": request.headers.get("user-agent", ""),
+            "accept_language": request.headers.get("accept-language", ""),
+            "referer": request.headers.get("referer", ""),
+            "request_id": f"req_{int(start_time)}_{hash(request.url.path) % 10000}"
+        }
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Add customer detection headers to response
+        if hasattr(request.state, "customer_detection"):
+            processing_time = time.time() - start_time
+            response.headers["X-Detection-Time"] = f"{processing_time:.3f}s"
+            response.headers["X-Request-ID"] = request.state.customer_detection["request_id"]
+        
+        return response
+    
+    def _get_client_ip(self, request: Request) -> str:
+        """Extract client IP with proxy support"""
+        # Check for forwarded IP headers
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip
+        
+        return getattr(request.client, "host", "127.0.0.1")
 
-
-# app/live_chat/customer_detection_utils.py
-
-import hashlib
-import ipaddress
-import re
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
 
 class CustomerDetectionUtils:
     """Utility functions for customer detection"""
@@ -211,19 +876,10 @@ class CustomerDetectionUtils:
         if len(user_agent) < 10 or len(user_agent) > 1000:
             return True
         
-        # Check for common datacenter IP ranges (simplified)
-        try:
-            ip = ipaddress.ip_address(ip_address)
-            # This is a simplified check - in production, use a proper datacenter IP list
-            if ip.is_private or ip.is_loopback:
-                return False
-        except ValueError:
-            return True
-        
         return False
     
     @staticmethod
-    def calculate_customer_risk_score(customer_data: Dict[str, Any]) -> float:
+    def calculate_customer_risk_score(customer_data: Dict[str, any]) -> float:
         """Calculate risk score for customer (for fraud detection)"""
         risk_score = 0.0
         
@@ -315,62 +971,5 @@ class CustomerDetectionUtils:
         return privacy_preferences.get(consent_key, True)
 
 
-# app/live_chat/customer_detection_middleware.py
-
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-import time
-import logging
-
-logger = logging.getLogger(__name__)
-
-class CustomerDetectionMiddleware(BaseHTTPMiddleware):
-    """Middleware for automatic customer detection and tracking"""
-    
-    def __init__(self, app, enabled: bool = True):
-        super().__init__(app)
-        self.enabled = enabled
-    
-    async def dispatch(self, request: Request, call_next):
-        if not self.enabled:
-            return await call_next(request)
-        
-        start_time = time.time()
-        
-        # Add customer detection context to request
-        request.state.customer_detection = {
-            "start_time": start_time,
-            "ip_address": self._get_client_ip(request),
-            "user_agent": request.headers.get("user-agent", ""),
-            "accept_language": request.headers.get("accept-language", ""),
-            "referer": request.headers.get("referer", ""),
-            "request_id": f"req_{int(start_time)}_{hash(request.url.path) % 10000}"
-        }
-        
-        # Process request
-        response = await call_next(request)
-        
-        # Add customer detection headers to response
-        if hasattr(request.state, "customer_detection"):
-            processing_time = time.time() - start_time
-            response.headers["X-Detection-Time"] = f"{processing_time:.3f}s"
-            response.headers["X-Request-ID"] = request.state.customer_detection["request_id"]
-        
-        return response
-    
-    def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP with proxy support"""
-        # Check for forwarded IP headers
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip
-        
-        return getattr(request.client, "host", "127.0.0.1")
-
-
-# Usage in main.py:
-# app.add_middleware(CustomerDetectionMiddleware, enabled=True)
+# Initialize configuration
+detection_config = CustomerDetectionConfig()

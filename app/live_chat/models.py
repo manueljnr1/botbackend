@@ -5,7 +5,7 @@ from sqlalchemy.sql import func
 from app.database import Base
 from datetime import datetime
 from enum import Enum
-
+from app.pricing.models import TenantSubscription
 
 
 

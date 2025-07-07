@@ -2664,3 +2664,126 @@ async def start_live_chat_with_detection(
         logger.error(f"Error starting enhanced live chat: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to start chat")
+
+
+
+# Add this endpoint to your router.py file
+
+@router.post("/conversations/{conversation_id}/accept")
+async def accept_conversation(
+    conversation_id: int,
+    current_agent: Agent = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    """Agent accepts a conversation from the queue"""
+    try:
+        # Get conversation
+        conversation = db.query(LiveChatConversation).filter(
+            LiveChatConversation.id == conversation_id,
+            LiveChatConversation.tenant_id == current_agent.tenant_id
+        ).first()
+        
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Check if conversation is available for acceptance
+        if conversation.status not in [ConversationStatus.QUEUED]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Conversation cannot be accepted. Current status: {conversation.status}"
+            )
+        
+        # Check if agent is available
+        agent_session = db.query(AgentSession).filter(
+            AgentSession.agent_id == current_agent.id,
+            AgentSession.logout_at.is_(None)
+        ).first()
+        
+        if not agent_session:
+            raise HTTPException(status_code=400, detail="Agent session not found")
+        
+        if not agent_session.is_accepting_chats:
+            raise HTTPException(status_code=400, detail="Agent is not accepting chats")
+        
+        if agent_session.active_conversations >= agent_session.max_concurrent_chats:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Agent at maximum capacity ({agent_session.max_concurrent_chats} conversations)"
+            )
+        
+        # Accept the conversation
+        conversation.status = ConversationStatus.ASSIGNED
+        conversation.assigned_agent_id = current_agent.id
+        conversation.assigned_at = datetime.utcnow()
+        conversation.assignment_method = "agent_self_accept"
+        
+        # Update agent session
+        agent_session.active_conversations += 1
+        
+        # Remove from queue if exists
+        queue_entry = db.query(ChatQueue).filter(
+            ChatQueue.conversation_id == conversation_id,
+            ChatQueue.status == "waiting"
+        ).first()
+        
+        if queue_entry:
+            queue_entry.status = "assigned"
+            queue_entry.assigned_at = datetime.utcnow()
+            queue_entry.assigned_agent_id = current_agent.id
+        
+        # Add assignment message
+        assignment_message = LiveChatMessage(
+            conversation_id=conversation_id,
+            content=f"Agent {current_agent.display_name} has joined the conversation",
+            message_type=MessageType.SYSTEM,
+            sender_type=SenderType.SYSTEM,
+            sender_name="System",
+            system_event_type="agent_joined",
+            system_event_data=json.dumps({
+                "agent_id": current_agent.id,
+                "agent_name": current_agent.display_name,
+                "assignment_method": "self_accept"
+            })
+        )
+        
+        db.add(assignment_message)
+        db.commit()
+        
+        # Notify via WebSocket
+        from app.live_chat.websocket_manager import WebSocketMessage
+        accept_notification = WebSocketMessage(
+            message_type="conversation_accepted",
+            data={
+                "conversation_id": conversation_id,
+                "agent_id": current_agent.id,
+                "agent_name": current_agent.display_name,
+                "accepted_at": conversation.assigned_at.isoformat()
+            },
+            conversation_id=str(conversation_id)
+        )
+        
+        await websocket_manager.send_to_conversation(str(conversation_id), accept_notification)
+        
+        logger.info(f"Conversation {conversation_id} accepted by agent {current_agent.id}")
+        
+        return {
+            "success": True,
+            "message": "Conversation accepted successfully",
+            "conversation_id": conversation_id,
+            "agent_id": current_agent.id,
+            "agent_name": current_agent.display_name,
+            "accepted_at": conversation.assigned_at.isoformat(),
+            "websocket_url": f"/live-chat/ws/agent/{current_agent.id}",
+            "customer_info": {
+                "customer_identifier": conversation.customer_identifier,
+                "customer_name": conversation.customer_name,
+                "customer_email": conversation.customer_email
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error accepting conversation: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to accept conversation")
