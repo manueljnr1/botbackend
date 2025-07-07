@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, desc, func
+import traceback
 
 
 
@@ -107,6 +108,7 @@ class AgentDashboardService:
             
         except Exception as e:
             logger.error(f"Error getting enhanced queue: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {"success": False, "error": str(e)}
     
     async def _get_customer_intelligence(self, customer_identifier: str, tenant_id: int) -> Dict[str, Any]:
@@ -867,7 +869,7 @@ class AgentDashboardService:
             "total": len(queue),
             "by_priority": {"high": 0, "medium": 0, "low": 0},
             "by_customer_type": {"new": 0, "returning": 0, "premium": 0},
-            "by_risk": {"high": 0, "medium": 0, "low": 0},
+            "by_risk": {"high": 0, "medium": 0, "low": 0, "unknown": 0},  # ← Add "unknown"
             "average_wait_time": 0,
             "longest_waiting": 0
         }
