@@ -15,6 +15,19 @@ from app.live_chat.models import Agent, AgentSession, LiveChatConversation, Conv
 
 logger = logging.getLogger(__name__)
 
+
+def make_naive(dt):
+    """Convert timezone-aware datetime to naive"""
+    if dt and dt.tzinfo:
+        return dt.replace(tzinfo=None)
+    return dt
+
+def safe_subtract(dt1, dt2):
+    """Safely subtract datetimes"""
+    if not dt1 or not dt2:
+        return timedelta(0)
+    return make_naive(dt1) - make_naive(dt2)
+
 class AgentDashboardService:
     """Enhanced agent dashboard with customer intelligence"""
     
@@ -291,7 +304,7 @@ class AgentDashboardService:
         
         # Frequent recent contacts (potential escalation)
         recent_conversations = [conv for conv in conversations 
-                              if conv.created_at > datetime.utcnow() - timedelta(days=7)]
+                      if make_naive(conv.created_at) > make_naive(datetime.utcnow()) - timedelta(days=7)]
         if len(recent_conversations) > 3:
             risk_score += 2
             risk_factors.append("High recent contact frequency")
@@ -601,7 +614,7 @@ class AgentDashboardService:
     def _calculate_wait_time(self, conversation: LiveChatConversation) -> int:
         """Calculate wait time in minutes"""
         if conversation.queue_entry_time:
-            delta = datetime.utcnow() - conversation.queue_entry_time
+            delta = safe_subtract(datetime.utcnow(), conversation.queue_entry_time)
             return int(delta.total_seconds() / 60)
         return 0
     
@@ -979,10 +992,10 @@ class SharedDashboardService:
                 wait_time = None
                 if conv.queue_entry_time:
                     if conv.assigned_at:
-                        time_diff = conv.assigned_at - conv.queue_entry_time
+                        time_diff = safe_subtract(conv.assigned_at, conv.queue_entry_time)
                         wait_time = int(time_diff.total_seconds() / 60)
                     else:
-                        time_diff = current_time - conv.queue_entry_time
+                        time_diff = safe_subtract(current_time, conv.queue_entry_time)
                         wait_time = int(time_diff.total_seconds() / 60)
                 
                 conversation_list.append({
