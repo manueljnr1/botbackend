@@ -341,7 +341,7 @@ class DocumentProcessor:
         
         try:
             if file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, encoding='utf-8-sig')
             elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
             else:

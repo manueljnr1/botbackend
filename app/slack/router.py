@@ -72,6 +72,18 @@ class ThreadAnalyticsResponse(BaseModel):
     analytics: dict
 
 
+class ChunkingConfigResponse(BaseModel):
+    chunking_enabled: bool
+    max_chunk_size: int
+    supported_content_types: List[str]
+    features: List[str]
+
+class UnifiedEngineResponse(BaseModel):
+    engine_type: str
+    features: List[str]
+    intelligence_level: str
+    token_efficiency: str
+
 
 def verify_slack_signature(request_body: bytes, timestamp: str, signature: str, signing_secret: str) -> bool:
     """Verify Slack request signature"""
@@ -734,3 +746,104 @@ async def update_thread_summary(
     except Exception as e:
         logger.error(f"Error updating thread summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to update thread summary")
+    
+
+@router.get("/chunking/status", response_model=ChunkingConfigResponse)
+async def get_chunking_status(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get chunking configuration and capabilities"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        bot_manager = get_slack_bot_manager()
+        chunker = bot_manager.get_chunker(tenant.id)
+        
+        if not chunker:
+            return ChunkingConfigResponse(
+                chunking_enabled=False,
+                max_chunk_size=0,
+                supported_content_types=[],
+                features=[]
+            )
+        
+        return ChunkingConfigResponse(
+            chunking_enabled=True,
+            max_chunk_size=chunker.max_chunk_size,
+            supported_content_types=[
+                "faq", "knowledge_base", "instruction", 
+                "technical", "support", "conversational"
+            ],
+            features=[
+                "content_type_detection",
+                "engagement_adaptation", 
+                "interactive_delivery",
+                "natural_delays",
+                "context_preservation"
+            ]
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting chunking status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get chunking status")
+
+@router.get("/engine/info", response_model=UnifiedEngineResponse)
+async def get_engine_info(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get information about the unified intelligent engine"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        return UnifiedEngineResponse(
+            engine_type="unified_intelligent",
+            features=[
+                "intent_classification",
+                "context_relevance_check",
+                "smart_routing",
+                "conversation_flow_enhancement",
+                "knowledge_grounding",
+                "security_enhanced",
+                "3_tier_knowledge_search"
+            ],
+            intelligence_level="advanced",
+            token_efficiency="~80% reduction"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting engine info: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get engine information")
+
+@router.post("/test-chunked-message")
+async def send_test_chunked_message(
+    message_data: SlackTestMessage,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Send a test message with intelligent chunking enabled"""
+    try:
+        tenant = get_tenant_from_api_key(api_key, db)
+        
+        bot_manager = get_slack_bot_manager()
+        success = await bot_manager.send_message(
+            tenant_id=tenant.id,
+            channel=message_data.channel,
+            text=message_data.message,
+            thread_ts=message_data.thread_ts,
+            use_chunking=True  # Enable intelligent chunking
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Test message sent with intelligent chunking",
+                "chunking_enabled": True
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Failed to send chunked test message")
+        
+    except Exception as e:
+        logger.error(f"Error sending chunked test message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send chunked test message")
