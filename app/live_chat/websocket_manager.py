@@ -103,7 +103,7 @@ class LiveChatWebSocketManager:
         self.agent_connections: Dict[int, str] = {}  # agent_id -> connection_id
         
         self._lock = asyncio.Lock()
-        
+
     
     async def connect_customer(self, websocket: WebSocket, customer_id: str, 
                             tenant_id: int, conversation_id: str = None) -> str:
@@ -137,8 +137,7 @@ class LiveChatWebSocketManager:
         connection_id = f"agent_{agent_id}_{uuid.uuid4().hex[:8]}"
         
         try:
-            await websocket.accept()
-            
+           
             connection = Connection(
                 websocket=websocket,
                 connection_id=connection_id,
