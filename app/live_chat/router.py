@@ -458,6 +458,9 @@ async def customer_websocket_endpoint(
             await websocket.close(code=4004, reason="Conversation not found")
             return
         
+        # ✅ CRITICAL FIX: Accept the WebSocket connection FIRST
+        await websocket.accept()
+        
         # Connect customer
         connection_id = await websocket_manager.connect_customer(
             websocket=websocket,
@@ -468,6 +471,17 @@ async def customer_websocket_endpoint(
         
         # Initialize message handler
         message_handler = LiveChatMessageHandler(db, websocket_manager)
+        
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "type": "connection_established",
+            "data": {
+                "conversation_id": conversation_id,
+                "customer_id": customer_id,
+                "status": "connected",
+                "message": "Connected to live chat"
+            }
+        })
         
         # Listen for messages
         while True:
@@ -490,7 +504,6 @@ async def customer_websocket_endpoint(
     finally:
         if connection_id:
             await websocket_manager.disconnect(connection_id)
-
 
 
 
@@ -555,7 +568,6 @@ async def agent_websocket_endpoint(
     session_id: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    """WebSocket endpoint for agents - FIXED JSON SERIALIZATION"""
     connection_id = None
     try:
         # Verify agent and session
@@ -568,6 +580,9 @@ async def agent_websocket_endpoint(
         if not agent:
             await websocket.close(code=4004, reason="Agent not found or inactive")
             return
+        
+        # ✅ ADD THIS: Accept the WebSocket connection FIRST
+        await websocket.accept()
         
         # Update agent session with WebSocket
         session_service = AgentSessionService(db)
