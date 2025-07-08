@@ -102,7 +102,7 @@ class LiveChatWebSocketManager:
         connection_id = f"customer_{customer_id}_{uuid.uuid4().hex[:8]}"
         
         try:
-            await websocket.accept()
+            # await websocket.accept()
             
             connection = Connection(
                 websocket=websocket,

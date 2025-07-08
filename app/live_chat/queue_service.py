@@ -55,13 +55,13 @@ class LiveChatQueueService:
             logger.error(f"Error in get_queue_status: {e}")
             return {"success": False, "error": str(e)}
 
+
+
+
     
-    async def add_to_queue_with_smart_routing(self, conversation_id: int, priority: int = 1,
-                                           preferred_agent_id: int = None, 
-                                           assignment_criteria: Dict = None) -> Dict:
-        """
-        Add conversation to queue with intelligent routing analysis
-        """
+    def add_to_queue(self, conversation_id: int, priority="normal", 
+                    preferred_agent_id: int = None, assignment_criteria: Dict = None) -> Dict:
+        """Add conversation to queue - basic method"""
         try:
             # Get conversation details
             conversation = self.db.query(LiveChatConversation).filter(
@@ -71,86 +71,268 @@ class LiveChatQueueService:
             if not conversation:
                 raise ValueError(f"Conversation {conversation_id} not found")
             
-            # First add to regular queue
-            queue_result = self.add_to_queue(
-                conversation_id, priority, preferred_agent_id, assignment_criteria
+            # Create queue entry
+            queue_entry = ChatQueue(
+                conversation_id=conversation_id,
+                tenant_id=conversation.tenant_id,
+                priority=priority,  # String value like "normal", "high", etc.
+                status="waiting",
+                preferred_agent_id=preferred_agent_id,
+                assignment_criteria=json.dumps(assignment_criteria) if assignment_criteria else None,
+                queued_at=datetime.utcnow(),
+                position=self._get_next_position(conversation.tenant_id)
             )
             
-            if not queue_result.get("success"):
-                return queue_result
+            self.db.add(queue_entry)
             
-            # Try intelligent routing
-            routing_result = await self.smart_routing.find_best_agent(conversation_id)
+            # Update conversation
+            conversation.status = ConversationStatus.QUEUED
+            conversation.queue_entry_time = datetime.utcnow()
+            conversation.queue_position = queue_entry.position
             
-            if routing_result.get("success") and routing_result.get("agent_id"):
-                # Smart routing found a good match - try immediate assignment
-                best_agent_id = routing_result["agent_id"]
-                
-                logger.info(f"Smart routing suggests agent {best_agent_id} for conversation {conversation_id}")
-                
-                # Check if the suggested agent is actually available
-                if await self._verify_agent_availability(best_agent_id, conversation.tenant_id):
-                    # Get the queue entry that was just created
-                    queue_entry = self.db.query(ChatQueue).filter(
-                        ChatQueue.conversation_id == conversation_id,
-                        ChatQueue.status == "waiting"
-                    ).first()
-                    
-                    if queue_entry:
-                        # Attempt immediate assignment
-                        assignment_success = self.assign_conversation(
-                            queue_entry.id, 
-                            best_agent_id, 
-                            "smart_routing"
-                        )
-                        
-                        if assignment_success:
-                            queue_result.update({
-                                "immediately_assigned": True,
-                                "assigned_agent_id": best_agent_id,
-                                "routing_method": "smart_tags",
-                                "routing_confidence": routing_result.get("confidence", 0.0),
-                                "detected_tags": routing_result.get("detected_tags", []),
-                                "routing_reasoning": routing_result.get("reasoning", [])
-                            })
-                            
-                            logger.info(f"Conversation {conversation_id} immediately assigned via smart routing")
-                        else:
-                            # Assignment failed, update queue with routing info
-                            queue_result.update({
-                                "immediately_assigned": False,
-                                "smart_routing_available": True,
-                                "suggested_agent_id": best_agent_id,
-                                "routing_confidence": routing_result.get("confidence", 0.0),
-                                "estimated_wait_time": self._calculate_smart_wait_time(
-                                    conversation.tenant_id, queue_result.get("position", 1), best_agent_id
-                                )
-                            })
-                    else:
-                        logger.warning(f"Queue entry not found for conversation {conversation_id}")
-                else:
-                    logger.info(f"Suggested agent {best_agent_id} not available, keeping in queue")
-                    queue_result.update({
-                        "immediately_assigned": False,
-                        "smart_routing_available": True,
-                        "suggested_agent_unavailable": True,
-                        "routing_confidence": routing_result.get("confidence", 0.0)
-                    })
-            else:
-                # Smart routing didn't find a good match or failed
-                logger.info(f"Smart routing failed or no good match for conversation {conversation_id}")
-                queue_result.update({
-                    "immediately_assigned": False,
-                    "smart_routing_available": False,
-                    "routing_error": routing_result.get("error"),
-                    "fallback_method": "traditional_queue"
-                })
+            self.db.commit()
+            self.db.refresh(queue_entry)
             
-            return queue_result
+            return {
+                "success": True,
+                "queue_id": queue_entry.id,
+                "position": queue_entry.position,
+                "estimated_wait_time": self._calculate_wait_time(conversation.tenant_id, queue_entry.position)
+            }
             
         except Exception as e:
-            logger.error(f"Error in enhanced queue service: {str(e)}")
+            logger.error(f"Error adding to queue: {str(e)}")
+            self.db.rollback()
             return {"success": False, "error": str(e)}
+
+    # 🆕 ADD THESE HELPER METHODS TOO:
+    def _get_next_position(self, tenant_id: int) -> int:
+        """Get next position in queue for tenant"""
+        try:
+            max_position = self.db.query(func.max(ChatQueue.position)).filter(
+                ChatQueue.tenant_id == tenant_id,
+                ChatQueue.status == "waiting"
+            ).scalar()
+            
+            return (max_position or 0) + 1
+            
+        except Exception as e:
+            logger.error(f"Error getting next position: {str(e)}")
+            return 1
+
+    def _calculate_wait_time(self, tenant_id: int, position: int) -> int:
+        """Calculate estimated wait time in minutes"""
+        try:
+            # Simple calculation: assume 5 minutes per conversation ahead
+            base_time = position * 5
+            
+            # Adjust based on available agents
+            active_agents = self.db.query(AgentSession).join(Agent).filter(
+                Agent.tenant_id == tenant_id,
+                AgentSession.logout_at.is_(None),
+                AgentSession.is_accepting_chats == True
+            ).count()
+            
+            if active_agents > 0:
+                base_time = max(1, base_time // active_agents)
+            
+            return min(base_time, 60)  # Cap at 60 minutes
+            
+        except Exception as e:
+            logger.error(f"Error calculating wait time: {str(e)}")
+            return position * 5
+
+    def assign_conversation(self, queue_id: int, agent_id: int, method: str = "manual") -> bool:
+        """Assign conversation from queue to agent"""
+        try:
+            # Get queue entry
+            queue_entry = self.db.query(ChatQueue).filter(
+                ChatQueue.id == queue_id,
+                ChatQueue.status == "waiting"
+            ).first()
+            
+            if not queue_entry:
+                return False
+            
+            # Get conversation
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == queue_entry.conversation_id
+            ).first()
+            
+            if not conversation:
+                return False
+            
+            # Update queue entry
+            queue_entry.status = "assigned"
+            queue_entry.assigned_at = datetime.utcnow()
+            queue_entry.assigned_agent_id = agent_id
+            queue_entry.assignment_method = method
+            
+            # Update conversation
+            conversation.status = ConversationStatus.ASSIGNED
+            conversation.assigned_agent_id = agent_id
+            conversation.assigned_at = datetime.utcnow()
+            conversation.assignment_method = method
+            
+            # Calculate wait time
+            if conversation.queue_entry_time:
+                wait_seconds = (datetime.utcnow() - conversation.queue_entry_time).total_seconds()
+                conversation.wait_time_seconds = int(wait_seconds)
+            
+            # Update agent session
+            agent_session = self.db.query(AgentSession).filter(
+                AgentSession.agent_id == agent_id,
+                AgentSession.logout_at.is_(None)
+            ).first()
+            
+            if agent_session:
+                agent_session.active_conversations += 1
+            
+            self.db.commit()
+            
+            logger.info(f"Conversation {conversation.id} assigned to agent {agent_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error assigning conversation: {str(e)}")
+            self.db.rollback()
+            return False
+
+
+
+
+
+    
+    async def add_to_queue_with_smart_routing(self, conversation_id: int, priority: int = 1,
+                                          preferred_agent_id: int = None, 
+                                          assignment_criteria: Dict = None) -> Dict:
+       """
+       Add conversation to queue with intelligent routing analysis
+       """
+       try:
+           # Get conversation details
+           conversation = self.db.query(LiveChatConversation).filter(
+               LiveChatConversation.id == conversation_id
+           ).first()
+           
+           if not conversation:
+               raise ValueError(f"Conversation {conversation_id} not found")
+
+           # Convert numeric priority to string
+           if isinstance(priority, int):
+               priority_map = {1: "normal", 2: "high", 3: "urgent", 0: "low"}
+               priority_str = priority_map.get(priority, "normal")
+           else:
+               priority_str = str(priority)
+           
+           # Create queue entry directly
+           max_position = self.db.query(func.max(ChatQueue.position)).filter(
+               ChatQueue.tenant_id == conversation.tenant_id,
+               ChatQueue.status == "waiting"
+           ).scalar()
+           
+           next_position = (max_position or 0) + 1
+           
+           queue_entry = ChatQueue(
+               conversation_id=conversation_id,
+               tenant_id=conversation.tenant_id,
+               priority=priority_str,
+               status="waiting",
+               preferred_agent_id=preferred_agent_id,
+               assignment_criteria=json.dumps(assignment_criteria) if assignment_criteria else None,
+               queued_at=datetime.utcnow(),
+               position=next_position
+           )
+           
+           self.db.add(queue_entry)
+           
+           # Update conversation
+           conversation.status = ConversationStatus.QUEUED
+           conversation.queue_entry_time = datetime.utcnow()
+           conversation.queue_position = queue_entry.position
+           
+           self.db.commit()
+           self.db.refresh(queue_entry)
+           
+           queue_result = {
+               "success": True,
+               "queue_id": queue_entry.id,
+               "position": queue_entry.position,
+               "estimated_wait_time": next_position * 5
+           }
+           
+           # Try intelligent routing
+           routing_result = await self.smart_routing.find_best_agent(conversation_id)
+           
+           if routing_result.get("success") and routing_result.get("agent_id"):
+               # Smart routing found a good match - try immediate assignment
+               best_agent_id = routing_result["agent_id"]
+               
+               logger.info(f"Smart routing suggests agent {best_agent_id} for conversation {conversation_id}")
+               
+               # Check if the suggested agent is actually available
+               if await self._verify_agent_availability(best_agent_id, conversation.tenant_id):
+                   # Get the queue entry that was just created
+                   queue_entry = self.db.query(ChatQueue).filter(
+                       ChatQueue.conversation_id == conversation_id,
+                       ChatQueue.status == "waiting"
+                   ).first()
+                   
+                   if queue_entry:
+                       # Attempt immediate assignment
+                       assignment_success = self.assign_conversation(
+                           queue_entry.id, 
+                           best_agent_id, 
+                           "smart_routing"
+                       )
+                       
+                       if assignment_success:
+                           queue_result.update({
+                               "immediately_assigned": True,
+                               "assigned_agent_id": best_agent_id,
+                               "routing_method": "smart_tags",
+                               "routing_confidence": routing_result.get("confidence", 0.0),
+                               "detected_tags": routing_result.get("detected_tags", []),
+                               "routing_reasoning": routing_result.get("reasoning", [])
+                           })
+                           
+                           logger.info(f"Conversation {conversation_id} immediately assigned via smart routing")
+                       else:
+                           # Assignment failed, update queue with routing info
+                           queue_result.update({
+                               "immediately_assigned": False,
+                               "smart_routing_available": True,
+                               "suggested_agent_id": best_agent_id,
+                               "routing_confidence": routing_result.get("confidence", 0.0),
+                               "estimated_wait_time": self._calculate_smart_wait_time(
+                                   conversation.tenant_id, queue_result.get("position", 1), best_agent_id
+                               )
+                           })
+                   else:
+                       logger.warning(f"Queue entry not found for conversation {conversation_id}")
+               else:
+                   logger.info(f"Suggested agent {best_agent_id} not available, keeping in queue")
+                   queue_result.update({
+                       "immediately_assigned": False,
+                       "smart_routing_available": True,
+                       "suggested_agent_unavailable": True,
+                       "routing_confidence": routing_result.get("confidence", 0.0)
+                   })
+           else:
+               # Smart routing didn't find a good match or failed
+               logger.info(f"Smart routing failed or no good match for conversation {conversation_id}")
+               queue_result.update({
+                   "immediately_assigned": False,
+                   "smart_routing_available": False,
+                   "routing_error": routing_result.get("error"),
+                   "fallback_method": "traditional_queue"
+               })
+           
+           return queue_result
+           
+       except Exception as e:
+           logger.error(f"Error in enhanced queue service: {str(e)}")
+           return {"success": False, "error": str(e)}
     
     async def _verify_agent_availability(self, agent_id: int, tenant_id: int) -> bool:
         """Verify that the suggested agent is actually available for assignment"""
