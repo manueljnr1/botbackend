@@ -183,7 +183,7 @@ class UnifiedIntelligentEngine:
                 "answered_by": base_response.get('source', 'unknown'),
                 "intent": intent_result['intent'],
                 "context": context_result['context_type'],
-                "conversation_context": conversation_context['context_type'],
+                "conversation_context": conversation_context.get('context_type', 'unknown'),
                 "was_contextual": conversation_context['is_contextual'],
                 "flow_enhancement": flow_enhancement['flow_type'],
                 "engagement_level": flow_enhancement.get('engagement_level', 'unknown'),
