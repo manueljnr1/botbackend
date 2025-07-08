@@ -438,72 +438,76 @@ async def start_live_chat(
 
 @router.websocket("/ws/customer/{conversation_id}")
 async def customer_websocket_endpoint(
-    websocket: WebSocket,
-    conversation_id: int,
-    customer_id: str = Query(...),
-    tenant_id: int = Query(...),
-    db: Session = Depends(get_db)
+   websocket: WebSocket,
+   conversation_id: int,
+   customer_id: str = Query(...),
+   tenant_id: int = Query(...),
+   db: Session = Depends(get_db)
 ):
-    """WebSocket endpoint for customers"""
-    connection_id = None
-    try:
-        # Verify conversation exists and belongs to tenant
-        conversation = db.query(LiveChatConversation).filter(
-            LiveChatConversation.id == conversation_id,
-            LiveChatConversation.tenant_id == tenant_id,
-            LiveChatConversation.customer_identifier == customer_id
-        ).first()
-        
-        if not conversation:
-            await websocket.close(code=4004, reason="Conversation not found")
-            return
-        
-        # ✅ CRITICAL FIX: Accept the WebSocket connection FIRST
-        await websocket.accept()
-        
-        # Connect customer
-        connection_id = await websocket_manager.connect_customer(
-            websocket=websocket,
-            customer_id=customer_id,
-            tenant_id=tenant_id,
-            conversation_id=str(conversation_id)
-        )
-        
-        # Initialize message handler
-        message_handler = LiveChatMessageHandler(db, websocket_manager)
-        
-        # Send initial connection confirmation
-        await websocket.send_json({
-            "type": "connection_established",
-            "data": {
-                "conversation_id": conversation_id,
-                "customer_id": customer_id,
-                "status": "connected",
-                "message": "Connected to live chat"
-            }
-        })
-        
-        # Listen for messages
-        while True:
-            try:
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
-                await message_handler.handle_message(connection_id, message_data)
-                
-            except WebSocketDisconnect:
-                logger.info(f"Customer disconnected: {customer_id}")
-                break
-            except json.JSONDecodeError:
-                await message_handler._send_error(connection_id, "Invalid JSON format")
-            except Exception as e:
-                logger.error(f"Error in customer websocket: {str(e)}")
-                await message_handler._send_error(connection_id, "Message processing failed")
-                
-    except Exception as e:
-        logger.error(f"Error in customer websocket endpoint: {str(e)}")
-    finally:
-        if connection_id:
-            await websocket_manager.disconnect(connection_id)
+   """WebSocket endpoint for customers"""
+   connection_id = None
+   try:
+       # Verify conversation exists and belongs to tenant
+       conversation = db.query(LiveChatConversation).filter(
+           LiveChatConversation.id == conversation_id,
+           LiveChatConversation.tenant_id == tenant_id,
+           LiveChatConversation.customer_identifier == customer_id
+       ).first()
+       
+       if not conversation:
+           await websocket.close(code=4004, reason="Conversation not found")
+           return
+       
+       # Accept the WebSocket connection FIRST
+       await websocket.accept()
+       
+       # Connect customer
+       connection_id = await websocket_manager.connect_customer(
+           websocket=websocket,
+           customer_id=customer_id,
+           tenant_id=tenant_id,
+           conversation_id=str(conversation_id)
+       )
+       
+       # Initialize message handler
+       message_handler = LiveChatMessageHandler(db, websocket_manager)
+       
+       # Send initial connection confirmation
+       if websocket.client_state.name == "CONNECTED":
+           await websocket.send_json({
+               "type": "connection_established",
+               "data": {
+                   "conversation_id": conversation_id,
+                   "customer_id": customer_id,
+                   "status": "connected",
+                   "message": "Connected to live chat"
+               }
+           })
+       
+       # Listen for messages
+       while True:
+           try:
+               data = await websocket.receive_text()
+               message_data = json.loads(data)
+               await message_handler.handle_message(connection_id, message_data)
+               
+           except WebSocketDisconnect:
+               logger.info(f"Customer disconnected: {customer_id}")
+               break
+           except json.JSONDecodeError:
+               if connection_id and websocket.client_state.name == "CONNECTED":
+                   await message_handler._send_error(connection_id, "Invalid JSON format")
+           except Exception as e:
+               logger.error(f"Error in customer websocket: {str(e)}")
+               if connection_id and websocket.client_state.name == "CONNECTED":
+                   await message_handler._send_error(connection_id, "Message processing failed")
+               break
+               
+   except Exception as e:
+       logger.error(f"Error in customer websocket endpoint: {str(e)}")
+   finally:
+       if connection_id:
+           await websocket_manager.disconnect(connection_id)
 
 
 

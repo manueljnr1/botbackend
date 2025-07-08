@@ -63,19 +63,27 @@ class Connection:
     async def send_message(self, message: WebSocketMessage):
         """Send message to this connection"""
         try:
-            if self.is_active:
+            # Check if connection is still active and WebSocket is open
+            if self.is_active and self.websocket.client_state.name == "CONNECTED":
                 await self.websocket.send_text(message.to_json())
                 self.last_activity = datetime.utcnow()
+            else:
+                logger.warning(f"Attempted to send message to closed connection {self.connection_id}")
+                self.is_active = False
         except Exception as e:
             logger.error(f"Error sending message to {self.connection_id}: {str(e)}")
             self.is_active = False
-    
+
     async def send_json(self, data: dict):
         """Send JSON data directly"""
         try:
-            if self.is_active:
+            # Check if connection is still active and WebSocket is open
+            if self.is_active and self.websocket.client_state.name == "CONNECTED":
                 await self.websocket.send_json(data)
                 self.last_activity = datetime.utcnow()
+            else:
+                logger.warning(f"Attempted to send JSON to closed connection {self.connection_id}")
+                self.is_active = False
         except Exception as e:
             logger.error(f"Error sending JSON to {self.connection_id}: {str(e)}")
             self.is_active = False
@@ -95,45 +103,33 @@ class LiveChatWebSocketManager:
         self.agent_connections: Dict[int, str] = {}  # agent_id -> connection_id
         
         self._lock = asyncio.Lock()
+        
     
     async def connect_customer(self, websocket: WebSocket, customer_id: str, 
-                             tenant_id: int, conversation_id: str = None) -> str:
-        """Connect a customer to live chat"""
-        connection_id = f"customer_{customer_id}_{uuid.uuid4().hex[:8]}"
-        
-        try:
-            # await websocket.accept()
-            
-            connection = Connection(
-                websocket=websocket,
-                connection_id=connection_id,
-                connection_type=ConnectionType.CUSTOMER,
-                user_id=customer_id,
-                tenant_id=tenant_id
-            )
-            
-            if conversation_id:
-                connection.conversation_ids.add(conversation_id)
-            
-            await self._add_connection(connection)
-            
-            # Send welcome message
-            welcome_msg = WebSocketMessage(
-                message_type="connection_established",
-                data={
-                    "connection_id": connection_id,
-                    "user_type": "customer",
-                    "conversation_id": conversation_id
-                }
-            )
-            await connection.send_message(welcome_msg)
-            
-            logger.info(f"Customer connected: {customer_id} ({connection_id})")
-            return connection_id
-            
-        except Exception as e:
-            logger.error(f"Error connecting customer: {str(e)}")
-            raise
+                            tenant_id: int, conversation_id: str = None) -> str:
+       """Connect a customer to live chat"""
+       connection_id = f"customer_{customer_id}_{uuid.uuid4().hex[:8]}"
+       
+       try:
+           connection = Connection(
+               websocket=websocket,
+               connection_id=connection_id,
+               connection_type=ConnectionType.CUSTOMER,
+               user_id=customer_id,
+               tenant_id=tenant_id
+           )
+           
+           if conversation_id:
+               connection.conversation_ids.add(conversation_id)
+           
+           await self._add_connection(connection)
+           
+           logger.info(f"Customer connected: {customer_id} ({connection_id})")
+           return connection_id
+           
+       except Exception as e:
+           logger.error(f"Error connecting customer: {str(e)}")
+           raise
     
     async def connect_agent(self, websocket: WebSocket, agent_id: int, 
                           tenant_id: int, session_id: str) -> str:
