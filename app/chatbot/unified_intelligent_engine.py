@@ -22,7 +22,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-class EnhancedUnifiedIntelligentEngine:
+class UnifiedIntelligentEngine:
     """
     Enhanced Unified Engine with:
     - 3-hour context window with LLM override detection
@@ -1192,6 +1192,6 @@ Enhanced response:"""
 
 
 # Factory function
-def get_enhanced_unified_intelligent_engine(db: Session) -> EnhancedUnifiedIntelligentEngine:
+def get_unified_intelligent_engine(db: Session) -> UnifiedIntelligentEngine:
     """Factory function to create the enhanced unified engine"""
-    return EnhancedUnifiedIntelligentEngine(db)
+    return UnifiedIntelligentEngine(db)
