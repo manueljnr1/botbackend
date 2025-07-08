@@ -218,7 +218,7 @@ class UnifiedIntelligentEngine:
             ).order_by(ChatMessage.created_at.desc()).first()
             
             if last_message:
-                time_since_last = datetime.utcnow() - last_message.created_at
+                time_since_last = utc_now() - last_message.created_at
                 
                 # Session lifecycle logic
                 if time_since_last > timedelta(days=7):
@@ -280,7 +280,7 @@ class UnifiedIntelligentEngine:
                         msg_time = msg['timestamp']
                     
                     # Check if message is within 3-hour window
-                    time_diff = current_time - (msg_time.replace(tzinfo=None) if msg_time and msg_time.tzinfo else msg_time) if msg_time else timedelta(0)
+                    time_diff = safe_datetime_subtract(current_time, msg_time)
                     if time_diff <= timedelta(hours=3):
                         time_filtered_history.append(msg)
                 else:

@@ -1,8 +1,4 @@
-# app/instagram/router.py
-"""
-Instagram Integration FastAPI Router
-Handles Instagram setup, webhooks, and management endpoints
-"""
+
 
 import logging
 import json

@@ -5,14 +5,44 @@ Adds: 3-hour context windows, automatic cleanup, performance optimization
 """
 
 from typing import List, Dict, Optional, Tuple, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 import logging
 import uuid
 from app.chatbot.models import ChatSession, ChatMessage
 
+
+
 logger = logging.getLogger(__name__)
+
+
+
+
+def safe_datetime_subtract(dt1, dt2):
+    """Safely subtract two datetime objects, handling timezone issues"""
+    try:
+        if dt1 is None or dt2 is None:
+            return timedelta(0)
+        
+        # Convert both to naive UTC datetimes for safe subtraction
+        if dt1.tzinfo is not None:
+            dt1_naive = dt1.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            dt1_naive = dt1
+            
+        if dt2.tzinfo is not None:
+            dt2_naive = dt2.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            dt2_naive = dt2
+            
+        return dt1_naive - dt2_naive
+        
+    except Exception as e:
+        logger.warning(f"Datetime subtraction error: {str(e)}")
+        return timedelta(0)
+
+
 
 class SimpleChatbotMemory:
     """
@@ -27,7 +57,7 @@ class SimpleChatbotMemory:
         self.db = db
         self.tenant_id = tenant_id
         
-        # Session lifecycle thresholds
+       
         self.IDLE_THRESHOLD = timedelta(minutes=30)
         self.DORMANT_THRESHOLD = timedelta(hours=3)
         self.EXPIRED_THRESHOLD = timedelta(days=7)
@@ -38,7 +68,7 @@ class SimpleChatbotMemory:
         Enhanced session management with lifecycle awareness
         Returns: (session_id, is_new_session)
         """
-        # Look for existing active session
+        
         existing_session = self.db.query(ChatSession).filter(
             ChatSession.tenant_id == self.tenant_id,
             ChatSession.user_identifier == user_identifier,
@@ -46,20 +76,20 @@ class SimpleChatbotMemory:
         ).first()
         
         if existing_session:
-            # Check session lifecycle state
+           
             session_state = self._get_session_state(existing_session)
             
             if session_state == "expired":
-                # Archive expired session and create new one
+                
                 logger.info(f"Archiving expired session {existing_session.session_id}")
                 existing_session.is_active = False
                 self.db.commit()
                 return self._create_new_session(user_identifier, platform)
             
             elif session_state == "dormant":
-                # Session is dormant but reusable
+               
                 logger.info(f"Reactivating dormant session {existing_session.session_id}")
-                # Context will be naturally limited by 3-hour window in get_conversation_history
+                
                 return existing_session.session_id, False
             
             else:
@@ -102,7 +132,7 @@ class SimpleChatbotMemory:
             # No messages yet - consider active
             return "active"
         
-        time_since_last = datetime.utcnow() - last_message.created_at
+        time_since_last = safe_datetime_subtract(datetime.utcnow(), last_message.created_at)
         
         if time_since_last >= self.EXPIRED_THRESHOLD:
             return "expired"
