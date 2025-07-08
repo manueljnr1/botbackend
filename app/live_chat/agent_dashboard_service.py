@@ -1157,7 +1157,7 @@ class AgentDashboardService:
         
         stats = {
             "total": len(queue),
-            "by_priority": {"high": 0, "medium": 0, "low": 0},
+            "by_priority": {"high": 0, "medium": 0, "low": 0, "normal": 0},  # Add "normal"
             "by_customer_type": {"new": 0, "returning": 0, "premium": 0},
             "by_risk": {"high": 0, "medium": 0, "low": 0, "unknown": 0},
             "average_wait_time": 0,
@@ -1167,9 +1167,12 @@ class AgentDashboardService:
         wait_times = []
         
         for conv in queue:
-            # Priority breakdown
-            priority = conv["indicators"]["priority"]
-            stats["by_priority"][priority] += 1
+            # Priority breakdown - handle unknown priorities safely
+            priority = conv["indicators"].get("priority", "normal")
+            if priority in stats["by_priority"]:
+                stats["by_priority"][priority] += 1
+            else:
+                stats["by_priority"]["normal"] += 1  # Default fallback
             
             # Customer type breakdown
             customer_type = conv["indicators"]["customer_type"]
@@ -1179,11 +1182,14 @@ class AgentDashboardService:
                 stats["by_customer_type"]["returning"] += 1
             
             # Risk breakdown
-            risk_level = conv["indicators"]["risk_level"]
-            stats["by_risk"][risk_level] += 1
+            risk_level = conv["indicators"].get("risk_level", "unknown")
+            if risk_level in stats["by_risk"]:
+                stats["by_risk"][risk_level] += 1
+            else:
+                stats["by_risk"]["unknown"] += 1
             
             # Wait times
-            wait_time = conv["wait_time_minutes"]
+            wait_time = conv.get("wait_time_minutes", 0)
             wait_times.append(wait_time)
         
         if wait_times:
@@ -1191,7 +1197,6 @@ class AgentDashboardService:
             stats["longest_waiting"] = max(wait_times)
         
         return stats
-
 
 class SharedDashboardService:
     """Shared service layer for dashboard operations - used by both admin and agent endpoints"""
