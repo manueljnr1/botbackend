@@ -340,15 +340,29 @@ class DocumentProcessor:
         logger.info(f"Processing FAQ sheet: {file_path}")
         
         try:
+            # Add more detailed logging for file reading
+            logger.info(f"Attempting to read file: {file_path}")
+            
             if file_path.endswith('.csv'):
                 df = pd.read_csv(file_path, encoding='utf-8-sig')
+                logger.info("Successfully read CSV file")
             elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
+                logger.info("Successfully read Excel file")
             else:
                 raise ValueError("FAQ file must be CSV or Excel format")
             
-            # Log column names for debugging
-            logger.info(f"FAQ sheet columns: {df.columns.tolist()}")
+            # Log dataframe info
+            logger.info(f"DataFrame shape: {df.shape}")
+            logger.info(f"DataFrame columns (raw): {df.columns.tolist()}")
+            
+            # Check if dataframe is empty
+            if df.empty:
+                raise ValueError("FAQ file is empty")
+            
+            # Clean column names - remove leading/trailing whitespace and convert to string
+            df.columns = df.columns.astype(str).str.strip()
+            logger.info(f"DataFrame columns (after cleaning): {df.columns.tolist()}")
             
             # Expected columns: question/questions, answer/answers
             question_col = None
@@ -357,51 +371,101 @@ class DocumentProcessor:
             # Look for question and answer columns (case insensitive, singular or plural)
             for col in df.columns:
                 col_lower = col.lower().strip()
+                logger.info(f"Checking column: '{col}' -> '{col_lower}'")
+                
                 if col_lower in ['question', 'questions']:
                     question_col = col
+                    logger.info(f"Found question column: '{col}'")
                 elif col_lower in ['answer', 'answers']:
                     answer_col = col
+                    logger.info(f"Found answer column: '{col}'")
             
+            # Enhanced error reporting
             if question_col is None or answer_col is None:
                 missing_cols = []
                 if question_col is None:
                     missing_cols.append("'question' or 'questions'")
+                    logger.error("No question column found")
                 if answer_col is None:
                     missing_cols.append("'answer' or 'answers'")
+                    logger.error("No answer column found")
                 
-                raise ValueError(
+                # Log each column and why it didn't match
+                for col in df.columns:
+                    col_lower = col.lower().strip()
+                    logger.error(f"Column '{col}' (processed: '{col_lower}') - "
+                            f"matches question: {col_lower in ['question', 'questions']}, "
+                            f"matches answer: {col_lower in ['answer', 'answers']}")
+                
+                error_msg = (
                     f"FAQ sheet must contain {' and '.join(missing_cols)} columns. "
-                    f"Found columns: {df.columns.tolist()}"
+                    f"Found columns: {df.columns.tolist()}. "
+                    f"Note: Column matching is case-insensitive and looks for 'question'/'questions' and 'answer'/'answers'."
                 )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             logger.info(f"Using columns: question='{question_col}', answer='{answer_col}'")
             
             # Rename columns to standardized names for processing
             df = df.rename(columns={question_col: 'question', answer_col: 'answer'})
             
+            # Log sample data
+            logger.info(f"Sample data (first 3 rows):")
+            for i, row in df.head(3).iterrows():
+                logger.info(f"Row {i}: Q='{row['question']}' A='{row['answer']}'")
+            
             # Convert to list of dictionaries
             faqs = []
-            for idx, row in df.iterrows():
-                if pd.notna(row['question']) and pd.notna(row['answer']):
-                    question_text = str(row['question']).strip()
-                    answer_text = str(row['answer']).strip()
-                    
-                    # Skip empty strings after stripping
-                    if question_text and answer_text:
-                        faqs.append({
-                            'question': question_text,
-                            'answer': answer_text
-                        })
-                    else:
-                        logger.warning(f"Skipping row {idx + 1}: empty question or answer after stripping whitespace")
-                else:
-                    logger.warning(f"Skipping row {idx + 1}: missing question or answer")
+            skipped_rows = []
             
-            logger.info(f"Processed {len(faqs)} FAQ items")
+            for idx, row in df.iterrows():
+                # Check for null values
+                if pd.isna(row['question']) or pd.isna(row['answer']):
+                    skipped_rows.append(f"Row {idx + 1}: null values")
+                    continue
+                
+                # Convert to string and strip whitespace
+                question_text = str(row['question']).strip()
+                answer_text = str(row['answer']).strip()
+                
+                # Skip empty strings after stripping
+                if not question_text or not answer_text:
+                    skipped_rows.append(f"Row {idx + 1}: empty after stripping")
+                    continue
+                
+                # Skip if values are just "nan" string
+                if question_text.lower() == 'nan' or answer_text.lower() == 'nan':
+                    skipped_rows.append(f"Row {idx + 1}: 'nan' values")
+                    continue
+                
+                faqs.append({
+                    'question': question_text,
+                    'answer': answer_text
+                })
+            
+            # Log processing results
+            logger.info(f"Processed {len(faqs)} FAQ items successfully")
+            if skipped_rows:
+                logger.warning(f"Skipped {len(skipped_rows)} rows: {skipped_rows}")
+            
+            if not faqs:
+                raise ValueError("No valid FAQ items found in the file")
+            
             return faqs
             
         except Exception as e:
             logger.error(f"Error processing FAQ sheet: {str(e)}", exc_info=True)
+            
+            # Additional debugging info
+            try:
+                if 'df' in locals():
+                    logger.error(f"DataFrame info: shape={df.shape}, columns={df.columns.tolist()}")
+                else:
+                    logger.error("DataFrame was not created - file reading failed")
+            except:
+                pass
+            
             raise
 
     async def get_crawl_metadata(self, vector_store_id: str) -> Optional[Dict]:

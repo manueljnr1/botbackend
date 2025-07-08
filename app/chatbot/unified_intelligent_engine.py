@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from app.chatbot.simple_memory import SimpleChatbotMemory
 from app.knowledge_base.models import FAQ, KnowledgeBase, ProcessingStatus
@@ -21,6 +21,23 @@ except ImportError:
     LLM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def utc_now():
+    """Get current UTC time with timezone info"""
+    return datetime.now(timezone.utc)
+
+def safe_datetime_subtract(dt1, dt2):
+    """Safely subtract two datetime objects, handling timezone issues"""
+    try:
+        # Make both naive for subtraction
+        dt1_naive = dt1.replace(tzinfo=None) if dt1 and dt1.tzinfo else dt1
+        dt2_naive = dt2.replace(tzinfo=None) if dt2 and dt2.tzinfo else dt2
+        return dt1_naive - dt2_naive if dt1_naive and dt2_naive else timedelta(0)
+    except Exception as e:
+        logger.warning(f"Datetime subtraction error: {str(e)}")
+        return timedelta(0)
+
 
 class UnifiedIntelligentEngine:
     """
@@ -247,8 +264,13 @@ class UnifiedIntelligentEngine:
         
         try:
             # 🆕 TIME-BASED FILTERING (3-hour window)
-            current_time = datetime.utcnow()
-            time_filtered_history = []
+            current_time = utc_now()
+            # Replace 'some_db_datetime' with a valid datetime object from the conversation history
+            if conversation_history and 'timestamp' in conversation_history[-1]:
+                last_message_time = datetime.fromisoformat(conversation_history[-1]['timestamp'].replace('Z', '+00:00'))
+                time_diff = safe_datetime_subtract(current_time, last_message_time)
+            else:
+                time_diff = timedelta(0)  # Default to zero if no valid timestamp is found
             
             for msg in conversation_history:
                 if 'timestamp' in msg:
@@ -258,7 +280,7 @@ class UnifiedIntelligentEngine:
                         msg_time = msg['timestamp']
                     
                     # Check if message is within 3-hour window
-                    time_diff = current_time - msg_time.replace(tzinfo=None)
+                    time_diff = current_time - (msg_time.replace(tzinfo=None) if msg_time and msg_time.tzinfo else msg_time) if msg_time else timedelta(0)
                     if time_diff <= timedelta(hours=3):
                         time_filtered_history.append(msg)
                 else:
