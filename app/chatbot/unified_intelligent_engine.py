@@ -75,6 +75,131 @@ class UnifiedIntelligentEngine:
             'sensitive_data': re.compile(r'\b(password|token|secret|key|credential)\s*[:=]\s*\S+', re.IGNORECASE)
         }
 
+    # def process_message(
+    #     self,
+    #     api_key: str,
+    #     user_message: str,
+    #     user_identifier: str,
+    #     platform: str = "web"
+    # ) -> Dict[str, Any]:
+    #     """
+    #     Enhanced processing pipeline with privacy-first approach
+    #     """
+    #     try:
+    #         # --- PRE-PROCESSING & SECURITY ---
+    #         tenant = self._get_tenant_by_api_key(api_key)
+    #         if not tenant:
+    #             logger.error(f"Invalid API key provided.")
+    #             return {"error": "Invalid API key", "success": False}
+
+    #         is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+    #         if not is_safe:
+    #             logger.warning(f"🔒 Security risk blocked: {user_message[:50]}...")
+    #             return {
+    #                 "success": True,
+    #                 "response": security_response,
+    #                 "session_id": "security_violation",
+    #                 "answered_by": "security_system",
+    #                 "intent": "security_risk",
+    #                 "architecture": "enhanced_unified_security"
+    #             }
+
+    #         # Initialize memory and manage session lifecycle
+    #         memory = SimpleChatbotMemory(self.db, tenant.id)
+    #         session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+            
+    #         # 🆕 SESSION LIFECYCLE MANAGEMENT
+    #         self._manage_session_lifecycle(memory, session_id, user_identifier)
+            
+    #         # --- ENHANCED CONTEXT ANALYSIS (3-hour window + LLM override) ---
+    #         conversation_context = {"is_contextual": False, "enhanced_message": user_message}
+    #         original_user_message = user_message
+    #         conversation_history = []
+            
+    #         if not is_new_session and self.llm_available:
+    #             conversation_history = memory.get_recent_messages(session_id, limit=6)
+                
+    #             if conversation_history and len(conversation_history) >= 2:
+    #                 conversation_context = self._enhanced_context_analysis(
+    #                     current_message=user_message,
+    #                     conversation_history=conversation_history,
+    #                     tenant=tenant,
+    #                     llm_instance=self.llm
+    #                 )
+                    
+    #                 if conversation_context['is_contextual']:
+    #                     user_message = conversation_context['enhanced_message']
+    #                     logger.info(f"🔗 Contextual message detected. Enhanced: {user_message}")
+
+    #         # Store the original user message
+    #         memory.store_message(session_id, original_user_message, True)
+
+    #         # --- INTENT CLASSIFICATION ---
+    #         intent_result = self._classify_intent(user_message, tenant)
+
+    #         # --- CONTEXT CHECK ---
+    #         context_result = self._check_context_relevance(user_message, intent_result, tenant)
+
+    #         # --- SMART ROUTING & RESPONSE GENERATION ---
+    #         if context_result['is_product_related']:
+    #             response = self._handle_product_related(user_message, tenant, context_result)
+    #         else:
+    #             response = self._handle_general_knowledge(user_message, tenant, intent_result)
+
+    #         # --- 🆕 PRIVACY-FIRST RESPONSE FILTERING ---
+    #         base_response = self._privacy_filter_response(
+    #             response=response,
+    #             user_message=original_user_message,
+    #             conversation_history=conversation_history,
+    #             tenant=tenant
+    #         )
+
+    #         base_response['content'] = fix_response_formatting(base_response['content'])
+
+    #         # --- 🆕 SMART CONVERSATION FLOW ENHANCEMENT (Every 5th + Topic-based) ---
+    #         flow_enhancement = {"enhanced_response": base_response['content'], "flow_type": "no_enhancement"}
+            
+    #         if self._should_enhance_conversation(session_id, intent_result, tenant):
+    #             flow_enhancement = self._smart_conversation_enhancement(
+    #                 current_response=base_response['content'],
+    #                 user_message=original_user_message,
+    #                 conversation_history=conversation_history,
+    #                 intent_result=intent_result,
+    #                 response_source=base_response.get('source', 'unknown'),
+    #                 tenant=tenant,
+    #                 session_id=session_id
+    #             )
+            
+    #         final_response_content = flow_enhancement['enhanced_response']
+
+    #         # Store the final bot response in memory
+    #         memory.store_message(session_id, final_response_content, False)
+
+    #         return {
+    #             "success": True,
+    #             "response": final_response_content,
+    #             "session_id": session_id,
+    #             "is_new_session": is_new_session,
+    #             "answered_by": base_response.get('source', 'unknown'),
+    #             "intent": intent_result['intent'],
+    #             "context": context_result['context_type'],
+    #             "conversation_context": conversation_context.get('context_type', 'unknown'),
+    #             "was_contextual": conversation_context['is_contextual'],
+    #             "flow_enhancement": flow_enhancement['flow_type'],
+    #             "engagement_level": flow_enhancement.get('engagement_level', 'unknown'),
+    #             "privacy_filtered": base_response.get('privacy_filtered', False),
+    #             "session_lifecycle": "active",
+    #             "architecture": "enhanced_unified"
+    #         }
+
+    #     except Exception as e:
+    #         import traceback
+    #         logger.error(f"Error in enhanced processing pipeline: {e}\n{traceback.format_exc()}")
+    #         return {"error": str(e), "success": False}
+
+
+
+
     def process_message(
         self,
         api_key: str,
@@ -83,119 +208,60 @@ class UnifiedIntelligentEngine:
         platform: str = "web"
     ) -> Dict[str, Any]:
         """
-        Enhanced processing pipeline with privacy-first approach
+        This is the new "Intelligent Router". It orchestrates the entire response process.
         """
         try:
-            # --- PRE-PROCESSING & SECURITY ---
+            # --- 1. PRE-PROCESSING & SECURITY ---
             tenant = self._get_tenant_by_api_key(api_key)
             if not tenant:
-                logger.error(f"Invalid API key provided.")
                 return {"error": "Invalid API key", "success": False}
 
-            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+            # Security check remains crucial
+            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name) #
             if not is_safe:
-                logger.warning(f"🔒 Security risk blocked: {user_message[:50]}...")
-                return {
-                    "success": True,
-                    "response": security_response,
-                    "session_id": "security_violation",
-                    "answered_by": "security_system",
-                    "intent": "security_risk",
-                    "architecture": "enhanced_unified_security"
-                }
+                # This part of your security logic is already good
+                return {"success": True, "response": security_response, "answered_by": "security_system"}
 
-            # Initialize memory and manage session lifecycle
-            memory = SimpleChatbotMemory(self.db, tenant.id)
-            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
-            
-            # 🆕 SESSION LIFECYCLE MANAGEMENT
-            self._manage_session_lifecycle(memory, session_id, user_identifier)
-            
-            # --- ENHANCED CONTEXT ANALYSIS (3-hour window + LLM override) ---
-            conversation_context = {"is_contextual": False, "enhanced_message": user_message}
-            original_user_message = user_message
-            conversation_history = []
-            
-            if not is_new_session and self.llm_available:
-                conversation_history = memory.get_recent_messages(session_id, limit=6)
-                
-                if conversation_history and len(conversation_history) >= 2:
-                    conversation_context = self._enhanced_context_analysis(
-                        current_message=user_message,
-                        conversation_history=conversation_history,
-                        tenant=tenant,
-                        llm_instance=self.llm
-                    )
-                    
-                    if conversation_context['is_contextual']:
-                        user_message = conversation_context['enhanced_message']
-                        logger.info(f"🔗 Contextual message detected. Enhanced: {user_message}")
+            # --- 2. INTENT & CONTEXT ANALYSIS ---
+            # These functions you've already built will now guide the routing
+            intent_result = self._classify_intent(user_message, tenant) #
+            context_result = self._check_context_relevance(user_message, intent_result, tenant) #
 
-            # Store the original user message
-            memory.store_message(session_id, original_user_message, True)
-
-            # --- INTENT CLASSIFICATION ---
-            intent_result = self._classify_intent(user_message, tenant)
-
-            # --- CONTEXT CHECK ---
-            context_result = self._check_context_relevance(user_message, intent_result, tenant)
-
-            # --- SMART ROUTING & RESPONSE GENERATION ---
+            # --- 3. ROUTING TO SPECIALIZED HANDLERS ---
             if context_result['is_product_related']:
-                response = self._handle_product_related(user_message, tenant, context_result)
+                # If the query is about the tenant's product/service
+                response_data = self._handle_product_related(user_message, tenant, context_result) #
             else:
-                response = self._handle_general_knowledge(user_message, tenant, intent_result)
+                # If it's a general question or casual chat
+                response_data = self._handle_general_knowledge(user_message, tenant, intent_result) #
 
-            # --- 🆕 PRIVACY-FIRST RESPONSE FILTERING ---
-            base_response = self._privacy_filter_response(
-                response=response,
-                user_message=original_user_message,
-                conversation_history=conversation_history,
-                tenant=tenant
-            )
+            # --- 4. POST-PROCESSING & MEMORY ---
+            # Clean up the final response
+            final_content = fix_response_formatting(response_data['content']) #
 
-            base_response['content'] = fix_response_formatting(base_response['content'])
-
-            # --- 🆕 SMART CONVERSATION FLOW ENHANCEMENT (Every 5th + Topic-based) ---
-            flow_enhancement = {"enhanced_response": base_response['content'], "flow_type": "no_enhancement"}
-            
-            if self._should_enhance_conversation(session_id, intent_result, tenant):
-                flow_enhancement = self._smart_conversation_enhancement(
-                    current_response=base_response['content'],
-                    user_message=original_user_message,
-                    conversation_history=conversation_history,
-                    intent_result=intent_result,
-                    response_source=base_response.get('source', 'unknown'),
-                    tenant=tenant,
-                    session_id=session_id
-                )
-            
-            final_response_content = flow_enhancement['enhanced_response']
-
-            # Store the final bot response in memory
-            memory.store_message(session_id, final_response_content, False)
+            # Store the conversation in memory
+            memory = SimpleChatbotMemory(self.db, tenant.id)
+            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform) #
+            memory.store_message(session_id, user_message, True) #
+            memory.store_message(session_id, final_content, False) #
 
             return {
                 "success": True,
-                "response": final_response_content,
+                "response": final_content,
                 "session_id": session_id,
                 "is_new_session": is_new_session,
-                "answered_by": base_response.get('source', 'unknown'),
-                "intent": intent_result['intent'],
-                "context": context_result['context_type'],
-                "conversation_context": conversation_context.get('context_type', 'unknown'),
-                "was_contextual": conversation_context['is_contextual'],
-                "flow_enhancement": flow_enhancement['flow_type'],
-                "engagement_level": flow_enhancement.get('engagement_level', 'unknown'),
-                "privacy_filtered": base_response.get('privacy_filtered', False),
-                "session_lifecycle": "active",
-                "architecture": "enhanced_unified"
+                "answered_by": response_data.get('source', 'unknown'),
+                "intent": intent_result.get('intent', 'unknown'),
+                "architecture": "hybrid_intelligent_router"
             }
 
         except Exception as e:
-            import traceback
-            logger.error(f"Error in enhanced processing pipeline: {e}\n{traceback.format_exc()}")
+            logger.error(f"Error in intelligent router: {e}")
             return {"error": str(e), "success": False}
+
+
+
+
 
     def _manage_session_lifecycle(self, memory: SimpleChatbotMemory, session_id: str, user_identifier: str):
         """
