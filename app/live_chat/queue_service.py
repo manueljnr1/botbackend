@@ -2,7 +2,7 @@
 # Enhanced version of queue_service.py with smart routing integration
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import List, Dict, Optional, Any
@@ -162,21 +162,29 @@ class LiveChatQueueService:
             if not conversation:
                 return False
             
+            # Use timezone-aware datetime
+            current_time = datetime.now(timezone.utc)
+            
             # Update queue entry
             queue_entry.status = "assigned"
-            queue_entry.assigned_at = datetime.utcnow()
+            queue_entry.assigned_at = current_time
             queue_entry.assigned_agent_id = agent_id
             queue_entry.assignment_method = method
             
             # Update conversation
             conversation.status = ConversationStatus.ASSIGNED
             conversation.assigned_agent_id = agent_id
-            conversation.assigned_at = datetime.utcnow()
+            conversation.assigned_at = current_time
             conversation.assignment_method = method
             
-            # Calculate wait time
+            # Calculate wait time - make both datetime objects timezone-aware
             if conversation.queue_entry_time:
-                wait_seconds = (datetime.utcnow() - conversation.queue_entry_time).total_seconds()
+                if conversation.queue_entry_time.tzinfo is None:
+                    queue_time = conversation.queue_entry_time.replace(tzinfo=timezone.utc)
+                else:
+                    queue_time = conversation.queue_entry_time
+                
+                wait_seconds = (current_time - queue_time).total_seconds()
                 conversation.wait_time_seconds = int(wait_seconds)
             
             # Update agent session
