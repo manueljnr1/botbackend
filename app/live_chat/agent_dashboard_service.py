@@ -364,7 +364,7 @@ class AgentDashboardService:
                 })
             
             # Sort by urgency and queue position
-            enhanced_queue.sort(key=lambda x: (x["urgency_score"], x["queue_position"]), reverse=True)
+            enhanced_queue.sort(key=lambda x: (x.get("urgency_score") or 0, x.get("queue_position") or 0), reverse=True)
             
             return {
                 "success": True,
