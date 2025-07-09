@@ -519,6 +519,13 @@ class CustomerProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    tenant = relationship("Tenant")
+    sessions = relationship("CustomerSession", back_populates="customer_profile")
+    devices = relationship("CustomerDevice", back_populates="customer_profile")
+    preferences = relationship("CustomerPreferences", back_populates="customer_profile", uselist=False)
+
+
+
 class CustomerSession(Base):
     """Individual customer session tracking"""
     __tablename__ = "customer_sessions"
@@ -546,6 +553,9 @@ class CustomerSession(Base):
     page_views = Column(Integer, default=0)
     conversations_started = Column(Integer, default=0)
 
+    customer_profile = relationship("CustomerProfile", back_populates="sessions")
+
+
 class CustomerDevice(Base):
     """Device information for fingerprinting"""
     __tablename__ = "customer_devices"
@@ -570,6 +580,9 @@ class CustomerDevice(Base):
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow)
     total_sessions = Column(Integer, default=1)
+
+    customer_profile = relationship("CustomerProfile", back_populates="devices")
+
 
 class CustomerPreferences(Base):
     """Customer preferences and settings"""
@@ -599,6 +612,9 @@ class CustomerPreferences(Base):
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+    customer_profile = relationship("CustomerProfile", back_populates="preferences")
 
 
 

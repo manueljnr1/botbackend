@@ -124,35 +124,53 @@ class CustomerDetectionService:
             return self._create_fallback_customer_data(customer_identifier, request)
     
     async def _detect_geolocation(self, ip_address: str) -> Dict[str, Any]:
-        """
-        Detect customer geolocation using free APIs
-        """
-        try:
-            logger.info(f"🌍 Detecting geolocation for IP: {ip_address}")
-            
-            # Use the free geolocation service
-            geolocation = await self.geolocation_service.get_location(ip_address)
-            
-            logger.info(f"✅ Geolocation detected: {geolocation.get('country', 'Unknown')} - {geolocation.get('city', 'Unknown')}")
+        """Detect customer geolocation using free APIs"""
+        geolocation = {
+            "ip_address": ip_address,
+            "country": None,
+            "country_code": None,
+            "region": None,
+            "city": None,
+            "latitude": None,
+            "longitude": None,
+            "timezone": None,
+            "isp": None,
+            "detection_method": "unknown",
+            "accuracy": "unknown"
+        }
+        
+        # Handle localhost/private IPs
+        if not self._is_valid_ip(ip_address):
+            geolocation.update({
+                "country": "Test Location (Localhost)",
+                "country_code": "US",
+                "region": "Development Environment", 
+                "city": "Local Testing",
+                "latitude": 40.7128,
+                "longitude": -74.0060,
+                "timezone": "America/New_York",
+                "isp": "Local Development",
+                "detection_method": "localhost_fallback",
+                "accuracy": "testing"
+            })
             return geolocation
-            
+        
+        # Use free geolocation service directly
+        try:
+            geolocation_api = await self.geolocation_service.get_location(ip_address)
+            if geolocation_api:
+                geolocation.update(geolocation_api)
+                return geolocation
         except Exception as e:
-            logger.error(f"Geolocation detection failed: {str(e)}")
-            # Return fallback data
-            return {
-                "ip_address": ip_address,
-                "country": None,
-                "country_code": None,
-                "region": None,
-                "city": None,
-                "latitude": None,
-                "longitude": None,
-                "timezone": None,
-                "isp": None,
-                "detection_method": "failed",
-                "accuracy": "none",
-                "error": str(e)
-            }
+            logger.error(f"External geolocation API error: {str(e)}")
+        
+        # Final fallback
+        geolocation.update({
+            "detection_method": "failed",
+            "accuracy": "none"
+        })
+        
+        return geolocation
     
     def _extract_request_info(self, request: Request) -> Dict[str, Any]:
         """Extract comprehensive information from HTTP request"""
