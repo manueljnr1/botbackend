@@ -578,7 +578,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
 
 
 
-s
+
 @router.post("/login", response_model=SupabaseTokenResponse)
 async def login_with_supabase(
     login_data: SupabaseLoginRequest,
