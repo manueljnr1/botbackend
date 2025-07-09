@@ -379,6 +379,51 @@ async def start_live_chat(
         
         # 🔒 PRICING CHECK - Check conversation limits
         check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+
+        # 🚫 Check for existing active conversation
+        existing_conversation = db.query(LiveChatConversation).filter(
+            and_(
+                LiveChatConversation.tenant_id == tenant.id,
+                LiveChatConversation.customer_identifier == request.customer_identifier,
+                LiveChatConversation.status.in_([
+                    ConversationStatus.QUEUED,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.ACTIVE
+                ])
+            )
+        ).first()
+        
+        if existing_conversation:
+            # Customer already has an active conversation
+            websocket_url = f"/live-chat/ws/customer/{existing_conversation.id}?customer_id={request.customer_identifier}&tenant_id={tenant.id}"
+            
+            return {
+                "success": True,
+                "conversation_id": existing_conversation.id,
+                "queue_position": existing_conversation.queue_position,
+                "estimated_wait_time": None,
+                "websocket_url": websocket_url,
+                "message": f"You already have an active conversation. Please continue with your existing chat."
+            }
+
+        validated_session_id = None
+        if request.chatbot_session_id:
+            # Import your ChatSession model (adjust import path as needed)
+            from app.chatbot.models import ChatSession  # Adjust this import path
+            
+            # Check if session exists
+            existing_session = db.query(ChatSession).filter(
+                ChatSession.id == request.chatbot_session_id,
+                ChatSession.tenant_id == tenant.id  # Ensure it belongs to the same tenant
+            ).first()
+            
+            if existing_session:
+                validated_session_id = request.chatbot_session_id
+                logger.info(f"Using existing chatbot session: {validated_session_id}")
+            else:
+                logger.warning(f"Chatbot session {request.chatbot_session_id} not found, proceeding without session link")
+                validated_session_id = None
+
         
         # Create new conversation
         conversation = LiveChatConversation(
@@ -386,7 +431,7 @@ async def start_live_chat(
             customer_identifier=request.customer_identifier,
             customer_name=request.customer_name,
             customer_email=request.customer_email,
-            chatbot_session_id=request.chatbot_session_id,
+            chatbot_session_id=validated_session_id,
             handoff_reason="manual" if not request.handoff_context else "triggered",
             handoff_context=json.dumps(request.handoff_context) if request.handoff_context else None,
             original_question=request.initial_message,
