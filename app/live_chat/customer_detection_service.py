@@ -213,6 +213,8 @@ class CustomerDetectionService:
         # Create hash from IP + User Agent + Date (for privacy)
         identifier_string = f"{request_info['ip_address']}:{request_info['user_agent']}:{datetime.utcnow().date()}"
         return hashlib.sha256(identifier_string.encode()).hexdigest()[:16]
+
+
     
     async def _detect_geolocation(self, ip_address: str) -> Dict[str, Any]:
         """Detect customer geolocation with multiple fallback methods"""
@@ -247,27 +249,28 @@ class CustomerDetectionService:
             return geolocation  # Return the fallback data instead of skipping
         
         # Method 1: Local GeoIP2 database (fastest, most private)
-        if self.geoip_reader:
-            try:
-                response = self.geoip_reader.city(ip_address)
-                geolocation.update({
-                    "country": response.country.name,
-                    "country_code": response.country.iso_code,
-                    "region": response.subdivisions.most_specific.name,
-                    "city": response.city.name,
-                    "latitude": float(response.location.latitude) if response.location.latitude else None,
-                    "longitude": float(response.location.longitude) if response.location.longitude else None,
-                    "timezone": response.location.time_zone,
-                    "detection_method": "geoip2_local",
-                    "accuracy": "high"
-                })
-                return geolocation
-            except geoip2.errors.AddressNotFoundError:
-                logger.debug(f"IP {ip_address} not found in GeoIP database")
-            except Exception as e:
-                logger.error(f"GeoIP2 lookup error: {str(e)}")
+        # if self.geoip_reader:
+        #     try:
+        #         response = self.geoip_reader.city(ip_address)
+        #         geolocation.update({
+        #             "country": response.country.name,
+        #             "country_code": response.country.iso_code,
+        #             "region": response.subdivisions.most_specific.name,
+        #             "city": response.city.name,
+        #             "latitude": float(response.location.latitude) if response.location.latitude else None,
+        #             "longitude": float(response.location.longitude) if response.location.longitude else None,
+        #             "timezone": response.location.time_zone,
+        #             "detection_method": "geoip2_local",
+        #             "accuracy": "high"
+        #         })
+        #         return geolocation
+        #     except geoip2.errors.AddressNotFoundError:
+        #         logger.debug(f"IP {ip_address} not found in GeoIP database")
+        #     except Exception as e:
+        #         logger.error(f"GeoIP2 lookup error: {str(e)}")
         
-        # Method 2: External API fallback (with rate limiting)
+
+        
         try:
             geolocation_api = await self._fetch_external_geolocation(ip_address)
             if geolocation_api:
@@ -276,7 +279,7 @@ class CustomerDetectionService:
         except Exception as e:
             logger.error(f"External geolocation API error: {str(e)}")
         
-        # Method 3: Browser geolocation hint from accept-language
+       
         if not geolocation["country"]:
             country_from_lang = self._guess_country_from_language(
                 self.request_info.get('accept_language', '')
@@ -288,7 +291,7 @@ class CustomerDetectionService:
                     "accuracy": "low"
                 })
         
-        # Final fallback if everything fails
+       
         if not geolocation["country"]:
             geolocation.update({
                 "detection_method": "failed",
@@ -296,6 +299,8 @@ class CustomerDetectionService:
             })
         
         return geolocation
+
+
     
     async def _fetch_external_geolocation(self, ip_address: str) -> Optional[Dict]:
         """Fetch geolocation from external API with rate limiting"""
