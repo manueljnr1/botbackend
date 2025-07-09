@@ -504,7 +504,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         # 🔒 STEP 5: Create local tenant with SECURE ID (MOST IMPORTANT CHANGE)
         logger.info("Creating local tenant record...")
         new_tenant = Tenant(
-            id=secure_tenant_id,  # 🔒 USE SECURE ID INSTEAD OF AUTO-INCREMENT
+            # id=secure_tenant_id,  # 🔒 USE SECURE ID INSTEAD OF AUTO-INCREMENT
             name=tenant.name,
             business_name=tenant.business_name,
             email=normalized_email,
@@ -578,7 +578,7 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
 
 
 
-
+s
 @router.post("/login", response_model=SupabaseTokenResponse)
 async def login_with_supabase(
     login_data: SupabaseLoginRequest,
