@@ -81,8 +81,6 @@ class SupportedLanguage(BaseModel):
     name: str
 
 
-
-
 class StreamingChatRequest(BaseModel):
     message: str
     user_identifier: str

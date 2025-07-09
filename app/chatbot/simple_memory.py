@@ -169,7 +169,7 @@ class SimpleChatbotMemory:
                 ChatMessage.created_at >= context_cutoff  # 🆕 3-hour window
             )
         ).order_by(ChatMessage.created_at.desc()).limit(max_messages).all()
-        s
+        
         if not messages:
             logger.info(f"No messages within 3-hour context window for {user_identifier}")
             return []
