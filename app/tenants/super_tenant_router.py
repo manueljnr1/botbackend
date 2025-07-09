@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.tenants.super_tenant_service import SuperTenantService
+from app.chatbot.super_tenant_service import SuperTenantService
 from app.tenants.router import get_tenant_from_api_key
 
 router = APIRouter()

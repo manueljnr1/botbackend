@@ -21,6 +21,19 @@ class PricingService:
     
     def __init__(self, db: Session):
         self.db = db
+
+
+    def _get_utc_now(self):
+        """Get current UTC time as timezone-aware datetime"""
+        from datetime import timezone
+        return datetime.now(timezone.utc)
+
+    def _ensure_timezone_aware(self, dt: datetime) -> datetime:
+        """Ensure a datetime is timezone-aware (assume UTC if naive)"""
+        if dt.tzinfo is None:
+            import pytz
+            return pytz.UTC.localize(dt)
+        return dt.astimezone(pytz.UTC)
     
     def create_default_plans(self):
         """Create default pricing plans if they don't exist"""
@@ -174,8 +187,8 @@ class PricingService:
                 plan_id=free_plan.id,
                 is_active=True,
                 billing_cycle="monthly",
-                current_period_start=datetime.utcnow(),
-                current_period_end=datetime.utcnow() + timedelta(days=30),
+                current_period_start=self._get_utc_now(),
+                current_period_end=self._get_utc_now() + timedelta(days=30),
                 status="active",
                 messages_used_current_period=0,
                 integrations_count=0
@@ -246,8 +259,9 @@ class PricingService:
                 return True  # Allow unlimited if max is None
             
             # Check if current period is valid
-            now = datetime.utcnow()
-            if now > subscription.current_period_end:
+            now = self._get_utc_now()
+            period_end = self._ensure_timezone_aware(subscription.current_period_end)
+            if now > period_end:
                 self.reset_usage_for_new_period(subscription)
             
             # Now safe to check the limit
@@ -298,8 +312,9 @@ class PricingService:
                     return False
             
             # Check if current period is valid
-            now = datetime.utcnow()
-            if now > subscription.current_period_end:
+            now = self._get_utc_now()
+            period_end = self._ensure_timezone_aware(subscription.current_period_end)
+            if now > period_end:
                 self.reset_usage_for_new_period(subscription)
             
             # Check if this is a new conversation (within 24 hours)
@@ -380,7 +395,7 @@ class PricingService:
     def reset_usage_for_new_period(self, subscription: TenantSubscription):
         """Reset usage counters for new billing period"""
         subscription.messages_used_current_period = 0
-        subscription.current_period_start = datetime.utcnow()
+        subscription.current_period_start = self._get_utc_now()
         
         if subscription.billing_cycle == "monthly":
             subscription.current_period_end = subscription.current_period_start + timedelta(days=30)
@@ -399,8 +414,9 @@ class PricingService:
             )
         
         # Check if current period is valid
-        now = datetime.utcnow()
-        if now > subscription.current_period_end:
+        now = self._get_utc_now()
+        period_end = self._ensure_timezone_aware(subscription.current_period_end)
+        if now > period_end:
             self.reset_usage_for_new_period(subscription)
         
         return UsageStatsOut(
@@ -436,8 +452,8 @@ class PricingService:
             plan_id=new_plan_id,
             is_active=True,
             billing_cycle=billing_cycle,
-            current_period_start=datetime.utcnow(),
-            current_period_end=datetime.utcnow() + timedelta(days=30 if billing_cycle == "monthly" else 365),
+            current_period_start=self._get_utc_now(),
+            current_period_end=self._get_utc_now() + timedelta(days=30 if billing_cycle == "monthly" else 365),
             status="active",
             messages_used_current_period=0,
             integrations_count=current_subscription.integrations_count if current_subscription else 0
@@ -526,8 +542,9 @@ class PricingService:
             return {"error": "No subscription found"}
         
         # Calculate days remaining in current period
-        now = datetime.utcnow()
-        days_remaining = (subscription.current_period_end - now).days
+        now = self._get_utc_now()
+        period_end = self._ensure_timezone_aware(subscription.current_period_end)
+        days_remaining = (period_end - now).days
         
         # Get usage logs for current period
         usage_logs = self.db.query(UsageLog).filter(
@@ -564,7 +581,7 @@ class PricingService:
         """
         try:
             # Check if super tenant first
-            from app.tenants.super_tenant_service import SuperTenantService
+            from app.chatbot.super_tenant_service import SuperTenantService
             super_service = SuperTenantService(self.db)
             
             if super_service.is_super_tenant(tenant_id):
@@ -584,7 +601,7 @@ class PricingService:
         """
         try:
             # Check if super tenant first
-            from app.tenants.super_tenant_service import SuperTenantService
+            from app.chatbot.super_tenant_service import SuperTenantService
             super_service = SuperTenantService(self.db)
             
             if super_service.is_super_tenant(tenant_id):

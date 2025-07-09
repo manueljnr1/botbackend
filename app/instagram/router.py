@@ -86,13 +86,13 @@ async def setup_instagram_integration(
 ):
     """Set up Instagram integration for tenant"""
     try:
-        # Get and validate tenant
+        
         tenant = get_tenant_from_api_key(api_key, db)
         
-        # Check integration limits
+       
         check_integration_limit_dependency_with_super_tenant(tenant.id, db)
         
-        # Check if integration already exists
+        
         existing = db.query(InstagramIntegration).filter(
             InstagramIntegration.tenant_id == tenant.id
         ).first()
@@ -103,7 +103,7 @@ async def setup_instagram_integration(
                 detail="Instagram integration already exists for this tenant"
             )
         
-        # Create new integration
+       
         integration = InstagramIntegration(
             tenant_id=tenant.id,
             meta_app_id=integration_data.meta_app_id,
@@ -134,14 +134,14 @@ async def setup_instagram_integration(
                 detail=f"Instagram API connection failed: {connection_msg}"
             )
         
-        # Subscribe to webhooks
+        
         webhook_success = api_service.subscribe_to_webhooks()
         if webhook_success:
             logger.info(f"✅ Webhooks subscribed for tenant {tenant.id}")
         else:
             logger.warning(f"⚠️ Webhook subscription failed for tenant {tenant.id}")
         
-        # Update status to active
+       
         integration.bot_status = "active"
         db.commit()
         
@@ -152,7 +152,7 @@ async def setup_instagram_integration(
         )
         
         # Track integration creation
-        track_integration_created(tenant.id, "instagram", db)
+        # track_integration_created(tenant.id, "instagram", db)
         
         logger.info(f"✅ Instagram integration created for tenant {tenant.id}")
         
