@@ -444,10 +444,12 @@ async def customer_websocket_endpoint(
    tenant_id: int = Query(...),
    db: Session = Depends(get_db)
 ):
-   """WebSocket endpoint for customers"""
    connection_id = None
    try:
-       # Verify conversation exists and belongs to tenant
+       # ✅ ACCEPT CONNECTION FIRST
+       await websocket.accept()
+       
+       # Then validate
        conversation = db.query(LiveChatConversation).filter(
            LiveChatConversation.id == conversation_id,
            LiveChatConversation.tenant_id == tenant_id,
@@ -455,11 +457,12 @@ async def customer_websocket_endpoint(
        ).first()
        
        if not conversation:
+           await websocket.send_json({
+               "type": "error", 
+               "data": {"message": "Conversation not found"}
+           })
            await websocket.close(code=4004, reason="Conversation not found")
            return
-       
-       # Accept the WebSocket connection FIRST
-       await websocket.accept()
        
        # Connect customer
        connection_id = await websocket_manager.connect_customer(
@@ -496,11 +499,17 @@ async def customer_websocket_endpoint(
                break
            except json.JSONDecodeError:
                if connection_id and websocket.client_state.name == "CONNECTED":
-                   await message_handler._send_error(connection_id, "Invalid JSON format")
+                   try:
+                       await message_handler._send_error(connection_id, "Invalid JSON format")
+                   except:
+                       pass
            except Exception as e:
                logger.error(f"Error in customer websocket: {str(e)}")
                if connection_id and websocket.client_state.name == "CONNECTED":
-                   await message_handler._send_error(connection_id, "Message processing failed")
+                   try:
+                       await message_handler._send_error(connection_id, "Message processing failed")
+                   except:
+                       pass
                break
                
    except Exception as e:
@@ -574,7 +583,10 @@ async def agent_websocket_endpoint(
 ):
     connection_id = None
     try:
-        # Verify agent and session
+        # ✅ ACCEPT CONNECTION FIRST - Always accept before any validation
+        await websocket.accept()
+        
+        # Now do validation and send close message if needed
         agent = db.query(Agent).filter(
             Agent.id == agent_id,
             Agent.status == "active",
@@ -582,15 +594,21 @@ async def agent_websocket_endpoint(
         ).first()
         
         if not agent:
+            # Send error message then close gracefully
+            await websocket.send_json({
+                "type": "error",
+                "data": {"message": "Agent not found or inactive"}
+            })
             await websocket.close(code=4004, reason="Agent not found or inactive")
             return
         
-        # ✅ ADD THIS: Accept the WebSocket connection FIRST
-        await websocket.accept()
-        
         # Update agent session with WebSocket
         session_service = AgentSessionService(db)
-        session_service.update_session_status(session_id, "active")
+        try:
+            session_service.update_session_status(session_id, "active")
+        except Exception as e:
+            logger.warning(f"Could not update session status: {str(e)}")
+            # Continue anyway - don't fail the connection for this
         
         # Connect agent
         connection_id = await websocket_manager.connect_agent(
@@ -604,26 +622,31 @@ async def agent_websocket_endpoint(
         message_handler = LiveChatMessageHandler(db, websocket_manager)
         
         # Send initial queue data - FIXED: Serialize datetime objects
-        queue_service = LiveChatQueueService(db)
-        queue_status = queue_service.get_queue_status(agent.tenant_id)
-        
-        # 🔧 SERIALIZE DATETIME OBJECTS BEFORE SENDING
-        serialized_queue_status = serialize_datetime_objects(queue_status)
-        
-        initial_data = {
-            "type": "initial_data",
-            "data": {
-                "queue_status": serialized_queue_status,
-                "agent_info": {
-                    "agent_id": agent.id,
-                    "display_name": agent.display_name,
-                    "tenant_id": agent.tenant_id
+        try:
+            queue_service = LiveChatQueueService(db)
+            queue_status = queue_service.get_queue_status(agent.tenant_id)
+            
+            # 🔧 SERIALIZE DATETIME OBJECTS BEFORE SENDING
+            serialized_queue_status = serialize_datetime_objects(queue_status)
+            
+            initial_data = {
+                "type": "initial_data",
+                "data": {
+                    "queue_status": serialized_queue_status,
+                    "agent_info": {
+                        "agent_id": agent.id,
+                        "display_name": agent.display_name,
+                        "tenant_id": agent.tenant_id
+                    }
                 }
             }
-        }
-        
-        # Send initial data
-        await websocket.send_json(initial_data)
+            
+            # Send initial data with safety check
+            if websocket.client_state.name == "CONNECTED":
+                await websocket.send_json(initial_data)
+        except Exception as e:
+            logger.error(f"Error sending initial data: {str(e)}")
+            # Don't fail the connection for this
         
         # Listen for messages
         while True:
@@ -636,14 +659,24 @@ async def agent_websocket_endpoint(
                 logger.info(f"Agent disconnected: {agent_id}")
                 break
             except json.JSONDecodeError:
-                await message_handler._send_error(connection_id, "Invalid JSON format")
+                if connection_id and websocket.client_state.name == "CONNECTED":
+                    try:
+                        await message_handler._send_error(connection_id, "Invalid JSON format")
+                    except:
+                        pass  # Connection might be closed
             except Exception as e:
-                logger.error(f"Error in agent websocket: {str(e)}")
-                await message_handler._send_error(connection_id, "Message processing failed")
+                logger.error(f"Error in agent websocket message loop: {str(e)}")
+                if connection_id and websocket.client_state.name == "CONNECTED":
+                    try:
+                        await message_handler._send_error(connection_id, "Message processing failed")
+                    except:
+                        pass  # Connection might be closed
+                # Don't break here - continue listening unless it's a WebSocketDisconnect
                 
     except Exception as e:
         logger.error(f"Error in agent websocket endpoint: {str(e)}")
     finally:
+        # Clean up connection
         if connection_id:
             await websocket_manager.disconnect(connection_id)
         
@@ -652,7 +685,9 @@ async def agent_websocket_endpoint(
             session_service = AgentSessionService(db)
             session_service.update_session_status(session_id, "offline")
         except Exception as e:
-            logger.error(f"Error updating agent session: {str(e)}")
+            logger.error(f"Error updating agent session on disconnect: {str(e)}")
+
+
 
 
 @router.post("/assign-conversation")
