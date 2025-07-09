@@ -329,6 +329,7 @@ class UnifiedIntelligentEngine:
             }
         
         try:
+            time_filtered_history = []
             # 🆕 TIME-BASED FILTERING (3-hour window)
             current_time = utc_now()
             # Replace 'some_db_datetime' with a valid datetime object from the conversation history

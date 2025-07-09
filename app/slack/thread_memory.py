@@ -166,10 +166,13 @@ class SlackThreadMemoryManager:
                 user_preferences="{}",
                 message_count=0
             )
-            self.db.add(thread_memory)
-            self.db.commit()
-            
-            logger.info(f"Created new thread context: {thread_id}")
+            try:
+                self.db.add(thread_memory)
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Error creating thread memory: {e}")
+                raise
         
         # Cache the context
         self.memory_cache[thread_id] = context
@@ -275,7 +278,12 @@ class SlackThreadMemoryManager:
                 
                 channel_data.last_activity = datetime.utcnow()
             
-            self.db.commit()
+            try:
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Error updating channel context: {e}")
+                raise
             
             # Clear cache to force reload
             if channel_id in self.channel_cache:
@@ -360,8 +368,13 @@ class SlackThreadMemoryManager:
                 thread_memory.message_count = len(context.messages)
                 thread_memory.last_activity = context.last_activity or datetime.utcnow()
                 
-                self.db.commit()
-                logger.debug(f"Saved thread context: {context.thread_id}")
+                try:
+                    self.db.commit()
+                    logger.debug(f"Saved thread context: {context.thread_id}")
+                except Exception as e:
+                    self.db.rollback()
+                    logger.error(f"Error saving thread context: {e}")
+                    raise
                 
         except Exception as e:
             logger.error(f"Error saving thread context: {e}")
@@ -380,7 +393,12 @@ class SlackThreadMemoryManager:
             for thread in old_threads:
                 thread.is_active = False
             
-            self.db.commit()
+            try:
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Error cleaning up old threads: {e}")
+                raise
             
             # Clear from cache
             self.memory_cache.clear()
@@ -425,6 +443,7 @@ class SlackThreadMemoryManager:
             }
             
         except Exception as e:
+            self.db.rollback()
             logger.error(f"Error getting thread statistics: {e}")
             return {}
     

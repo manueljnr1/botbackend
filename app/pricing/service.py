@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import HTTPException, status
 import logging
+import pytz
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -31,10 +32,9 @@ class PricingService:
     def _ensure_timezone_aware(self, dt: datetime) -> datetime:
         """Ensure a datetime is timezone-aware (assume UTC if naive)"""
         if dt.tzinfo is None:
-            import pytz
             return pytz.UTC.localize(dt)
         return dt.astimezone(pytz.UTC)
-    
+        
     def create_default_plans(self):
         """Create default pricing plans if they don't exist"""
         
