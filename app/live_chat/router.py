@@ -708,16 +708,25 @@ async def agent_websocket_endpoint(
                     try:
                         await message_handler._send_error(connection_id, "Invalid JSON format")
                     except:
-                        pass  # Connection might be closed
+                        break  # Exit if we can't send error message
+                else:
+                    break  # Exit if connection is not valid
             except Exception as e:
                 logger.error(f"Error in agent websocket message loop: {str(e)}")
-                if connection_id and websocket.client_state.name == "CONNECTED":
+                # 🔧 FIXED: Break the loop on any connection-related error
+                if ("not connected" in str(e).lower() or 
+                    "connection" in str(e).lower() or
+                    websocket.client_state.name != "CONNECTED"):
+                    logger.info(f"WebSocket connection lost for agent {agent_id}")
+                    break
+                
+                # For other errors, try to send error message and continue
+                if connection_id:
                     try:
                         await message_handler._send_error(connection_id, "Message processing failed")
                     except:
-                        pass  # Connection might be closed
-                # Don't break here - continue listening unless it's a WebSocketDisconnect
-                
+                        break  # Exit if we can't send error message
+                        
     except Exception as e:
         logger.error(f"Error in agent websocket endpoint: {str(e)}")
     finally:
