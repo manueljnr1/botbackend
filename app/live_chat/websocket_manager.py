@@ -61,32 +61,44 @@ class Connection:
         self.is_active = True
     
     async def send_message(self, message: WebSocketMessage):
-        """Send message to this connection"""
+        """Send message to this connection - IMPROVED VERSION"""
         try:
             # Check if connection is still active and WebSocket is open
-            if self.is_active and self.websocket.client_state.name == "CONNECTED":
+            if (self.is_active and 
+                hasattr(self.websocket, 'client_state') and 
+                self.websocket.client_state.name == "CONNECTED"):
+                
                 await self.websocket.send_text(message.to_json())
                 self.last_activity = datetime.utcnow()
+                return True
             else:
-                logger.warning(f"Attempted to send message to closed connection {self.connection_id}")
+                logger.debug(f"Connection {self.connection_id} is not active or not connected")
                 self.is_active = False
+                return False
         except Exception as e:
             logger.error(f"Error sending message to {self.connection_id}: {str(e)}")
             self.is_active = False
+            return False
 
     async def send_json(self, data: dict):
-        """Send JSON data directly"""
+        """Send JSON data directly - IMPROVED VERSION"""
         try:
             # Check if connection is still active and WebSocket is open
-            if self.is_active and self.websocket.client_state.name == "CONNECTED":
+            if (self.is_active and 
+                hasattr(self.websocket, 'client_state') and 
+                self.websocket.client_state.name == "CONNECTED"):
+                
                 await self.websocket.send_json(data)
                 self.last_activity = datetime.utcnow()
+                return True
             else:
-                logger.warning(f"Attempted to send JSON to closed connection {self.connection_id}")
+                logger.debug(f"Connection {self.connection_id} is not active or not connected")
                 self.is_active = False
+                return False
         except Exception as e:
             logger.error(f"Error sending JSON to {self.connection_id}: {str(e)}")
             self.is_active = False
+            return False
 
 
 class LiveChatWebSocketManager:
@@ -235,65 +247,83 @@ class LiveChatWebSocketManager:
     
     async def send_to_conversation(self, conversation_id: str, message: WebSocketMessage, 
                                  exclude_connection: str = None):
-        """Send message to all connections in a conversation"""
+        """Send message to all connections in a conversation - IMPROVED VERSION"""
         async with self._lock:
             connection_ids = self.connections_by_conversation.get(conversation_id, set()).copy()
         
         if exclude_connection:
             connection_ids.discard(exclude_connection)
         
-        # Send to all connections
+        # Send to all connections and track failed ones
+        failed_connections = []
         for conn_id in connection_ids:
             connection = self.connections.get(conn_id)
             if connection and connection.is_active:
-                try:
-                    await connection.send_message(message)
-                except Exception as e:
-                    logger.error(f"Error sending to conversation {conversation_id}: {str(e)}")
-                    await self.disconnect(conn_id)
+                success = await connection.send_message(message)
+                if not success:
+                    failed_connections.append(conn_id)
+        
+        # Clean up failed connections
+        for conn_id in failed_connections:
+            await self.disconnect(conn_id)
+
+
     
     async def send_to_agent(self, agent_id: int, message: WebSocketMessage):
-        """Send message directly to an agent"""
+        """Send message directly to an agent - IMPROVED VERSION"""
         connection_id = self.agent_connections.get(agent_id)
         if connection_id:
             connection = self.connections.get(connection_id)
             if connection and connection.is_active:
-                try:
-                    await connection.send_message(message)
-                except Exception as e:
-                    logger.error(f"Error sending to agent {agent_id}: {str(e)}")
+                success = await connection.send_message(message)
+                if not success:
                     await self.disconnect(connection_id)
+            else:
+                # Clean up stale agent connection reference
+                self.agent_connections.pop(agent_id, None)
+
+
     
     async def send_to_customer(self, customer_id: str, tenant_id: int, message: WebSocketMessage):
-        """Send message to a specific customer"""
+        """Send message to a specific customer - IMPROVED VERSION"""
         user_key = f"{ConnectionType.CUSTOMER}_{customer_id}"
         connection_ids = self.connections_by_user.get(user_key, set()).copy()
         
+        failed_connections = []
         for conn_id in connection_ids:
             connection = self.connections.get(conn_id)
             if connection and connection.is_active and connection.tenant_id == tenant_id:
-                try:
-                    await connection.send_message(message)
-                except Exception as e:
-                    logger.error(f"Error sending to customer {customer_id}: {str(e)}")
-                    await self.disconnect(conn_id)
+                success = await connection.send_message(message)
+                if not success:
+                    failed_connections.append(conn_id)
+        
+        # Clean up failed connections
+        for conn_id in failed_connections:
+            await self.disconnect(conn_id)
+
+
     
     async def broadcast_to_tenant_agents(self, tenant_id: int, message: WebSocketMessage, 
                                        exclude_agent: int = None):
-        """Broadcast message to all agents of a tenant"""
+        """Broadcast message to all agents of a tenant - IMPROVED VERSION"""
         async with self._lock:
             connection_ids = self.connections_by_tenant.get(tenant_id, set()).copy()
         
+        failed_connections = []
         for conn_id in connection_ids:
             connection = self.connections.get(conn_id)
             if (connection and connection.is_active and 
                 connection.connection_type == ConnectionType.AGENT and
                 (exclude_agent is None or int(connection.user_id) != exclude_agent)):
-                try:
-                    await connection.send_message(message)
-                except Exception as e:
-                    logger.error(f"Error broadcasting to tenant {tenant_id}: {str(e)}")
-                    await self.disconnect(conn_id)
+                
+                success = await connection.send_message(message)
+                if not success:
+                    failed_connections.append(conn_id)
+        
+        # Clean up failed connections
+        for conn_id in failed_connections:
+            await self.disconnect(conn_id)
+
     
     async def add_connection_to_conversation(self, connection_id: str, conversation_id: str):
         """Add a connection to a conversation"""
@@ -307,6 +337,8 @@ class LiveChatWebSocketManager:
                     self.connections_by_conversation[conversation_id] = set()
                 self.connections_by_conversation[conversation_id].add(connection_id)
     
+
+
     async def remove_connection_from_conversation(self, connection_id: str, conversation_id: str):
         """Remove a connection from a conversation"""
         async with self._lock:
@@ -319,6 +351,7 @@ class LiveChatWebSocketManager:
                     self.connections_by_conversation[conversation_id].discard(connection_id)
                     if not self.connections_by_conversation[conversation_id]:
                         del self.connections_by_conversation[conversation_id]
+    
     
     def get_connection_stats(self, tenant_id: int = None) -> Dict:
         """Get connection statistics"""
