@@ -27,8 +27,13 @@ class ResendEmailService:
         template_dir.mkdir(exist_ok=True)
         self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
     
+
+
     async def send_agent_invitation(self, to_email: str, agent_name: str, 
-                                  business_name: str, invite_url: str) -> Dict:
+                              business_name: str, invite_url: str,
+                              role_title: str = "Support Member",
+                              role_description: str = "You've been invited to join as a Support Member", 
+                              responsibilities: List[str] = None) -> Dict:
         """Send agent invitation email"""
         try:
             if not self.enabled:
@@ -38,22 +43,33 @@ class ResendEmailService:
                     "error": "Email service not configured"
                 }
             
+            # Default responsibilities if none provided
+            if responsibilities is None:
+                responsibilities = [
+                    "Handle customer conversations",
+                    "Provide excellent customer service", 
+                    "Use our live chat system efficiently"
+                ]
+
             # Render email template
             html_content = self._render_agent_invitation_template(
                 agent_name=agent_name,
                 business_name=business_name,
-                invite_url=invite_url
+                invite_url=invite_url,
+                role_title=role_title,           # Add this
+                role_description=role_description, # Add this
+                responsibilities=responsibilities  # Add this
             )
             
             # Send email via Resend
             params = {
-                "from": f"{self.from_name} <{self.from_email}>",
+                "from": f"{business_name} Support Team <{self.from_email}>",
                 "to": [to_email],
                 "subject": f"Join {business_name}'s Support Team - Set Up Your Agent Account",
                 "html": html_content,
                 "tags": [
                     {"name": "type", "value": "agent_invitation"},
-                    {"name": "business", "value": business_name}
+                    {"name": "business", "value": self._sanitize_tag_value(business_name)}  # ← FIX THIS
                 ]
             }
             
@@ -75,30 +91,137 @@ class ResendEmailService:
                 "error": str(e),
                 "to_email": to_email
             }
+        
+        
     
+    # def _render_agent_invitation_template(self, agent_name: str, business_name: str, 
+    #                                     invite_url: str, role_title: str = "Support Member",
+    #                                     role_description: str = "You've been invited to join as a Support Member",
+    #                                     responsibilities: List[str] = None) -> str:
+    #     """Render the agent invitation email template"""
+        
+    #     if responsibilities is None:
+    #         responsibilities = [
+    #             "Handle customer conversations",
+    #             "Provide excellent customer service",
+    #             "Use our live chat system efficiently"
+    #         ]
+        
+    #     # Try to load custom template first, fall back to default
+    #     try:
+    #         template = self.jinja_env.get_template("agent_invitation.html")
+    #         return template.render(
+    #             agent_name=agent_name,
+    #             business_name=business_name,
+    #             invite_url=invite_url,
+    #             role_title=role_title,
+    #             role_description=role_description,
+    #             responsibilities=responsibilities,
+    #             expires_in="7 days",
+    #             support_email=self.from_email
+    #         )
+    #     except Exception as e:
+    #         logger.warning(f"Template loading failed: {e}, using default template")
+    #         # Fallback to inline template
+    #         return self._get_default_invitation_template(
+    #             agent_name, business_name, invite_url, role_title, role_description, responsibilities
+    #         )
+    
+
+
     def _render_agent_invitation_template(self, agent_name: str, business_name: str, 
-                                        invite_url: str) -> str:
+                                        invite_url: str, role_title: str = "Support Member",
+                                        role_description: str = "You've been invited to join as a Support Member",
+                                        responsibilities: List[str] = None) -> str:
         """Render the agent invitation email template"""
+        
+        if responsibilities is None:
+            responsibilities = [
+                "Handle customer conversations",
+                "Provide excellent customer service",
+                "Use our live chat system efficiently"
+            ]
+        
+        logger.info(f"🔧 DEBUG: Starting template render for {agent_name}")
+        logger.info(f"🔧 DEBUG: Role title: {role_title}")
+        logger.info(f"🔧 DEBUG: Template dir: {self.jinja_env.loader.searchpath}")
         
         # Try to load custom template first, fall back to default
         try:
             template = self.jinja_env.get_template("agent_invitation.html")
-            return template.render(
+            result = template.render(
                 agent_name=agent_name,
                 business_name=business_name,
                 invite_url=invite_url,
+                role_title=role_title,
+                role_description=role_description,
+                responsibilities=responsibilities,
                 expires_in="7 days",
                 support_email=self.from_email
             )
-        except Exception:
-            # Fallback to inline template
-            return self._get_default_invitation_template(
-                agent_name, business_name, invite_url
-            )
-    
+            logger.info("✅ Jinja2 template loaded successfully")
+            return result
+        except Exception as e:
+            logger.warning(f"❌ Template loading failed: {e}")
+            logger.info("🔄 Falling back to default template")
+            
+            # Use a simple, working default template
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Join {business_name}</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .container {{ background: white; padding: 30px; border-radius: 8px; }}
+                    .button {{ display: inline-block; background: #6d28d9; color: white; text-decoration: none; padding: 15px 30px; border-radius: 5px; margin: 20px 0; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Welcome to {business_name}!</h1>
+                    <p><strong>{role_description}</strong></p>
+                    <p>Hi {agent_name},</p>
+                    <p>You've been invited to join <strong>{business_name}</strong> as a <strong>{role_title}</strong>.</p>
+                    
+                    <h3>Your responsibilities:</h3>
+                    <ul>
+                        {''.join([f'<li>{resp}</li>' for resp in responsibilities])}
+                    </ul>
+                    
+                    <div style="text-align: center;">
+                        <a href="{invite_url}" class="button">Accept Invitation & Set Password</a>
+                    </div>
+                    
+                    <p>This invitation expires in 7 days. Please complete your setup soon!</p>
+                    <p>Welcome to the team!</p>
+                    <p>Best regards,<br>The {business_name} Team</p>
+                </div>
+            </body>
+            </html>
+            """
+
+
+
+
+
     def _get_default_invitation_template(self, agent_name: str, business_name: str, 
-                                       invite_url: str) -> str:
+                                    invite_url: str, role_title: str = "Support Member",
+                                    role_description: str = "You've been invited to join as a Support Member",
+                                    responsibilities: List[str] = None) -> str:
         """Default agent invitation email template"""
+        
+        if responsibilities is None:
+            responsibilities = [
+                "Handle customer conversations",
+                "Provide excellent customer service",
+                "Use our live chat system efficiently"
+            ]
+        
+        # Create responsibilities HTML
+        responsibilities_html = "".join([f"<li>{resp}</li>" for resp in responsibilities])
+        
         return f"""
         <!DOCTYPE html>
         <html lang="en">
@@ -180,20 +303,17 @@ class ResendEmailService:
                 <div class="header">
                     <div class="logo">🎧</div>
                     <h1>Welcome to {business_name}!</h1>
-                    <p>You've been invited to join our customer support team</p>
+                    <p>{role_description}</p>
                 </div>
                 
                 <p>Hi {agent_name},</p>
                 
-                <p>Great news! You've been invited to join <strong>{business_name}</strong> as a customer support agent. You'll be helping customers through our live chat system.</p>
+                <p>Great news! You've been invited to join <strong>{business_name}</strong> as a <strong>{role_title}</strong>. You'll be helping customers through our live chat system.</p>
                 
                 <div class="info-box">
                     <h3>🚀 What you'll be doing:</h3>
                     <ul>
-                        <li>Respond to customer inquiries in real-time</li>
-                        <li>Help resolve customer issues and questions</li>
-                        <li>Work with a modern, easy-to-use chat interface</li>
-                        <li>Make a real difference in customer satisfaction</li>
+                        {responsibilities_html}
                     </ul>
                 </div>
                 
@@ -282,7 +402,7 @@ class ResendEmailService:
             """
             
             params = {
-                "from": f"{self.from_name} <{self.from_email}>",
+                "from": f"{business_name} Support Team <{self.from_email}>",
                 "to": [to_email],
                 "subject": f"Welcome to {business_name} - Account Activated!",
                 "html": html_content,
@@ -346,13 +466,13 @@ class ResendEmailService:
             """
             
             params = {
-                "from": f"{self.from_name} <{self.from_email}>",
+                "from": f"{business_name} Support Team <{self.from_email}>",
                 "to": [to_email],
                 "subject": f"Account Access Update - {business_name}",
                 "html": html_content,
                 "tags": [
                     {"name": "type", "value": "account_revoked"},
-                    {"name": "business", "value": business_name}
+                    {"name": "business", "value": self._sanitize_tag_value(business_name)}
                 ]
             }
             
@@ -399,3 +519,205 @@ class ResendEmailService:
                 "success": False,
                 "error": f"Email service test failed: {str(e)}"
             }
+
+
+    async def send_promotion_notification(self, to_email: str, agent_name: str, 
+                                        business_name: str, new_role: str, 
+                                        new_permissions: List) -> Dict:
+        """Send email notification about agent promotion"""
+        try:
+            if not self.enabled:
+                logger.warning("Email service disabled - cannot send promotion notification")
+                return {
+                    "success": False,
+                    "error": "Email service not configured"
+                }
+            
+            # Render email template
+            html_content = self._render_promotion_template(
+                agent_name=agent_name,
+                business_name=business_name,
+                new_role=new_role,
+                new_permissions=new_permissions
+            )
+            
+            # Send email via Resend
+            params = {
+                "from": f"{business_name} Support Team <{self.from_email}>",
+                "to": [to_email],
+                "subject": f"Congratulations! You've been promoted at {business_name}",
+                "html": html_content,
+                "tags": [
+                    {"name": "type", "value": "agent_promotion"},
+                    {"name": "business", "value": self._sanitize_tag_value(business_name)},
+                    {"name": "new_role", "value": self._sanitize_tag_value(new_role)}
+                ]
+            }
+            
+            response = resend.Emails.send(params)
+            
+            logger.info(f"✅ Promotion notification sent to {to_email}, ID: {response.get('id')}")
+            
+            return {
+                "success": True,
+                "email_id": response.get("id"),
+                "to_email": to_email,
+                "message": "Promotion notification sent successfully"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to send promotion notification to {to_email}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "to_email": to_email
+            }
+
+    def _render_promotion_template(self, agent_name: str, business_name: str, 
+                                new_role: str, new_permissions: List) -> str:
+        """Render the promotion notification email template"""
+        
+        # Format permissions list
+        permissions_html = ""
+        if new_permissions:
+            permissions_list = [perm.value.replace('_', ' ').title() for perm in new_permissions[:10]]  # Limit to 10
+            permissions_html = "<ul>" + "".join([f"<li>{perm}</li>" for perm in permissions_list]) + "</ul>"
+            if len(new_permissions) > 10:
+                permissions_html += f"<p><em>...and {len(new_permissions) - 10} more permissions</em></p>"
+        
+        role_title = new_role.replace('_', ' ').title()
+        
+        return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Congratulations on Your Promotion!</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                    background-color: #f9f9f9;
+                }}
+                .container {{
+                    background-color: white;
+                    padding: 40px;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 30px;
+                }}
+                .celebration {{
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    color: white;
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 20px;
+                    font-size: 36px;
+                }}
+                .success-box {{
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    color: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    text-align: center;
+                }}
+                .permissions-box {{
+                    background-color: #f3f4f6;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                    border-left: 4px solid #10b981;
+                }}
+                .footer {{
+                    text-align: center;
+                    margin-top: 30px;
+                    color: #6b7280;
+                    font-size: 14px;
+                }}
+                ul {{
+                    margin: 10px 0;
+                    padding-left: 20px;
+                }}
+                li {{
+                    margin: 5px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="celebration">🎉</div>
+                    <h1>Congratulations {agent_name}!</h1>
+                    <p>You've been promoted at {business_name}</p>
+                </div>
+                
+                <div class="success-box">
+                    <h2>🚀 Your New Role: {role_title}</h2>
+                    <p>Your promotion is effective immediately!</p>
+                </div>
+                
+                <p>We're excited to announce your promotion to <strong>{role_title}</strong>! This promotion recognizes your excellent work and dedication to providing outstanding customer support.</p>
+                
+                <div class="permissions-box">
+                    <h3>🔑 Your New Permissions & Responsibilities:</h3>
+                    {permissions_html if permissions_html else "<p>You now have enhanced access and responsibilities in your new role.</p>"}
+                </div>
+                
+                <p><strong>What this means for you:</strong></p>
+                <ul>
+                    <li>Increased responsibilities and autonomy</li>
+                    <li>Access to additional system features</li>
+                    <li>Opportunity to mentor and guide team members</li>
+                    <li>Enhanced role in customer satisfaction initiatives</li>
+                </ul>
+                
+                <p>Your new permissions are active immediately. Please log in to your agent dashboard to explore your enhanced capabilities.</p>
+                
+                <p>Congratulations again on this well-deserved promotion! We look forward to your continued success in your new role.</p>
+                
+                <p>Best regards,<br>
+                The {business_name} Management Team</p>
+                
+                <div class="footer">
+                    <p>This promotion notification was sent to {agent_name} at {business_name}</p>
+                    <p>Welcome to your new role as {role_title}!</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+    
+    def _sanitize_tag_value(self, value: str) -> str:
+        """Sanitize tag values to only contain ASCII letters, numbers, underscores, or dashes"""
+        if not value:
+            return "unknown"
+        
+        import re
+        # Replace spaces and special characters with underscores
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', value)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        
+        if not sanitized:
+            return "unknown"
+        
+        return sanitized[:50]
+
+
+# Create the email service instance
+email_service = ResendEmailService()

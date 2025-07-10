@@ -7,6 +7,8 @@ from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from pydantic import BaseModel, EmailStr, validator
+import resend
+
 
 from app.live_chat.permissions import (
     AgentRole, AgentPermission, PermissionService, 
@@ -439,7 +441,7 @@ class AgentInvitationService:
     async def _send_role_invitation_email(self, agent: Agent, role: AgentRole) -> bool:
         """Send role-specific invitation email"""
         try:
-            from app.email.resend_service import email_service
+            from app.live_chat.email.resend_service import ResendEmailService
             from app.config import settings
             
             # Get tenant info
@@ -487,12 +489,13 @@ class AgentInvitationService:
             role_info = role_messages.get(role, role_messages[AgentRole.MEMBER])
             
             # Send invitation email (you'll need to implement this in your email service)
+            email_service = ResendEmailService()
             result = await email_service.send_agent_invitation(
                 to_email=agent.email,
                 agent_name=agent.full_name,
                 business_name=tenant.business_name or tenant.name,
                 invite_url=invite_url,
-                role_title=role_info["title"],
+                role_title=role_info["title"], 
                 role_description=role_info["description"],
                 responsibilities=role_info["responsibilities"]
             )
@@ -504,7 +507,35 @@ class AgentInvitationService:
             return False
     
    
-
+    async def _send_promotion_notification(self, agent: Agent, new_role: AgentRole):
+        """Send email notification about promotion"""
+        try:
+            from app.live_chat.email.resend_service import ResendEmailService
+            
+            # Create email service instance
+            email_service = ResendEmailService()
+            
+            tenant = self.db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+            
+            if not tenant:
+                logger.error(f"Tenant not found for agent {agent.id}")
+                return False
+            
+            await email_service.send_promotion_notification(
+                to_email=agent.email,
+                agent_name=agent.full_name,
+                business_name=tenant.business_name or tenant.name,
+                new_role=new_role.value,
+                new_permissions=self.permission_service.get_agent_permissions(agent)
+            )
+            
+            logger.info(f"Promotion notification sent to {agent.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending promotion notification: {str(e)}")
+            # Don't fail promotion for email failure
+            return False
 
 
 
@@ -579,21 +610,5 @@ class AgentInvitationService:
 
 
     
-    async def _send_promotion_notification(self, agent: Agent, new_role: AgentRole):
-        """Send email notification about promotion"""
-        try:
-            from app.email.resend_service import email_service
-            
-            tenant = self.db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
-            
-            await email_service.send_promotion_notification(
-                to_email=agent.email,
-                agent_name=agent.full_name,
-                business_name=tenant.business_name or tenant.name,
-                new_role=new_role.value,
-                new_permissions=self.permission_service.get_agent_permissions(agent)
-            )
-            
-        except Exception as e:
-            logger.error(f"Error sending promotion notification: {str(e)}")
-            # Don't fail promotion for email failure
+   
+    

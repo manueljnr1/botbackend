@@ -54,13 +54,13 @@ class ResendEmailService:
             
             # Send email via Resend with dynamic FROM_NAME
             params = {
-                "from": f"{dynamic_from_name} <{self.from_email}>",  # 🎯 Dynamic name here
+                "from": f"{self.from_name} <{self.from_email}>",
                 "to": [to_email],
                 "subject": f"Join {business_name}'s Support Team - Set Up Your Agent Account",
                 "html": html_content,
                 "tags": [
                     {"name": "type", "value": "agent_invitation"},
-                    {"name": "business", "value": business_name}
+                    {"name": "business", "value": self._sanitize_tag_value(business_name)}  # ← FIX THIS
                 ]
             }
             
@@ -508,6 +508,28 @@ class ResendEmailService:
                 "error": f"Unexpected error: {str(e)}"
             }
 
+
+
+    def _sanitize_tag_value(self, value: str) -> str:
+        """Sanitize tag values to only contain ASCII letters, numbers, underscores, or dashes"""
+        if not value:
+            return "unknown"
+        
+        # Replace spaces and special characters with underscores
+        import re
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', value)
+        
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        
+        # Ensure it's not empty and not too long
+        if not sanitized:
+            return "unknown"
+        
+        return sanitized[:50]  # Limit length to 50 characters
 
 
 # Create the email service instance

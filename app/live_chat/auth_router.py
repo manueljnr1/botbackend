@@ -134,6 +134,8 @@ async def invite_agent_with_role(
     except Exception as e:
         logger.error(f"Error in tenant invite agent with role: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to invite agent")
+    
+    
 
 @router.post("/agent-invite-with-role", response_model=AgentInviteResponse)
 @require_permission(AgentPermission.INVITE_AGENTS)
