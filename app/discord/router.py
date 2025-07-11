@@ -25,7 +25,7 @@ from app.tenants.router import get_tenant_from_api_key
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Global bot manager instance
+
 bot_manager: Optional[DiscordBotManager] = None
 
 def get_bot_manager():
