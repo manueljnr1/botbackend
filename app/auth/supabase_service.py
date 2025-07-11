@@ -267,6 +267,201 @@ class SupabaseAuthService:
                 "error": friendly_error
             }
 
+    # 📧 NEW: Email confirmation methods
+    async def create_user_with_confirmation(
+        self, 
+        email: str, 
+        password: str,
+        confirmation_url: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create user with email confirmation required"""
+        try:
+            logger.info(f"📧 Creating user with email confirmation: {email}")
+            
+            if not email or not password:
+                return {
+                    "success": False,
+                    "error": "Email and password are required"
+                }
+            
+            if len(password) < 6:
+                return {
+                    "success": False,
+                    "error": "Password must be at least 6 characters"
+                }
+            
+            # Create user with email confirmation enabled (unconfirmed initially)
+            auth_response = self.admin_client.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": False,  # Important: User starts unconfirmed
+                "user_metadata": metadata or {},
+                "app_metadata": {
+                    "provider": "email",
+                    "providers": ["email"]
+                }
+            })
+            
+            if auth_response.user:
+                logger.info(f"✅ User created successfully (unconfirmed): {auth_response.user.id}")
+                
+                # Send confirmation email
+                confirmation_result = await self.send_confirmation_email(
+                    email=email,
+                    confirmation_url=confirmation_url
+                )
+                
+                if not confirmation_result["success"]:
+                    logger.warning(f"⚠️ User created but confirmation email failed: {confirmation_result.get('error')}")
+                
+                return {
+                    "success": True,
+                    "user": auth_response.user,
+                    "confirmation_email_sent": confirmation_result["success"],
+                    "message": "User created successfully. Please check your email for confirmation link."
+                }
+            else:
+                logger.error("❌ User creation failed - no user returned")
+                return {
+                    "success": False,
+                    "error": "User creation failed"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating user with confirmation: {str(e)}")
+            
+            # Handle common Supabase errors
+            error_message = str(e).lower()
+            if "already registered" in error_message or "email" in error_message:
+                friendly_error = "Email already registered"
+            elif "password" in error_message:
+                friendly_error = "Invalid password format"
+            elif "rate" in error_message:
+                friendly_error = "Too many registration attempts"
+            else:
+                friendly_error = str(e)
+            
+            return {
+                "success": False,
+                "error": friendly_error
+            }
+    
+    async def send_confirmation_email(
+        self, 
+        email: str, 
+        confirmation_url: str
+    ) -> Dict[str, Any]:
+        """Send email confirmation link"""
+        try:
+            logger.info(f"📧 Sending confirmation email to: {email}")
+            
+            # Use public client to send confirmation email
+            response = self.public_client.auth.resend({
+                "type": "signup",
+                "email": email,
+                "options": {
+                    "redirect_to": confirmation_url
+                }
+            })
+            
+            logger.info(f"✅ Confirmation email sent successfully to: {email}")
+            return {
+                "success": True,
+                "message": "Confirmation email sent successfully"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending confirmation email: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def resend_confirmation_email(
+        self, 
+        email: str, 
+        confirmation_url: str
+    ) -> Dict[str, Any]:
+        """Resend confirmation email"""
+        try:
+            logger.info(f"📧 Resending confirmation email to: {email}")
+            
+            response = self.public_client.auth.resend({
+                "type": "signup",
+                "email": email,
+                "options": {
+                    "redirect_to": confirmation_url
+                }
+            })
+            
+            logger.info(f"✅ Confirmation email resent successfully to: {email}")
+            return {
+                "success": True,
+                "message": "Confirmation email resent successfully"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error resending confirmation email: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def verify_email_confirmation(self, token: str) -> Dict[str, Any]:
+        """Verify email confirmation token and activate user"""
+        try:
+            logger.info(f"🔍 Verifying email confirmation token...")
+            
+            # Use public client to verify the token
+            verification_response = self.public_client.auth.verify_otp({
+                "token_hash": token,
+                "type": "email"
+            })
+            
+            if verification_response.user and verification_response.session:
+                logger.info(f"✅ Email confirmation successful for user: {verification_response.user.id}")
+                
+                # Update user to mark as email confirmed using admin client
+                try:
+                    self.admin_client.auth.admin.update_user_by_id(
+                        verification_response.user.id,
+                        {"email_confirm": True}
+                    )
+                    logger.info("✅ User marked as email confirmed")
+                except Exception as update_error:
+                    logger.warning(f"⚠️ Failed to update email_confirm status: {update_error}")
+                
+                return {
+                    "success": True,
+                    "user": verification_response.user,
+                    "session": verification_response.session,
+                    "message": "Email confirmed successfully"
+                }
+            else:
+                logger.warning("❌ Email confirmation failed - no user or session returned")
+                return {
+                    "success": False,
+                    "error": "Email confirmation failed"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error verifying email confirmation: {str(e)}")
+            
+            # Handle common errors
+            error_message = str(e).lower()
+            if "invalid" in error_message or "expired" in error_message:
+                friendly_error = "Invalid or expired confirmation token"
+            elif "already" in error_message:
+                friendly_error = "Email already confirmed"
+            else:
+                friendly_error = "Email confirmation failed"
+            
+            return {
+                "success": False,
+                "error": friendly_error
+            }
+
     async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
         """
         Send password reset email - uses public client
@@ -378,6 +573,38 @@ class DummySupabaseService:
     async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """Dummy create user method"""
         logger.warning("⚠️ Using dummy Supabase service - create_user")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def create_user_with_confirmation(self, email: str, password: str, confirmation_url: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Dummy create user with confirmation method"""
+        logger.warning("⚠️ Using dummy Supabase service - create_user_with_confirmation")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def send_confirmation_email(self, email: str, confirmation_url: str) -> Dict[str, Any]:
+        """Dummy send confirmation email method"""
+        logger.warning("⚠️ Using dummy Supabase service - send_confirmation_email")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def resend_confirmation_email(self, email: str, confirmation_url: str) -> Dict[str, Any]:
+        """Dummy resend confirmation email method"""
+        logger.warning("⚠️ Using dummy Supabase service - resend_confirmation_email")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+    
+    async def verify_email_confirmation(self, token: str) -> Dict[str, Any]:
+        """Dummy verify email confirmation method"""
+        logger.warning("⚠️ Using dummy Supabase service - verify_email_confirmation")
         return {
             "success": False,
             "error": "Supabase not configured"

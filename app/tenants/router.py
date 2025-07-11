@@ -437,9 +437,153 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
 
 
 
+# @router.post("/register", response_model=TenantOut)
+# async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(get_db)):
+#     """Tenant Registration with secure random ID - UPDATED VERSION"""
+    
+#     supabase_user_id = None
+    
+#     try:
+#         logger.info(f"Starting registration for: {tenant.name} ({tenant.email}) - Business: {tenant.business_name}")
+        
+#         # Step 1: Validate inputs
+#         normalized_email = tenant.email.lower().strip()
+#         existing_email = db.query(Tenant).filter(
+#             func.lower(Tenant.email) == normalized_email
+#         ).first()
+#         if existing_email:
+#             logger.warning(f"Email already registered: {tenant.email}")
+#             raise HTTPException(status_code=400, detail="Email already registered")
+        
+#         existing_name = db.query(Tenant).filter(Tenant.name == tenant.name).first()
+#         if existing_name:
+#             logger.warning(f"Username already taken: {tenant.name}")
+#             raise HTTPException(status_code=400, detail="Username already taken")
+        
+#         logger.info("Input validation passed")
+        
+#         # 🔒 NEW STEP 2: Generate secure tenant ID (REPLACES automatic ID)
+#         secure_id_service = get_secure_tenant_id_service(db)
+#         secure_tenant_id = secure_id_service.generate_unique_tenant_id()
+#         logger.info(f"Generated secure tenant ID: {secure_tenant_id}")
+        
+#         # Step 3: Generate API key  
+#         api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
+#         logger.info(f"Generated API key: {api_key[:15]}...")
+        
+#         # Step 4: Create Supabase user with business info
+#         logger.info("Creating Supabase user...")
+#         supabase_result = await supabase_auth_service.create_user(
+#             email=normalized_email,
+#             password=tenant.password,
+#             metadata={
+#                 "display_name": tenant.name,
+#                 "full_name": tenant.name,
+#                 "tenant_name": tenant.name,
+#                 "business_name": tenant.business_name,
+#                 "tenant_description": tenant.description or "",
+#                 "role": "tenant_admin",
+#                 "account_type": "tenant",
+#                 "api_key": api_key,
+#                 "tenant_id": secure_tenant_id,  # 🔒 INCLUDE SECURE ID
+#                 "registration_date": datetime.utcnow().isoformat(),
+#                 "tenant_status": "active"
+#             }
+#         )
+        
+#         if not supabase_result["success"]:
+#             logger.error(f"Supabase user creation failed: {supabase_result.get('error')}")
+#             raise HTTPException(
+#                 status_code=400, 
+#                 detail=f"Account creation failed: {supabase_result.get('error')}"
+#             )
+        
+#         supabase_user_id = supabase_result["user"].id
+#         logger.info(f"Supabase user created: {supabase_user_id}")
+        
+#         # 🔒 STEP 5: Create local tenant with SECURE ID (MOST IMPORTANT CHANGE)
+#         logger.info("Creating local tenant record...")
+#         new_tenant = Tenant(
+#             # id=secure_tenant_id,  # 🔒 USE SECURE ID INSTEAD OF AUTO-INCREMENT
+#             name=tenant.name,
+#             business_name=tenant.business_name,
+#             email=normalized_email,
+#             description=tenant.description,
+#             api_key=api_key,
+#             is_active=True,
+#             supabase_user_id=supabase_user_id
+#         )
+        
+#         db.add(new_tenant)
+#         db.commit()  # Commit immediately after creating tenant
+#         db.refresh(new_tenant)  # Refresh to get the ID
+#         logger.info(f"Local tenant created with SECURE ID: {new_tenant.id}")
+        
+#         # Step 6: Update Supabase with tenant ID (separate transaction)
+#         logger.info("Updating Supabase with tenant ID...")
+#         try:
+#             update_result = await supabase_auth_service.update_user_metadata(
+#                 user_id=supabase_user_id,
+#                 additional_metadata={
+#                     "tenant_id": new_tenant.id,
+#                     "database_tenant_id": str(new_tenant.id),
+#                     "tenant_created_at": datetime.utcnow().isoformat()
+#                 }
+#             )
+            
+#             if update_result["success"]:
+#                 logger.info("Supabase metadata updated")
+#             else:
+#                 logger.warning(f"Failed to update Supabase metadata: {update_result.get('error')}")
+#         except Exception as meta_error:
+#             logger.warning(f"Supabase metadata update failed: {meta_error}")
+        
+#         # Step 7: Create subscription if available (separate transaction)
+#         if PRICING_AVAILABLE:
+#             logger.info("Creating subscription...")
+#             try:
+#                 pricing_service = PricingService(db)
+#                 pricing_service.create_default_plans()
+#                 subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
+                
+#                 if subscription:
+#                     logger.info(f"Subscription created: {subscription.id}")
+#                 else:
+#                     logger.warning("Subscription creation returned None")
+#             except Exception as e:
+#                 logger.error(f"Subscription creation failed: {e}")
+#                 # Don't fail the whole registration if subscription fails
+#         else:
+#             logger.info("Pricing system not available, skipping subscription")
+        
+#         logger.info(f"Registration successful for: {new_tenant.name} - Business: {new_tenant.business_name} (SECURE ID: {new_tenant.id})")
+#         return new_tenant
+        
+#     except HTTPException as he:
+#         logger.error(f"HTTP Exception during registration: {he.detail}")
+#         db.rollback()  # Rollback on HTTP exceptions
+#         if supabase_user_id:
+#             await cleanup_supabase_user(supabase_user_id)
+#         raise he
+        
+#     except Exception as e:
+#         logger.error(f"Unexpected error during registration: {str(e)}")
+#         db.rollback()  # Rollback on any exception
+#         if supabase_user_id:
+#             await cleanup_supabase_user(supabase_user_id)
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Registration failed: {str(e)}"
+#         )
+
+
+
+
+
+
 @router.post("/register", response_model=TenantOut)
 async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(get_db)):
-    """Tenant Registration with secure random ID - UPDATED VERSION"""
+    """Tenant Registration with email confirmation - UPDATED VERSION"""
     
     supabase_user_id = None
     
@@ -471,11 +615,14 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         api_key = f"sk-{str(uuid.uuid4()).replace('-', '')}"
         logger.info(f"Generated API key: {api_key[:15]}...")
         
-        # Step 4: Create Supabase user with business info
-        logger.info("Creating Supabase user...")
-        supabase_result = await supabase_auth_service.create_user(
+        # 📧 Step 4: Create Supabase user with email confirmation ENABLED
+        logger.info("Creating Supabase user with email confirmation...")
+        confirmation_url = f"{settings.FRONTEND_URL}/auth/confirm"  # Your frontend confirmation page
+        
+        supabase_result = await supabase_auth_service.create_user_with_confirmation(
             email=normalized_email,
             password=tenant.password,
+            confirmation_url=confirmation_url,
             metadata={
                 "display_name": tenant.name,
                 "full_name": tenant.name,
@@ -487,7 +634,8 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
                 "api_key": api_key,
                 "tenant_id": secure_tenant_id,  # 🔒 INCLUDE SECURE ID
                 "registration_date": datetime.utcnow().isoformat(),
-                "tenant_status": "active"
+                "tenant_status": "pending_confirmation",  # 📧 PENDING until confirmed
+                "registration_step": "awaiting_email_confirmation"
             }
         )
         
@@ -499,25 +647,27 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             )
         
         supabase_user_id = supabase_result["user"].id
-        logger.info(f"Supabase user created: {supabase_user_id}")
+        logger.info(f"Supabase user created (pending confirmation): {supabase_user_id}")
         
-        # 🔒 STEP 5: Create local tenant with SECURE ID (MOST IMPORTANT CHANGE)
-        logger.info("Creating local tenant record...")
+        # 🔒 STEP 5: Create local tenant with SECURE ID but INACTIVE until email confirmed
+        logger.info("Creating local tenant record (inactive until email confirmed)...")
         new_tenant = Tenant(
-            # id=secure_tenant_id,  # 🔒 USE SECURE ID INSTEAD OF AUTO-INCREMENT
             name=tenant.name,
             business_name=tenant.business_name,
             email=normalized_email,
             description=tenant.description,
             api_key=api_key,
-            is_active=True,
-            supabase_user_id=supabase_user_id
+            is_active=False,  # 📧 INACTIVE until email confirmed
+            email_confirmed=False,  # 📧 NEW: Track email confirmation status
+            supabase_user_id=supabase_user_id,
+            registration_completed_at=None,  # 📧 NEW: Track when registration fully completed
+            email_confirmation_sent_at=datetime.utcnow()  # 📧 NEW: Track when confirmation email sent
         )
         
         db.add(new_tenant)
         db.commit()  # Commit immediately after creating tenant
         db.refresh(new_tenant)  # Refresh to get the ID
-        logger.info(f"Local tenant created with SECURE ID: {new_tenant.id}")
+        logger.info(f"Local tenant created (inactive) with SECURE ID: {new_tenant.id}")
         
         # Step 6: Update Supabase with tenant ID (separate transaction)
         logger.info("Updating Supabase with tenant ID...")
@@ -538,26 +688,17 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         except Exception as meta_error:
             logger.warning(f"Supabase metadata update failed: {meta_error}")
         
-        # Step 7: Create subscription if available (separate transaction)
-        if PRICING_AVAILABLE:
-            logger.info("Creating subscription...")
-            try:
-                pricing_service = PricingService(db)
-                pricing_service.create_default_plans()
-                subscription = pricing_service.create_free_subscription_for_tenant(new_tenant.id)
-                
-                if subscription:
-                    logger.info(f"Subscription created: {subscription.id}")
-                else:
-                    logger.warning("Subscription creation returned None")
-            except Exception as e:
-                logger.error(f"Subscription creation failed: {e}")
-                # Don't fail the whole registration if subscription fails
-        else:
-            logger.info("Pricing system not available, skipping subscription")
+        # 📧 NOTE: Skip subscription creation until email is confirmed
+        # This will be handled in the confirmation endpoint
         
-        logger.info(f"Registration successful for: {new_tenant.name} - Business: {new_tenant.business_name} (SECURE ID: {new_tenant.id})")
-        return new_tenant
+        logger.info(f"Registration initiated for: {new_tenant.name} - Business: {new_tenant.business_name} (SECURE ID: {new_tenant.id})")
+        logger.info(f"📧 Confirmation email sent to: {normalized_email}")
+        
+        # Return tenant info but mark as pending confirmation
+        response_tenant = new_tenant
+        response_tenant.registration_status = "pending_email_confirmation"
+        
+        return response_tenant
         
     except HTTPException as he:
         logger.error(f"HTTP Exception during registration: {he.detail}")
@@ -575,6 +716,207 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             status_code=500,
             detail=f"Registration failed: {str(e)}"
         )
+
+
+
+
+@router.post("/confirm-email")
+async def confirm_tenant_email(
+   confirmation_data: dict,  # {"token": "confirmation_token", "email": "user@example.com"}
+   db: Session = Depends(get_db)
+):
+   """Complete tenant registration after email confirmation"""
+   
+   try:
+       token = confirmation_data.get("token")
+       email = confirmation_data.get("email")
+       
+       if not token:
+           raise HTTPException(status_code=400, detail="Confirmation token is required")
+       
+       logger.info(f"📧 Processing email confirmation for: {email}")
+       
+       # Step 1: Verify the confirmation token with Supabase
+       verification_result = await supabase_auth_service.verify_email_confirmation(token)
+       
+       if not verification_result["success"]:
+           logger.warning(f"❌ Email confirmation failed: {verification_result.get('error')}")
+           raise HTTPException(
+               status_code=400,
+               detail=f"Email confirmation failed: {verification_result.get('error', 'Invalid token')}"
+           )
+       
+       verified_user = verification_result["user"]
+       verified_email = verified_user.email.lower().strip()
+       session = verification_result.get("session")  # Get session from Supabase
+       
+       # Step 2: Find the tenant in our database
+       tenant = db.query(Tenant).filter(
+           func.lower(Tenant.email) == verified_email,
+           Tenant.email_confirmed == False
+       ).first()
+       
+       if not tenant:
+           logger.warning(f"❌ No pending tenant found for confirmed email: {verified_email}")
+           raise HTTPException(
+               status_code=404,
+               detail="No pending registration found for this email"
+           )
+       
+       # Step 3: Activate the tenant account
+       tenant.is_active = True
+       tenant.email_confirmed = True
+       tenant.registration_completed_at = datetime.utcnow()
+       
+       # Step 4: Update Supabase metadata to reflect confirmation
+       try:
+           await supabase_auth_service.update_user_metadata(
+               user_id=tenant.supabase_user_id,
+               additional_metadata={
+                   "tenant_status": "active",
+                   "email_confirmed": True,
+                   "email_confirmed_at": datetime.utcnow().isoformat(),
+                   "registration_completed_at": datetime.utcnow().isoformat()
+               }
+           )
+       except Exception as meta_error:
+           logger.warning(f"Failed to update Supabase metadata after confirmation: {meta_error}")
+       
+       
+       if PRICING_AVAILABLE:
+           logger.info("Creating subscription after email confirmation...")
+           try:
+               pricing_service = PricingService(db)
+               pricing_service.create_default_plans()
+               subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
+               
+               if subscription:
+                   logger.info(f"Subscription created after confirmation: {subscription.id}")
+               else:
+                   logger.warning("Subscription creation returned None")
+           except Exception as e:
+               logger.error(f"Subscription creation failed after confirmation: {e}")
+               # Don't fail the confirmation if subscription fails
+       
+       db.commit()
+       
+       logger.info(f"✅ Email confirmation completed for tenant: {tenant.name} ({tenant.email})")
+       
+       # Return auto-login data if session available
+       if session:
+           return {
+               "success": True,
+               "message": "Email confirmed successfully! You are now logged in.",
+               "auto_login": True,
+               "access_token": session.access_token,
+               "token_type": "bearer",
+               "expires_at": datetime.fromtimestamp(session.expires_at),
+               "user_id": verified_user.id,
+               "email": verified_user.email,
+               "tenant_id": tenant.id,
+               "tenant_name": tenant.name,
+               "api_key": tenant.api_key,
+               "redirect_to": "dashboard"
+           }
+       else:
+           return {
+               "success": True,
+               "message": "Email confirmed successfully! Your account is now active.",
+               "tenant": {
+                   "id": tenant.id,
+                   "name": tenant.name,
+                   "business_name": tenant.business_name,
+                   "email": tenant.email,
+                   "is_active": tenant.is_active,
+                   "confirmed_at": tenant.registration_completed_at.isoformat()
+               },
+               "next_steps": {
+                   "login_url": f"{settings.FRONTEND_URL}/login",
+                   "dashboard_url": f"{settings.FRONTEND_URL}/dashboard"
+               }
+           }
+       
+   except HTTPException:
+       raise
+   except Exception as e:
+       logger.error(f"❌ Unexpected error during email confirmation: {str(e)}")
+       raise HTTPException(
+           status_code=500,
+           detail="Email confirmation failed. Please try again or contact support."
+       )
+
+
+
+@router.post("/resend-confirmation")
+async def resend_confirmation_email(
+    email_data: dict,  # {"email": "user@example.com"}
+    db: Session = Depends(get_db)
+):
+    """Resend confirmation email for pending registrations"""
+    
+    try:
+        email = email_data.get("email")
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        normalized_email = email.lower().strip()
+        
+        # Find tenant with pending confirmation
+        tenant = db.query(Tenant).filter(
+            func.lower(Tenant.email) == normalized_email,
+            Tenant.email_confirmed == False,
+            Tenant.is_active == False
+        ).first()
+        
+        if not tenant:
+            # Return success message for security (don't reveal if email exists)
+            return {
+                "success": True,
+                "message": "If your email is in our system, you will receive a confirmation link."
+            }
+        
+        # Check rate limiting (prevent spam)
+        now = datetime.utcnow()
+        if tenant.email_confirmation_sent_at:
+            time_since_last = now - tenant.email_confirmation_sent_at
+            if time_since_last.total_seconds() < 300:  # 5 minutes
+                remaining = 300 - int(time_since_last.total_seconds())
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Please wait {remaining} seconds before requesting another confirmation email"
+                )
+        
+        # Resend confirmation email via Supabase
+        confirmation_url = f"{settings.FRONTEND_URL}/auth/confirm"
+        
+        resend_result = await supabase_auth_service.resend_confirmation_email(
+            email=email,
+            confirmation_url=confirmation_url
+        )
+        
+        if resend_result["success"]:
+            # Update timestamp
+            tenant.email_confirmation_sent_at = now
+            db.commit()
+            
+            logger.info(f"📧 Confirmation email resent to: {normalized_email}")
+        
+        # Always return success for security
+        return {
+            "success": True,
+            "message": "If your email is in our system, you will receive a confirmation link."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error resending confirmation email: {str(e)}")
+        return {
+            "success": True,
+            "message": "If your email is in our system, you will receive a confirmation link."
+        }
+
+
 
 
 

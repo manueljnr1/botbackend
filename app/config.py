@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     # SYSTEM_META_APP_SECRET: Optional[str] = None
 
 
+    # 📧 NEW: Frontend URL for email confirmation redirects
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    
+    # 📧 NEW: Password reset URL (can be different from main frontend)
+    PASSWORD_RESET_URL: Optional [str] = os.getenv("PASSWORD_RESET_URL", None)
+
+
     
     def get_allowed_domains_list(self) -> list:
         """Get allowed domains as a list"""
@@ -174,6 +181,15 @@ class Settings(BaseSettings):
             
         # Remove duplicates and return the final list
         return list(set(origins))
+    
+
+    def get_password_reset_url(self) -> str:
+        """Get the password reset URL, fallback to frontend URL"""
+        return self.PASSWORD_RESET_URL or f"{self.FRONTEND_URL}/auth/reset-password"
+    
+    def get_email_confirmation_url(self) -> str:
+        """Get the email confirmation URL"""
+        return f"{self.FRONTEND_URL}/auth/confirm"
 
 
 settings = Settings()

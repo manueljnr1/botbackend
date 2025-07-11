@@ -129,7 +129,15 @@ class Tenant(Base):
 
 
 
+    # 📧 NEW: Email confirmation fields
+    email_confirmed = Column(Boolean, default=False, nullable=False)
+    email_confirmation_sent_at = Column(DateTime(timezone=True), nullable=True)
+    registration_completed_at = Column(DateTime(timezone=True), nullable=True)
     
+    # You might also want to add these for better tracking
+    email_confirmation_token = Column(String, nullable=True)  # Optional: store token for reference
+    confirmation_attempts = Column(Integer, default=0, nullable=False)  # Track attempts
+    last_confirmation_attempt = Column(DateTime(timezone=True), nullable=True)
 
 
 
