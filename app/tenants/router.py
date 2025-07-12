@@ -592,12 +592,39 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         
         # Step 1: Validate inputs
         normalized_email = tenant.email.lower().strip()
+        
+        # Check for existing confirmed email
         existing_email = db.query(Tenant).filter(
-            func.lower(Tenant.email) == normalized_email
+            func.lower(Tenant.email) == normalized_email,
+            Tenant.email_confirmed == True
         ).first()
         if existing_email:
-            logger.warning(f"Email already registered: {tenant.email}")
+            logger.warning(f"Email already registered and confirmed: {tenant.email}")
             raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Check for existing unconfirmed email and cleanup if expired
+        existing_unconfirmed = db.query(Tenant).filter(
+            func.lower(Tenant.email) == normalized_email,
+            Tenant.email_confirmed == False
+        ).first()
+        
+        if existing_unconfirmed:
+            time_since_registration = datetime.utcnow() - existing_unconfirmed.email_confirmation_sent_at
+            
+            if time_since_registration > timedelta(minutes=90):  # 1.5 hours
+                logger.info(f"Cleaning up expired unconfirmed account for: {normalized_email}")
+                # Delete from Supabase
+                await supabase_auth_service.delete_user(existing_unconfirmed.supabase_user_id)
+                # Delete from PostgreSQL
+                db.delete(existing_unconfirmed)
+                db.commit()
+                logger.info("Expired account cleaned up, proceeding with new registration")
+            else:
+                minutes_remaining = 90 - int(time_since_registration.total_seconds() / 60)
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Please check your email or wait {minutes_remaining} minutes to register again"
+                )
         
         existing_name = db.query(Tenant).filter(Tenant.name == tenant.name).first()
         if existing_name:
@@ -617,25 +644,19 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         
         # 📧 Step 4: Create Supabase user with email confirmation ENABLED
         logger.info("Creating Supabase user with email confirmation...")
-        confirmation_url = f"{settings.FRONTEND_URL}/auth/confirm"  # Your frontend confirmation page
+        confirmation_url = f"{settings.FRONTEND_URL}/auth/verify-email"  
         
         supabase_result = await supabase_auth_service.create_user_with_confirmation(
             email=normalized_email,
             password=tenant.password,
             confirmation_url=confirmation_url,
             metadata={
-                "display_name": tenant.name,
-                "full_name": tenant.name,
+                "display_name": f"{tenant.name}_{secure_tenant_id}",
                 "tenant_name": tenant.name,
-                "business_name": tenant.business_name,
-                "tenant_description": tenant.description or "",
                 "role": "tenant_admin",
                 "account_type": "tenant",
-                "api_key": api_key,
                 "tenant_id": secure_tenant_id,  # 🔒 INCLUDE SECURE ID
-                "registration_date": datetime.utcnow().isoformat(),
-                "tenant_status": "pending_confirmation",  # 📧 PENDING until confirmed
-                "registration_step": "awaiting_email_confirmation"
+                "tenant_status": "pending_confirmation" # 📧 PENDING until confirmed
             }
         )
         
@@ -716,6 +737,34 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
             status_code=500,
             detail=f"Registration failed: {str(e)}"
         )
+
+
+# Add this scheduled cleanup endpoint
+@router.post("/cleanup-unconfirmed")
+async def cleanup_unconfirmed_accounts(db: Session = Depends(get_db)):
+    """Cleanup unconfirmed accounts older than 1.5 hours"""
+    
+    cutoff_time = datetime.utcnow() - timedelta(minutes=90)
+    
+    unconfirmed_tenants = db.query(Tenant).filter(
+        Tenant.email_confirmed == False,
+        Tenant.email_confirmation_sent_at < cutoff_time
+    ).all()
+    
+    cleaned_count = 0
+    for tenant in unconfirmed_tenants:
+        try:
+            # Delete from Supabase
+            await supabase_auth_service.delete_user(tenant.supabase_user_id)
+            # Delete from PostgreSQL
+            db.delete(tenant)
+            cleaned_count += 1
+            logger.info(f"Cleaned up unconfirmed account: {tenant.email}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup {tenant.email}: {e}")
+    
+    db.commit()
+    return {"cleaned_accounts": cleaned_count}
 
 
 
