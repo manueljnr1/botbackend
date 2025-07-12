@@ -462,6 +462,8 @@ class SupabaseAuthService:
                 "error": friendly_error
             }
 
+
+
     async def send_password_reset(self, email: str, redirect_to: Optional[str] = None) -> Dict[str, Any]:
         """
         Send password reset email - uses public client

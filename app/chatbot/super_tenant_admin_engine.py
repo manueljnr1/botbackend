@@ -915,14 +915,26 @@ class RefactoredSuperTenantAdminEngine:
     # --- Specific Action Implementation Methods ---
     # These methods are called by _execute_action.
 
+    def _action_greeting(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """Handles a greeting from the admin user."""
+        state.last_intent_for_suggestion = AdminActionType.GREETING
+        tenant_name = data_manager.tenant.business_name
+        response = self._generate_dynamic_response(
+            "Hello! I'm ready to help you manage the chatbot for {tenant_name}. What can I assist you with today? You can ask me to add an FAQ, view analytics, and more.",
+            {"tenant_name": tenant_name}
+        )
+        return {"success": True, "response": response}
+
+
+
     def _action_add_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
         params = state.required_params
         faq = data_manager.create_faq(question=params['question'], answer=params['answer'])
         state.add_context("last_faq_id", faq.id)
         state.last_intent_for_suggestion = AdminActionType.ADD_FAQ
         response = self._generate_dynamic_response(
-            "I've successfully added that new FAQ for you (ID #{faq_id}). Your chatbot is now smarter!",
-            {"faq_id": faq.id}
+            "I've successfully added that new FAQ for you (ID #{faq_id}). Your chatbot is now smarter!"
+            # {"faq_id": faq.id}
         )
         return {"success": True, "response": response}
 
@@ -962,6 +974,40 @@ class RefactoredSuperTenantAdminEngine:
     def _action_confirm(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
         # This action is handled by the main loop, but we need a placeholder
         return {"success": True, "response": "Confirmed."}
+
+
+
+    def _action_help(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """Provides a helpful message listing the bot's capabilities."""
+        state.last_intent_for_suggestion = AdminActionType.HELP
+        # The get_help_text() method is already available in the intent parser
+        help_text = self.intent_parser.get_help_text()
+        return {"success": True, "response": help_text}
+
+    def _action_delete_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """Handles deleting an FAQ."""
+        # This is a placeholder for the full implementation
+        state.last_intent_for_suggestion = AdminActionType.DELETE_FAQ
+        faq_id = state.required_params.get('faq_id', 'unknown')
+        # A real implementation would confirm the deletion
+        response = f"This is where the logic to delete FAQ #{faq_id} would go. This feature is coming soon!"
+        return {"success": True, "response": response}
+
+    def _action_update_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """Handles updating an FAQ."""
+        # This is a placeholder for the full implementation
+        state.last_intent_for_suggestion = AdminActionType.UPDATE_FAQ
+        faq_id = state.required_params.get('faq_id', 'unknown')
+        response = f"This is where the logic to update FAQ #{faq_id} would go. This feature is coming soon!"
+        return {"success": True, "response": response}
+
+    def _action_view_settings(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """Handles viewing tenant settings."""
+        state.last_intent_for_suggestion = AdminActionType.VIEW_SETTINGS
+        settings = data_manager.get_tenant_settings()
+        # A real implementation would format this nicely
+        response = f"Your current business name is {settings.get('business_name')}. The full settings view is coming soon!"
+        return {"success": True, "response": response}
 
 
 # Factory function remains the same
