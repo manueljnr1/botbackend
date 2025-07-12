@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Question Has Been Answered</title>
+    <!-- ✅ ADDED EMAIL PREVIEW TEXT -->
+    <meta name="description" content="Your question has been answered, thank you for reaching out">
+    <style type="text/css">
+        /* Email client preview text */
+        .preheader {
+            display: none !important;
+            visibility: hidden;
+            opacity: 0;
+            color: transparent;
+            height: 0;
+            width: 0;
+            line-height: 0;
+            font-size: 0;
+        }
+    </style>
+</head>
+<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+    
+    <!-- ✅ PREVIEW TEXT FOR EMAIL CLIENTS -->
+    <div class="preheader">Your question has been answered, thank you for reaching out</div>
+    
+    <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+        
+        <!-- ✅ UPDATED HEADER: Business name bold and prominent, no green tick -->
+        <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e1e5e9;">
+            <h1 style="color: #2c3e50; margin: 0; font-size: 28px; font-weight: bold;">{{ company_name }}</h1>
+            <h2 style="color: #27ae60; margin: 15px 0 0 0; font-size: 20px; font-weight: normal;">Your Question Has Been Answered</h2>
+        </div>
+        
+        <!-- Greeting -->
+        <div style="margin-bottom: 25px;">
+            <p style="font-size: 16px; margin: 0;">Hello,</p>
+            <p style="font-size: 16px;">Thank you for your recent question to <strong>{{ company_name }}</strong>. We've reviewed your inquiry and wanted to provide you with a more comprehensive answer.</p>
+        </div>
+        
+        <!-- Original Question -->
+        <div style="margin-bottom: 25px;">
+            <h3 style="color: #3498db; margin-bottom: 12px; font-size: 18px;">💬 Your Original Question:</h3>
+            <div style="background: linear-gradient(135deg, #e3f2fd, #bbdefb); padding: 20px; border-left: 4px solid #2196f3; border-radius: 8px; font-size: 16px;">
+                "{{ user_question }}"
+            </div>
+        </div>
+        
+        <!-- Improved Response -->
+        <div style="margin-bottom: 30px;">
+            <h3 style="color: #27ae60; margin-bottom: 12px; font-size: 18px;">✨ Our Improved Response:</h3>
+            <div style="background: linear-gradient(135deg, #e8f5e8, #c8e6c8); padding: 25px; border-left: 4px solid #27ae60; border-radius: 8px; font-size: 16px; line-height: 1.7;">
+                {{ tenant_response }}
+            </div>
+        </div>
+        
+        <!-- Call to Action -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: center;">
+            <p style="margin: 0; font-size: 16px;">We appreciate your patience and hope this information is helpful.</p>
+            <p style="margin: 10px 0 0 0; font-size: 16px;"><strong>Please don't hesitate to reach out if you have any other questions!</strong></p>
+        </div>
+        
+        <!-- Footer -->
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e5e9;">
+            <p style="margin: 0 0 10px 0; font-size: 16px;">Best regards,<br><strong>{{ company_name }} Customer Support Team</strong></p>
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #f1f1f1; color: #7f8c8d; font-size: 12px; text-align: center;">
+                <p style="margin: 0;">This message was sent in response to your conversation with our AI assistant.</p>
+                <p style="margin: 5px 0 0 0;">We're committed to providing you with the best possible support.</p>
+            </div>
+        </div>
+        
+    </div>
+</body>
+</html>

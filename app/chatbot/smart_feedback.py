@@ -21,6 +21,7 @@ from app.tenants.models import Tenant
 import os
 from app.config import settings
 from app.chatbot.email_scraper_engine import EmailScraperEngine, ScrapedEmail
+from jinja2 import Environment, FileSystemLoader
 
 
 # Supabase integration
@@ -83,6 +84,7 @@ class AdvancedSmartFeedbackManager:
     - Automatic webhook processing
     - Advanced analytics and monitoring
     - 30-day email memory system
+    - Template-based email rendering
     """
     
     def __init__(self, db: Session, tenant_id: int):
@@ -107,6 +109,10 @@ class AdvancedSmartFeedbackManager:
             raise ValueError("RESEND_API_KEY must be set")
         
         self.from_email = os.getenv("FROM_EMAIL", "feedback@agentlyra.com")
+        
+        # Initialize Jinja2 template environment
+        template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
+        self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
         
         # Enhanced inadequate response patterns
         self.inadequate_response_patterns = [
@@ -144,6 +150,14 @@ class AdvancedSmartFeedbackManager:
         self.llm_available = LLM_AVAILABLE and bool(settings.OPENAI_API_KEY)
         logger.info(f"🔍 LLM available: {self.llm_available}, OpenAI key exists: {bool(settings.OPENAI_API_KEY)}")
 
+    def _load_template(self, template_name: str) -> str:
+        """Load HTML template from file"""
+        try:
+            template = self.jinja_env.get_template(template_name)
+            return template
+        except Exception as e:
+            logger.error(f"❌ Error loading template {template_name}: {e}")
+            raise
             
     def should_request_email(self, session_id: str, user_identifier: str) -> bool:
         """
@@ -322,20 +336,6 @@ class AdvancedSmartFeedbackManager:
             logger.error(f"❌ LLM email request generation failed: {e}")
             return selected_request
 
-    # def _generate_fallback_email_request(self, business_name: str) -> str:
-    #     """Fallback method when LLM is unavailable"""
-    #     messages = [
-    #         f"Hi, I'm {business_name}'s assistant. To provide better support and follow-up, could you share your email?",
-    #         f"Hello, Welcome to {business_name}. For quality service, may I have your email address?",
-    #         f"Hi there, To ensure complete assistance with {business_name}, could you share your email?",
-    #         f"Welcome, For better service and follow-up support, would you mind sharing your email?",
-    #         f"Hello, For the best {business_name} experience, could you please provide your email?"
-    #     ]
-    #     import random
-    #     return random.choice(messages)
-
-
-
     def extract_email_from_message(self, message: str) -> Optional[str]:
         """Extract and validate email address from user message - CLEAN VERSION"""
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -397,7 +397,7 @@ class AdvancedSmartFeedbackManager:
             "Got it! I've recorded your email as email. How may I assist you?",
             "Awesome, email is in. What do you need help with today?",
             "Email saved. What would you like us to sort out?",
-            "Alright, email locked in. What’s next on your mind?",
+            "Alright, email locked in. What's next on your mind?",
             "Noted your email. How can I be of help right now?"
         ]
         
@@ -407,9 +407,6 @@ class AdvancedSmartFeedbackManager:
         
         logger.info(f"📧 Generated clean email acknowledgment for {email}")
         return selected_template
-
-
-
 
     def get_email_memory_status(self, session_id: str) -> Dict[str, Any]:
         """Get email memory status for debugging"""
@@ -652,17 +649,20 @@ class AdvancedSmartFeedbackManager:
                     </div>
                     """
             
-            # Create reply-to address for tracking
-           
+            # Generate feedback URL
+            feedback_base_url = os.getenv("FEEDBACK_BASE_URL") or os.getenv("APP_BASE_URL", "https://botbackend-qtbf.onrender.com")
+            feedback_url = f"{feedback_base_url}/chatbot/feedback/form/{feedback_id}"
             
-            # Generate advanced email template
-            email_html = self._generate_tenant_email_template(
+            # Load and render template
+            template = self._load_template("tenant_notification_email.html")
+            email_html = template.render(
                 feedback_id=feedback_id,
-                company_name=getattr(tenant, 'name', 'Your Company'), # Use company name instead of the whole tenant object
+                company_name=company_name,
                 user_question=user_question,
                 bot_response=bot_response,
-                context_html=context_html, # Assuming you create this variable
-                user_email=user_email
+                context_html=context_html,
+                user_email=user_email,
+                feedback_url=feedback_url
             )
             
             # Send via Resend with enhanced configuration
@@ -717,79 +717,6 @@ class AdvancedSmartFeedbackManager:
         except Exception as e:
             logger.error(f"💥 Error sending tenant notification: {e}")
             return False, None
-    
-    def _generate_tenant_email_template(self, feedback_id: str, company_name: str,
-                                    user_question: str, bot_response: str,
-                                    context_html: str, user_email: str) -> str:
-        """Generate enhanced email template with business name"""
-        
-        feedback_base_url = os.getenv("FEEDBACK_BASE_URL") or os.getenv("APP_BASE_URL", "https://botbackend-qtbf.onrender.com")
-        feedback_url = f"{feedback_base_url}/chatbot/feedback/form/{feedback_id}"
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Customer Feedback Request - {company_name}</title>
-            <style>
-                .lyra-header {{
-                    background: linear-gradient(135deg, #6B46C1, #9333EA);
-                    color: white;
-                    padding: 20px;
-                    text-align: center;
-                    border-radius: 12px 12px 0 0;
-                }}
-                .business-badge {{
-                    background: rgba(255, 255, 255, 0.2);
-                    padding: 8px 16px;
-                    border-radius: 20px;
-                    display: inline-block;
-                    margin-top: 10px;
-                    font-weight: 600;
-                }}
-            </style>
-        </head>
-        <body style="font-family: sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div class="lyra-header">
-                    <h1 style="margin: 0; font-size: 28px;">LYRA AI</h1>
-                    <div class="business-badge">{company_name}</div>
-                </div>
-                
-                <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
-                    <h2 style="color: #1a1a2e; margin-top: 0;">🔔 Customer Feedback Needed</h2>
-                    <p>Hello <strong>{company_name}</strong>!</p>
-                    <p>Your AI assistant was unable to answer a customer's question satisfactorily.</p>
-                    
-                    <h3 style="color: #3498db;">💬 Customer's Question:</h3>
-                    <div style="background: #e3f2fd; padding: 15px; border-left: 4px solid #2196f3; border-radius: 8px;">"{user_question}"</div>
-                    
-                    <h3 style="color: #f39c12;">🤖 AI's Response:</h3>
-                    <div style="background: #fff8e1; padding: 15px; border-left: 4px solid #ff9800; border-radius: 8px;">"{bot_response}"</div>
-
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{feedback_url}" style="background: linear-gradient(135deg, #6B46C1, #9333EA); color: white; padding: 16px 32px; text-align: center; text-decoration: none; display: inline-block; border-radius: 12px; font-size: 18px; font-weight: 600;">
-                            Provide Improved Answer
-                        </a>
-                    </div>
-                    
-                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-size: 14px; color: #666;">
-                        <p><strong>✨ New Features:</strong></p>
-                        <ul style="margin: 5px 0; padding-left: 20px;">
-                            <li>Enhanced form with your business branding</li>
-                            <li>Option to add responses to your FAQ automatically</li>
-                            <li>Secure one-time use form that expires after submission</li>
-                        </ul>
-                    </div>
-                    
-                    <p style="font-size: 12px; color: #7f8c8d; margin-top: 20px;">
-                        Feedback ID: {feedback_id} | Powered by Lyra AI
-                    </p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
     
     def _track_email_sent(self, feedback_id: str, email_type: str, 
                          recipient: str, provider_id: str, reply_to: str = None):
@@ -919,10 +846,12 @@ class AdvancedSmartFeedbackManager:
             
             company_name = getattr(tenant, 'business_name', 'Our Company')
             
-            # Generate customer follow-up email
-            email_html = self._generate_customer_followup_template(
-                pending=pending,
-                company_name=company_name
+            # Load and render template
+            template = self._load_template("customer_followup_email.html")
+            email_html = template.render(
+                company_name=company_name,
+                user_question=pending.user_question,
+                tenant_response=pending.tenant_response
             )
             
             # Send from company's perspective
@@ -970,87 +899,6 @@ class AdvancedSmartFeedbackManager:
         except Exception as e:
             logger.error(f"💥 Error sending customer follow-up: {e}")
             return False, None
-    
-    def _generate_customer_followup_template(self, pending: PendingFeedback, company_name: str) -> str:
-        """Generate professional customer follow-up email"""
-        
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Your Question Has Been Answered</title>
-            <!-- ✅ ADDED EMAIL PREVIEW TEXT -->
-            <meta name="description" content="Your question has been answered, thank you for reaching out">
-            <style type="text/css">
-                /* Email client preview text */
-                .preheader {{
-                    display: none !important;
-                    visibility: hidden;
-                    opacity: 0;
-                    color: transparent;
-                    height: 0;
-                    width: 0;
-                    line-height: 0;
-                    font-size: 0;
-                }}
-            </style>
-        </head>
-        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
-            
-            <!-- ✅ PREVIEW TEXT FOR EMAIL CLIENTS -->
-            <div class="preheader">Your question has been answered, thank you for reaching out</div>
-            
-            <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                
-                <!-- ✅ UPDATED HEADER: Business name bold and prominent, no green tick -->
-                <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e1e5e9;">
-                    <h1 style="color: #2c3e50; margin: 0; font-size: 28px; font-weight: bold;">{company_name}</h1>
-                    <h2 style="color: #27ae60; margin: 15px 0 0 0; font-size: 20px; font-weight: normal;">Your Question Has Been Answered</h2>
-                </div>
-                
-                <!-- Greeting -->
-                <div style="margin-bottom: 25px;">
-                    <p style="font-size: 16px; margin: 0;">Hello,</p>
-                    <p style="font-size: 16px;">Thank you for your recent question to <strong>{company_name}</strong>. We've reviewed your inquiry and wanted to provide you with a more comprehensive answer.</p>
-                </div>
-                
-                <!-- Original Question -->
-                <div style="margin-bottom: 25px;">
-                    <h3 style="color: #3498db; margin-bottom: 12px; font-size: 18px;">💬 Your Original Question:</h3>
-                    <div style="background: linear-gradient(135deg, #e3f2fd, #bbdefb); padding: 20px; border-left: 4px solid #2196f3; border-radius: 8px; font-size: 16px;">
-                        "{pending.user_question}"
-                    </div>
-                </div>
-                
-                <!-- Improved Response -->
-                <div style="margin-bottom: 30px;">
-                    <h3 style="color: #27ae60; margin-bottom: 12px; font-size: 18px;">✨ Our Improved Response:</h3>
-                    <div style="background: linear-gradient(135deg, #e8f5e8, #c8e6c8); padding: 25px; border-left: 4px solid #27ae60; border-radius: 8px; font-size: 16px; line-height: 1.7;">
-                        {pending.tenant_response}
-                    </div>
-                </div>
-                
-                <!-- Call to Action -->
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: center;">
-                    <p style="margin: 0; font-size: 16px;">We appreciate your patience and hope this information is helpful.</p>
-                    <p style="margin: 10px 0 0 0; font-size: 16px;"><strong>Please don't hesitate to reach out if you have any other questions!</strong></p>
-                </div>
-                
-                <!-- Footer -->
-                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e1e5e9;">
-                    <p style="margin: 0 0 10px 0; font-size: 16px;">Best regards,<br><strong>{company_name} Customer Support Team</strong></p>
-                    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #f1f1f1; color: #7f8c8d; font-size: 12px; text-align: center;">
-                        <p style="margin: 0;">This message was sent in response to your conversation with our AI assistant.</p>
-                        <p style="margin: 5px 0 0 0;">We're committed to providing you with the best possible support.</p>
-                    </div>
-                </div>
-                
-            </div>
-        </body>
-        </html>
-        """
     
     def get_feedback_analytics(self, days: int = 30) -> Dict[str, Any]:
         """Get comprehensive feedback analytics with email memory stats"""

@@ -669,6 +669,9 @@ class AdminConversationState:
         self.pending_confirmation: bool = False
         self.last_interaction = datetime.utcnow()
         self.context_data: Dict[str, Any] = {} # Store things like a recently viewed FAQ ID
+        # --- ADDITION ---: Added this attribute to track the last action for suggestions
+        self.last_intent_for_suggestion: Optional[AdminActionType] = None
+
 
     def is_expired(self, timeout_minutes: int = 10) -> bool:
         """Check if the conversation state has timed out."""
@@ -680,6 +683,9 @@ class AdminConversationState:
         self.required_params = required_params or {}
         self.pending_confirmation = intent.requires_confirmation
         self.last_interaction = datetime.utcnow()
+        # Also update the suggestion tracker
+        self.last_intent_for_suggestion = self.current_intent
+
 
     def add_context(self, key: str, value: Any):
         """Add data to the conversation context."""
@@ -691,6 +697,7 @@ class AdminConversationState:
         self.required_params = {}
         self.pending_confirmation = False
         self.context_data = {}
+        self.last_intent_for_suggestion = None
 
 
 class RefactoredSuperTenantAdminEngine:
@@ -721,6 +728,7 @@ class RefactoredSuperTenantAdminEngine:
         state.last_interaction = datetime.utcnow() # Keep state alive
         return state
 
+    # --- FUNCTION REPLACED ---
     def process_admin_message(
         self,
         user_message: str,
@@ -742,8 +750,12 @@ class RefactoredSuperTenantAdminEngine:
             # Get the current state of the conversation
             state = self._get_or_create_conversation_state(user_identifier, authenticated_tenant_id)
 
-            # Use LLM to interpret the new message in the context of the current state
-            intent = self.intent_parser.parse_with_context(user_message, state, conversation_history)
+            # Correct two-step process: First parse the intent, then enhance it with context.
+            # 1. Get the basic intent from the user's current message.
+            initial_intent = self.intent_parser.parse(user_message)
+            # 2. Enhance the initial intent using the conversation state and history.
+            intent = self.intent_parser.enhance_with_context(initial_intent, state, conversation_history)
+
 
             # If the LLM determines this message completes a pending action, execute it
             if state.current_intent and self._message_completes_action(intent, state):
@@ -775,18 +787,6 @@ class RefactoredSuperTenantAdminEngine:
             logger.error(f"💥 Error processing admin message: {e}", exc_info=True)
             return {"success": False, "response": "❌ I encountered an error. Please try again."}
 
-    def _message_completes_action(self, intent: ParsedIntent, state: AdminConversationState) -> bool:
-        """Determines if the new message provides the necessary info to complete the pending action."""
-        if not state.current_intent:
-            return False
-        # If the user is confirming a pending action
-        if state.pending_confirmation and intent.action == AdminActionType.CONFIRM:
-            return True
-        # If the user is providing the last piece of missing information
-        if state.required_params and all(key in intent.parameters for key in state.required_params):
-            return True
-        return False
-
     def _execute_action(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
         """Executes the action defined in the current state or asks for more info."""
         # Check if all required parameters are present
@@ -810,6 +810,75 @@ class RefactoredSuperTenantAdminEngine:
 
         return result
 
+    # --- FUNCTION ADDED ---
+    def _message_completes_action(self, intent: ParsedIntent, state: AdminConversationState) -> bool:
+        """
+        Determines if the new message provides the necessary info or confirmation to complete the pending action.
+        This is a key decision point in the conversational flow.
+        """
+        if not state.current_intent:
+            return False
+
+        # Scenario 1: User explicitly confirms a pending action (e.g., says "yes" to a deletion).
+        if state.pending_confirmation and intent.action == AdminActionType.CONFIRM:
+            # We were waiting for a 'yes', and we got it. The action is complete.
+            state.pending_confirmation = False # No longer needs confirmation
+            logger.info(f"✅ Confirmation received for action: {state.current_intent.value}")
+            return True
+
+        # Scenario 2: User provides the last piece of missing information.
+        if state.required_params:
+            # Check if any of the keys in the newly parsed parameters match what we need.
+            provided_params = [p for p in state.required_params if p in intent.parameters]
+            if provided_params:
+                # User has provided some of the data we were waiting for.
+                # We can now consider this part of the action "complete".
+                # The main loop will update the state with this new info.
+                logger.info(f"✅ User provided missing parameters: {provided_params}")
+                # This logic is handled in the main loop, so we return true to proceed with execution.
+                return True
+
+        return False
+
+    # --- FUNCTION ADDED ---
+    def _get_proactive_suggestion(self, state: AdminConversationState, data_manager: TenantDataManager) -> Optional[str]:
+        """
+        After a successful action, use the LLM to suggest a logical next step to the user,
+        making the chatbot feel more like a helpful assistant.
+        """
+        if not self.llm_available or not state.last_intent_for_suggestion:
+            return None
+
+        try:
+            template = """A user, a business owner named {tenant_name}, just successfully completed an admin action for their chatbot. Based on their last action, suggest a relevant and helpful next step. Keep the suggestion brief and conversational.
+
+            Last Action Completed: "{last_action}"
+
+            Contextual Information:
+            - If they listed FAQs, you could suggest they update or delete one.
+            - If they added an FAQ, you could ask if they want to add another or view the list.
+            - If they viewed analytics showing high traffic, you could suggest adding more FAQs.
+            - If they updated a setting, you could ask them to view all settings to confirm.
+
+            Your helpful, one-sentence suggestion:"""
+
+            context = {
+                "last_action": state.last_intent_for_suggestion.value,
+                "tenant_name": data_manager.tenant.business_name
+            }
+
+            prompt = PromptTemplate.from_template(template)
+            response = self.llm.invoke(prompt.format(**context))
+            suggestion = response.content.strip()
+
+            logger.info(f"💡 Proactive suggestion generated for action '{context['last_action']}': {suggestion}")
+            return suggestion
+
+        except Exception as e:
+            logger.error(f"Failed to generate proactive suggestion: {e}")
+            return None
+
+
     # --- Dynamic Response and Suggestion Methods ---
 
     def _generate_dynamic_response(self, prompt_template: str, context: Dict[str, Any]) -> str:
@@ -824,29 +893,6 @@ class RefactoredSuperTenantAdminEngine:
         except Exception as e:
             logger.error(f"Dynamic response generation failed: {e}")
             return "I'm having a little trouble formulating a response. Could you try again?"
-
-    def _get_proactive_suggestion(self, state: AdminConversationState, data_manager: TenantDataManager) -> Optional[str]:
-        """After an action, use the LLM to suggest a logical next step."""
-        if not self.llm_available or not state.last_intent_for_suggestion:
-            return None
-
-        template = """You are a helpful admin assistant. The user just successfully performed an action. Based on this, suggest a logical next step.
-
-        Last Action: {last_action}
-        Company Name: {company_name}
-
-        Example Suggestions:
-        - After ADD_FAQ: "Would you like to add another FAQ, or maybe view your full list?"
-        - After LIST_FAQS: "You can update any of these by saying 'update FAQ #<id>' or delete one with 'remove FAQ #<id>'."
-        - After VIEW_ANALYTICS: "Based on your usage, you might want to add FAQs about the most common questions."
-
-        Your brief, helpful suggestion:"""
-
-        context = {
-            "last_action": state.last_intent_for_suggestion.value,
-            "company_name": data_manager.tenant.business_name
-        }
-        return self._generate_dynamic_response(template, context)
 
 
     # --- Methods for asking for more info/confirmation ---
@@ -919,6 +965,6 @@ class RefactoredSuperTenantAdminEngine:
 
 
 # Factory function remains the same
-def get_super_tenant_admin_engine(db: Session) -> RefactoredSuperTenantAdminEngine:
+def get_super_tenant_admin_engine(db: Session) -> "RefactoredSuperTenantAdminEngine":
     """Factory function to create the Refactored SuperTenantAdminEngine."""
     return RefactoredSuperTenantAdminEngine(db)

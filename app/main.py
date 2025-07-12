@@ -82,27 +82,25 @@ app = FastAPI(
     description="AI-powered customer support chatbot for multiple businesses",
     version="1.0.0",
     debug=settings.is_development(),
-    openapi_url="/backend/openapi.json" 
-    # docs_url="/admin-docs" if settings.is_development() else None,
-    # redoc_url="/admin-redoc" if settings.is_development() else None
+    openapi_url="/backend/openapi.json",
+    docs_url="/admin-docs" if settings.is_development() else None,
+    redoc_url="/admin-redoc" if settings.is_development() else None
 )
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
     raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
 
-# CORS middleware
-allowed_origins = settings.get_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=settings.is_development(),  # Only in development
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when using "*"
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-logger.info(f"🌐 CORS configured for {settings.ENVIRONMENT}: {len(allowed_origins)} origins")
+logger.info(f"🌐 CORS configured for {settings.ENVIRONMENT}: Open (API key protected)")
 
 
 

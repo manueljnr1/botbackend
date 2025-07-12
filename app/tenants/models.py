@@ -152,6 +152,8 @@ class Tenant(Base):
     # Self-referential relationship for impersonation
     impersonating_tenant = relationship("Tenant", remote_side=[id], foreign_keys=[impersonating_tenant_id])
 
+    allowed_origins = Column(String, nullable=True)
+
     @validates('email')
     def normalize_email(self, key, email):
         """Automatically normalize email to lowercase"""

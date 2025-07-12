@@ -2,7 +2,11 @@ import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 from urllib.parse import urlparse
+import logging
 from typing import List
+
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # Database
@@ -33,13 +37,14 @@ class Settings(BaseSettings):
     # Email Configuration
     SMTP_SERVER: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
-    SMTP_USERNAME: str = "your-email@gmail.com"
-    SMTP_PASSWORD: str = "your-app-password"
-    FROM_EMAIL: str = "your-email@gmail.com"
-    
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    FROM_EMAIL: Optional[str] = None
+
+    RESEND_API_KEY: Optional[str] = None
+
     # Environment and Frontend Configuration
     ENVIRONMENT: str = "development"  # development, staging, production
-    FRONTEND_URL: Optional[str] = None
     ALLOWED_DOMAINS: Optional[str] = None
     
     # Supabase Configuration
@@ -66,12 +71,7 @@ class Settings(BaseSettings):
     INSTAGRAM_WEBHOOK_ENDPOINT: str = "/api/instagram/webhook"
     INSTAGRAM_MAX_MESSAGE_LENGTH: int = 1000
     
-    # Optional: Default verify token prefix for tenant tokens
-    # DEFAULT_INSTAGRAM_VERIFY_TOKEN_PREFIX: str = "tenant_ig_"
-    
-    # # Optional: System-wide Meta App (if providing shared app option)
-    # SYSTEM_META_APP_ID: Optional[str] = None
-    # SYSTEM_META_APP_SECRET: Optional[str] = None
+   
 
 
     # 📧 NEW: Frontend URL for email confirmation redirects
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     # 📧 NEW: Password reset URL (can be different from main frontend)
     PASSWORD_RESET_URL: Optional [str] = os.getenv("PASSWORD_RESET_URL", None)
 
-
+    PRODUCTION_DOMAINS: Optional[str] = None 
     
     def get_allowed_domains_list(self) -> list:
         """Get allowed domains as a list"""
@@ -111,7 +111,8 @@ class Settings(BaseSettings):
                 "FRONTEND_URL": self.FRONTEND_URL,
                 "JWT_SECRET_KEY": self.JWT_SECRET_KEY,
                 "SUPABASE_URL": self.SUPABASE_URL,
-                "SUPABASE_SERVICE_KEY": self.SUPABASE_SERVICE_KEY
+                "SUPABASE_SERVICE_KEY": self.SUPABASE_SERVICE_KEY,
+                "FROM_EMAIL": self.FROM_EMAIL,
             }
             
             missing = [key for key, value in required_fields.items() if not value]
@@ -123,65 +124,71 @@ class Settings(BaseSettings):
             if len(self.JWT_SECRET_KEY) < 32:
                 raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
             
-            # Validate domains only in production (staging can be more flexible)
-            if self.is_production() and not self.get_allowed_domains_list():
-                raise ValueError("ALLOWED_DOMAINS is required in production")
+            # Validate email format
+            if self.FROM_EMAIL and "@" not in self.FROM_EMAIL:
+                raise ValueError("FROM_EMAIL must be a valid email address")
+            
+            # Require either SMTP OR Resend for email
+            has_smtp = all([self.SMTP_USERNAME, self.SMTP_PASSWORD])
+            has_resend = bool(self.RESEND_API_KEY)
+            
+            if not has_smtp and not has_resend:
+                raise ValueError("Either SMTP configuration or RESEND_API_KEY is required")
+            
+            # Validate domains only in production
+            if self.is_production() and not self.get_allowed_domains_list() and not self.PRODUCTION_DOMAINS:
+                raise ValueError("ALLOWED_DOMAINS or PRODUCTION_DOMAINS is required in production")
     
-    def get_password_reset_url(self) -> str:
-        """Get validated password reset URL"""
-        frontend_url = self.FRONTEND_URL or "http://localhost:3000"
-        
-        # Validate domain only in production
-        if self.is_production():
-            allowed_domains = self.get_allowed_domains_list()
-            if allowed_domains:
-                parsed = urlparse(frontend_url)
-                if parsed.netloc not in allowed_domains:
-                    raise ValueError(f"Frontend domain {parsed.netloc} not in allowed domains: {allowed_domains}")
-        
-        return f"{frontend_url}/tenant-reset-password"
+   
     
     def get_cors_origins(self) -> list:
-        """Get CORS origins based on environment."""
+        origins = ["null"]
         
-        # --- Development Environment ---
-        # For local testing, allow common local origins including local files (null).
         if self.is_development():
-            return [
-                "null",                  # For local file:// access
+            origins.extend([
                 "http://localhost:3000",
-                "http://localhost:3001",
-                "http://localhost:5173", # Common for ViteJS
-                "http://localhost:8080", # Common for other local servers
-            ]
-
-        # --- Production & Staging Environments ---
-        # For production and staging, use a strict, explicit list of domains.
-        origins = []
-        
-        # TEMPORARY: Allow null origin for local file access
-        origins.append("null")
+                "http://localhost:3001", 
+                "http://localhost:5173",
+                "http://localhost:8080"
+            ])
         
         if self.FRONTEND_URL:
             origins.append(self.FRONTEND_URL)
-
-        # Add other specific production/staging domains
-        origins.extend([
-            "https://frontier-j08o.onrender.com",
-            "https://agentlyra.com",
-            "https://www.agentlyra.com",
-        ])
         
-        # Add domains from the environment configuration
-        for domain in self.get_allowed_domains_list():
-            origins.extend([
-                f"https://{domain}",
-                f"https://www.{domain}",
-            ])
-            
-        # Remove duplicates and return the final list
+        # Only YOUR company domains
+        if self.PRODUCTION_DOMAINS:
+            domains = [d.strip() for d in self.PRODUCTION_DOMAINS.split(",")]
+            for domain in domains:
+                origins.extend([f"https://{domain}", f"https://www.{domain}"])
+        
         return list(set(origins))
     
+
+    def get_all_cors_origins(self, db_session=None) -> list:
+        """Get all CORS origins including tenant domains"""
+        origins = self.get_cors_origins()
+        
+        if db_session:
+            try:
+                from app.tenants.models import Tenant
+                tenants = db_session.query(Tenant).filter(
+                    Tenant.allowed_origins.isnot(None)
+                ).all()
+                
+                for tenant in tenants:
+                    if tenant.allowed_origins:
+                        for domain in tenant.allowed_origins.split(","):
+                            domain = domain.strip()
+                            origins.extend([f"https://{domain}", f"https://www.{domain}"])
+            
+            except Exception as e:
+                # Column doesn't exist yet, just return base origins
+                logger.warning(f"⚠️ Could not load tenant origins: {e}")
+                pass
+        
+        return list(set(origins))
+    
+
 
     def get_password_reset_url(self) -> str:
         """Get the password reset URL, fallback to frontend URL"""
@@ -190,6 +197,34 @@ class Settings(BaseSettings):
     def get_email_confirmation_url(self) -> str:
         """Get the email confirmation URL"""
         return f"{self.FRONTEND_URL}/auth/confirm"
+    
+
+    def get_email_config(self) -> dict:
+        """Get email configuration with validation"""
+        if not all([self.SMTP_USERNAME, self.SMTP_PASSWORD, self.FROM_EMAIL]):
+            if self.requires_security_validation():
+                raise ValueError("Email configuration incomplete for production environment")
+            return None
+        
+        return {
+            "smtp_server": self.SMTP_SERVER,
+            "smtp_port": self.SMTP_PORT,
+            "username": self.SMTP_USERNAME,
+            "password": self.SMTP_PASSWORD,
+            "from_email": self.FROM_EMAIL,
+        }
+    
+
+    def get_tenant_cors_origins(self, tenant_allowed_origins: str = None) -> list:
+        origins = self.get_cors_origins()  # Your company domains
+        
+        # Add tenant-specific domains
+        if tenant_allowed_origins:
+            domains = [d.strip() for d in tenant_allowed_origins.split(",")]
+            for domain in domains:
+                origins.extend([f"https://{domain}", f"https://www.{domain}"])
+        
+        return list(set(origins))
 
 
 settings = Settings()

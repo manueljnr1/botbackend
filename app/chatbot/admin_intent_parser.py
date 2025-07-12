@@ -322,90 +322,92 @@ JSON Response:"""
         }
         return descriptions.get(action, "Unknown action")
     
-    def enhance_with_context(self, intent: ParsedIntent, conversation_history: List[Dict] = None) -> ParsedIntent:
+    def enhance_with_context(self, intent: ParsedIntent, state, conversation_history: List[Dict] = None) -> ParsedIntent:
         """
-        Enhance parsed intent with conversation context using LLM
+        Enhances a parsed intent using the full conversational state.
+        This is the core of contextual understanding for the admin engine.
         """
-        if not self.llm_available or not conversation_history:
+        if not self.llm_available or not state.current_intent:
             return intent
-        
+
+        # If the user just says "yes" or "confirm", and we are pending confirmation,
+        # we can infer the intent is to confirm the action.
+        confirmation_words = ['yes', 'y', 'confirm', 'proceed', 'do it', 'go ahead']
+        if state.pending_confirmation and intent.original_text.lower().strip() in confirmation_words:
+            intent.action = AdminActionType.CONFIRM
+            intent.confidence = 0.99
+            intent.llm_reasoning = "User provided a confirmation word while in a pending confirmation state."
+            return intent
+
         try:
-            # Build context from recent messages
-            context_messages = []
-            for msg in conversation_history[-5:]:  # Last 5 messages
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                content = msg.get("content", "")[:200]  # Limit length
-                context_messages.append(f"{role}: {content}")
-            
-            context_text = "\n".join(context_messages)
-            
+            # Build a rich context string for the LLM
+            context_text = f"The user and bot were discussing how to '{state.current_intent.value}'. "
+            if state.required_params:
+                context_text += f"The bot is waiting for the user to provide: {', '.join(state.required_params.keys())}. "
+            if state.pending_confirmation:
+                context_text += "The bot is waiting for the user to confirm the action. "
+
+            history_text = "\n".join([f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in conversation_history[-4:]])
+
+
             enhance_prompt = PromptTemplate(
-                input_variables=["original_intent", "current_message", "context"],
-                template="""Given this conversation context and a parsed intent, enhance the understanding.
+                input_variables=["current_message", "previous_context", "history"],
+                template="""You are an expert intent refiner. A user is in the middle of an admin task. Your job is to interpret their latest message based on the conversational context.
 
-CONVERSATION CONTEXT:
-{context}
+Conversation Context: {previous_context}
 
-CURRENT MESSAGE: "{current_message}"
+Recent Chat History:
+{history}
 
-CURRENT PARSED INTENT:
-Action: {original_intent}
+User's Latest Message: "{current_message}"
 
-TASK: Based on the conversation context, should we:
-1. Keep the current intent as-is
-2. Modify parameters based on context
-3. Change the intent entirely
+TASK: Analyze the user's latest message.
+1.  Does it provide the missing information the bot was waiting for?
+2.  Is it a confirmation ('yes') or cancellation ('no')?
+3.  Is it a completely new request, meaning the user is abandoning the current task?
 
-If this appears to be a follow-up to a previous action (like "yes" after a confirmation request), indicate that.
+Based on your analysis, provide a refined action and extract any relevant parameters (like a question or answer for an FAQ).
 
-RESPONSE FORMAT (JSON):
+RESPONSE FORMAT (JSON only):
 {{
-    "enhanced": true/false,
-    "new_action": "action_name or null",
-    "additional_parameters": {{}},
-    "context_reasoning": "explanation"
+    "action": "action_name",
+    "parameters": {{ "param_name": "value" }},
+    "reasoning": "A brief explanation of your decision."
 }}
-
-JSON Response:"""
+"""
             )
-            
+
             response = self.llm.invoke(enhance_prompt.format(
-                original_intent=intent.action.value,
                 current_message=intent.original_text,
-                context=context_text
+                previous_context=context_text,
+                history=history_text
             ))
-            
+
             response_text = response.content if hasattr(response, 'content') else str(response)
-            
-            try:
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    enhancement_data = json.loads(json_match.group())
-                    
-                    if enhancement_data.get("enhanced", False):
-                        # Apply enhancements
-                        new_action = enhancement_data.get("new_action")
-                        if new_action:
-                            try:
-                                intent.action = AdminActionType(new_action)
-                            except ValueError:
-                                pass  # Keep original action if invalid
-                        
-                        additional_params = enhancement_data.get("additional_parameters", {})
-                        intent.parameters.update(additional_params)
-                        
-                        context_reasoning = enhancement_data.get("context_reasoning", "")
-                        intent.llm_reasoning = f"{intent.llm_reasoning} | Context: {context_reasoning}"
-                        
-                        logger.info(f"🔄 Enhanced intent with context: {intent.action.value}")
-            
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to parse context enhancement: {e}")
-        
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                enhancement_data = json.loads(json_match.group())
+                
+                # Update the original intent with the new, context-aware information
+                try:
+                    intent.action = AdminActionType(enhancement_data.get("action", intent.action.value))
+                except ValueError:
+                    # Keep original action if LLM hallucinates an invalid one
+                    pass 
+                intent.parameters.update(enhancement_data.get("parameters", {}))
+                intent.llm_reasoning = enhancement_data.get("reasoning", "")
+                intent.confidence = 0.95 # High confidence as it's context-aware
+
+                logger.info(f"🔄 Enhanced intent with context. New action: {intent.action.value}")
+                return intent
+
         except Exception as e:
             logger.error(f"Error enhancing intent with context: {e}")
         
+        # Fallback to the original intent if enhancement fails
         return intent
+    
+    
     
     def extract_faq_parameters_llm(self, user_message: str) -> Dict[str, Any]:
         """
