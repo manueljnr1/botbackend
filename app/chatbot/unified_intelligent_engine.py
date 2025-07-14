@@ -1428,9 +1428,8 @@ Enhanced response:"""
 
     def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
         """
-        Checks if the user's message triggers a troubleshooting flow.
+        Enhanced version with fuzzy matching for better trigger detection
         """
-        
         default_response = {"found": False}
 
         try:
@@ -1442,31 +1441,78 @@ Enhanced response:"""
             ).all()
 
             if not troubleshooting_guides:
-               
                 return default_response
 
+            user_msg_lower = user_message.lower()
+            
+            # Check each guide
+            best_match = None
+            best_score = 0
             
             for guide in troubleshooting_guides:
                 flow = guide.troubleshooting_flow
-                if not flow or 'keywords' not in flow:
+                if not flow:
                     continue
 
-                for keyword in flow['keywords']:
-                    if re.search(r'\b' + re.escape(keyword) + r'\b', user_message, re.IGNORECASE):
-                        
-                        return {
-                            "found": True,
-                            "content": flow.get("initial_message", "I see you're having an issue. I can help with that."),
-                            "source": "Troubleshooting_Flow",
-                            "confidence": 0.95,
-                            "flow_id": guide.id,
-                        }
+                # Calculate match score
+                score = 0
+                matched_keywords = []
+                
+                # Check keywords with partial matching
+                for keyword in flow.get('keywords', []):
+                    keyword_lower = keyword.lower()
+                    
+                    # Exact word match (highest score)
+                    if re.search(r'\b' + re.escape(keyword_lower) + r'\b', user_msg_lower):
+                        score += 3
+                        matched_keywords.append(keyword)
+                    # Partial match
+                    elif keyword_lower in user_msg_lower:
+                        score += 1
+                        matched_keywords.append(f"{keyword} (partial)")
+                
+                # Also check title/description similarity
+                title = flow.get('title', '').lower()
+                if any(word in user_msg_lower for word in title.split() if len(word) > 3):
+                    score += 1
+                
+                # Keep best match
+                if score > best_score and score >= 3:  # Minimum score threshold
+                    best_score = score
+                    best_match = {
+                        "guide": guide,
+                        "flow": flow,
+                        "matched_keywords": matched_keywords
+                    }
             
+            if best_match:
+                logger.info(f"🎯 Troubleshooting match found! Keywords: {best_match['matched_keywords']}")
+                
+                flow = best_match['flow']
+                initial_message = flow.get("initial_message", "I can help you with that issue.")
+                
+                # Get the first step if available
+                first_step = flow.get('steps', [{}])[0]
+                if first_step.get('message'):
+                    full_response = f"{initial_message}\n\n{first_step['message']}"
+                else:
+                    full_response = initial_message
+                
+                return {
+                    "found": True,
+                    "content": full_response,
+                    "source": "TROUBLESHOOTING_GUIDE",
+                    "confidence": min(0.9, best_score / 10),  # Scale confidence
+                    "flow_id": best_match['guide'].id,
+                    "troubleshooting_active": True,
+                    "current_step": first_step.get('id', 'step1'),
+                    "flow_data": flow
+                }
             
             return default_response
 
         except Exception as e:
-            
+            logger.error(f"Error in troubleshooting flow check: {e}")
             return default_response
 
 
