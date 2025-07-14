@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum, Boolean, JSON
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum, Boolean, JSON,  Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -20,6 +20,7 @@ class DocumentType(enum.Enum):
     CSV = "csv"
     XLSX = "xlsx"
     WEBSITE = "website"  
+    TROUBLESHOOTING = "troubleshooting"
 
 
 class CrawlStatus(enum.Enum):
@@ -56,6 +57,13 @@ class KnowledgeBase(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="knowledge_bases")
+
+
+    # Troubleshooting-specific fields
+    is_troubleshooting = Column(Boolean, default=False)
+    troubleshooting_flow = Column(JSON, nullable=True)  # LLM-extracted flow structure
+    flow_extraction_confidence = Column(Float, nullable=True)
+    flow_extraction_status = Column(String, nullable=True)  # 'pending', 'completed', 'failed'
 
 
 class FAQ(Base):

@@ -833,3 +833,92 @@ async def get_vector_content(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading vector store: {str(e)}")
+    
+
+
+# In router.py - Add this endpoint for troubleshooting document upload
+
+@router.post("/knowledge-base/troubleshooting/upload", response_model=KnowledgeBaseOut)
+async def upload_troubleshooting_guide(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a troubleshooting guide document
+    Accepts: TXT, PDF, DOCX formats
+    The system will use LLM to extract the conversation flow
+    """
+    logger.info(f"Troubleshooting guide upload requested: {name}")
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    # Get document type
+    file_extension = file.filename.split('.')[-1].lower()
+    if file_extension not in ['txt', 'pdf', 'docx']:
+        raise HTTPException(status_code=400, detail="Troubleshooting guides must be TXT, PDF, or DOCX")
+    
+    try:
+        doc_type = DocumentType(file_extension)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
+    
+    # Read and upload file
+    try:
+        file_content = await file.read()
+        cloud_file_path = storage_service.upload_knowledge_base_file(
+            tenant_id, file.filename, file_content
+        )
+        logger.info(f"Uploaded troubleshooting file to cloud: {cloud_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to upload file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file")
+    
+    # Create database record
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=name,
+        description=description,
+        file_path=cloud_file_path,
+        document_type=DocumentType.TROUBLESHOOTING,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",
+        processing_status=ProcessingStatus.PENDING,
+        is_troubleshooting=True,
+        flow_extraction_status="pending"
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Process document with enhanced troubleshooting extraction
+    processor = DocumentProcessor(tenant_id)
+    try:
+        kb.processing_status = ProcessingStatus.PROCESSING
+        db.commit()
+        
+        # Process as troubleshooting document
+        result = processor.process_troubleshooting_document(
+            cloud_file_path, doc_type, kb.vector_store_id
+        )
+        
+        # Update KB with results
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        kb.troubleshooting_flow = result.get("flow_data")
+        kb.flow_extraction_confidence = result.get("extraction_confidence", 0)
+        kb.flow_extraction_status = "completed" if result.get("flow_extracted") else "failed"
+        kb.processing_error = None
+        
+        logger.info(f"Troubleshooting guide processed: {kb.vector_store_id}")
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        kb.flow_extraction_status = "failed"
+        logger.error(f"Failed to process troubleshooting guide: {e}")
+    
+    db.commit()
+    return kb

@@ -1978,3 +1978,180 @@ Your detailed, step-by-step response:"""
             return f"Hello! How can I help you today?"
 
 
+    def _check_troubleshooting_triggers(self, user_message: str, tenant_id: int) -> Optional[Dict]:
+        """
+        Check if user message triggers any troubleshooting guide
+        """
+        try:
+            # Get active troubleshooting guides
+            troubleshooting_kbs = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.tenant_id == tenant_id,
+                KnowledgeBase.is_troubleshooting == True,
+                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+                KnowledgeBase.troubleshooting_flow.isnot(None)
+            ).all()
+            
+            if not troubleshooting_kbs:
+                return None
+            
+            user_msg_lower = user_message.lower()
+            best_match = None
+            best_score = 0
+            
+            for kb in troubleshooting_kbs:
+                flow = kb.troubleshooting_flow
+                if not flow:
+                    continue
+                
+                # Check keywords
+                keywords = flow.get("keywords", [])
+                keyword_matches = sum(1 for kw in keywords if kw.lower() in user_msg_lower)
+                
+                # Check title/description similarity
+                title_match = self._calculate_similarity(user_message, flow.get("title", ""))
+                desc_match = self._calculate_similarity(user_message, flow.get("description", ""))
+                
+                # Calculate overall score
+                score = (keyword_matches * 0.5) + (title_match * 0.3) + (desc_match * 0.2)
+                
+                if score > best_score and score > 0.3:  # Threshold
+                    best_score = score
+                    best_match = {
+                        "kb_id": kb.id,
+                        "flow": flow,
+                        "score": score
+                    }
+            
+            return best_match
+            
+        except Exception as e:
+            logger.error(f"Error checking troubleshooting triggers: {e}")
+            return None
+
+    def _execute_troubleshooting_step(self, session_id: str, user_message: str, current_state: Dict) -> Dict[str, Any]:
+        """
+        Execute the current step in a troubleshooting flow
+        """
+        try:
+            flow = current_state.get("flow", {})
+            current_step_id = current_state.get("current_step", "step1")
+            
+            # Find current step
+            current_step = None
+            for step in flow.get("steps", []):
+                if step.get("id") == current_step_id:
+                    current_step = step
+                    break
+            
+            if not current_step:
+                return {
+                    "success": False,
+                    "response": "I'm having trouble with the troubleshooting guide. Let me help you another way.",
+                    "end_troubleshooting": True
+                }
+            
+            # Process user response and determine next step
+            branches = current_step.get("branches", {})
+            next_step_id = None
+            branch_message = None
+            
+            # Match user response to branches
+            user_msg_lower = user_message.lower()
+            for branch_pattern, branch_data in branches.items():
+                patterns = branch_pattern.split("|")
+                if any(pattern in user_msg_lower for pattern in patterns):
+                    next_step_id = branch_data.get("next")
+                    branch_message = branch_data.get("message", "")
+                    break
+            
+            # Default branch if no match
+            if not next_step_id and "default" in branches:
+                default_branch = branches["default"]
+                next_step_id = default_branch.get("next")
+                branch_message = default_branch.get("message", "I didn't understand that. Let me ask again.")
+            
+            # Find next step
+            next_step = None
+            for step in flow.get("steps", []):
+                if step.get("id") == next_step_id:
+                    next_step = step
+                    break
+            
+            # Build response
+            response_parts = []
+            if branch_message:
+                response_parts.append(branch_message)
+            
+            if next_step:
+                response_parts.append(next_step.get("message", ""))
+                
+                # Update state
+                current_state["current_step"] = next_step_id
+                
+                return {
+                    "success": True,
+                    "response": "\n\n".join(response_parts),
+                    "continue_troubleshooting": True,
+                    "wait_for_response": next_step.get("wait_for_response", True),
+                    "updated_state": current_state
+                }
+            else:
+                # End of flow
+                success_msg = flow.get("success_message", "Great! The issue should be resolved now.")
+                return {
+                    "success": True,
+                    "response": success_msg,
+                    "end_troubleshooting": True
+                }
+            
+        except Exception as e:
+            logger.error(f"Error executing troubleshooting step: {e}")
+            return {
+                "success": False,
+                "response": "I encountered an error in the troubleshooting guide. Let me help you another way.",
+                "end_troubleshooting": True
+            }
+
+    # Modify the _get_harmonized_answer method to include troubleshooting
+    def _get_harmonized_answer(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
+        """
+        Get harmonized answer using hierarchical approach:
+        1. FAQ (authoritative, current)
+        2. Troubleshooting guides (NEW)
+        3. KB (detailed context)
+        4. Combined (if compatible)
+        """
+        # Check if there's an active troubleshooting session
+        from app.chatbot.simple_memory import SimpleChatbotMemory
+        memory = SimpleChatbotMemory(self.db, tenant_id)
+        
+        # This would need the session_id - you'd pass it from the main process_message method
+        # For now, showing the structure:
+        
+        # Step 1: Check FAQ first (existing code)
+        faqs = self._get_faqs(tenant_id)
+        faq_answer = self._check_faq_with_llm(user_message, faqs)
+        
+        # Step 2: Check for troubleshooting triggers
+        if not faq_answer:
+            troubleshooting_match = self._check_troubleshooting_triggers(user_message, tenant_id)
+            if troubleshooting_match:
+                flow = troubleshooting_match["flow"]
+                initial_msg = flow.get("initial_message", "I can help you with that. Let me guide you through the solution.")
+                first_step = flow.get("steps", [{}])[0]
+                
+                return {
+                    "answer": f"{initial_msg}\n\n{first_step.get('message', '')}",
+                    "source": "TROUBLESHOOTING",
+                    "troubleshooting_active": True,
+                    "troubleshooting_state": {
+                        "kb_id": troubleshooting_match["kb_id"],
+                        "flow": flow,
+                        "current_step": first_step.get("id", "step1")
+                    }
+                }
+        
+        # Step 3: Continue with KB search (existing code)
+        kb_answer = None
+        if not faq_answer:
+            kb_answer = self._get_kb_answer(user_message, tenant_id)

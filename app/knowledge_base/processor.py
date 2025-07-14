@@ -28,14 +28,29 @@ logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     """Enhanced processor with website crawling support"""
-    
-    def __init__(self, tenant_id: int):
+
+    def __init__(self, tenant_id: int, llm_service: Optional[Any] = None):
         """Initialize DocumentProcessor with tenant ID and required components"""
         self.tenant_id = tenant_id
         self.embeddings = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
         self.storage = storage_service
+        self.llm_service = llm_service
         
-        logger.info(f"DocumentProcessor initialized for tenant {tenant_id} with cloud storage")
+        # Add LLM availability check
+        try:
+            from langchain_openai import ChatOpenAI
+            self.llm_available = bool(settings.OPENAI_API_KEY)
+            if self.llm_available:
+                self.llm = ChatOpenAI(
+                    model_name="gpt-4",
+                    temperature=0.1,
+                    openai_api_key=settings.OPENAI_API_KEY
+                )
+        except ImportError:
+            self.llm_available = False
+            self.llm = None
+        
+        logger.info(f"DocumentProcessor initialized for tenant {tenant_id} with cloud storage (LLM: {self.llm_available})")
     
     def process_document(self, file_path: str, doc_type: DocumentType) -> str:
         """Process a document and store it in the vector store (original method)"""
@@ -467,6 +482,140 @@ class DocumentProcessor:
                 pass
             
             raise
+
+
+    
+
+
+    def process_troubleshooting_document(self, file_path: str, doc_type: DocumentType, vector_store_id: str) -> Dict[str, Any]:
+        """
+        Process troubleshooting document with LLM extraction
+        """
+        logger.info(f"Processing troubleshooting document: {file_path}")
+        
+        try:
+            # First, process as regular document for vector storage
+            self.process_document_with_id(file_path, doc_type, vector_store_id)
+            
+            # Now extract troubleshooting flow using LLM
+            flow_data = self._extract_troubleshooting_flow(file_path, doc_type)
+            
+            return {
+                "vector_store_id": vector_store_id,
+                "flow_extracted": flow_data is not None,
+                "flow_data": flow_data,
+                "extraction_confidence": flow_data.get("confidence", 0) if flow_data else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing troubleshooting document: {e}")
+            raise
+
+    def _extract_troubleshooting_flow(self, file_path: str, doc_type: DocumentType) -> Optional[Dict]:
+        """
+        Use LLM to extract troubleshooting flow from document
+        """
+        if not self.llm_available:
+            logger.warning("LLM not available for troubleshooting extraction")
+            return None
+        
+        try:
+            # Download file from cloud to temp location
+            temp_file_path = None
+            
+            try:
+                # Download the file if it's a cloud path
+                if file_path.startswith('tenant_'):
+                    temp_file_path = self.storage.download_to_temp("knowledge-base-files", file_path)
+                    logger.info(f"Downloaded file for extraction: {temp_file_path}")
+                    file_to_process = temp_file_path
+                else:
+                    file_to_process = file_path
+                
+                # Load document content
+                loader = self._get_loader(file_to_process, doc_type)
+                documents = loader.load()
+                
+                if not documents:
+                    return None
+                
+                # Combine all document content
+                full_content = "\n".join([doc.page_content for doc in documents])
+                
+                # LLM prompt for extraction
+                from langchain.prompts import PromptTemplate
+                
+                prompt = PromptTemplate(
+                    input_variables=["document_content"],
+                    template="""Analyze this troubleshooting guide and extract the conversation flow.
+
+    Document Content:
+    {document_content}
+
+    Extract the following:
+    1. Problem title and description
+    2. Keywords that would trigger this guide
+    3. Step-by-step conversation flow with branches
+
+    Format the response as JSON:
+    {{
+        "title": "Problem title",
+        "description": "Brief description",
+        "keywords": ["keyword1", "keyword2"],
+        "initial_message": "Bot's opening message when guide is triggered",
+        "steps": [
+            {{
+                "id": "step1",
+                "type": "question|information|action",
+                "message": "What the bot says",
+                "wait_for_response": true/false,
+                "branches": {{
+                    "yes|positive|confirmed": {{"next": "step2"}},
+                    "no|negative|denied": {{"next": "step3", "message": "Response for no"}},
+                    "default": {{"next": "step1", "message": "Please answer yes or no"}}
+                }}
+            }}
+        ],
+        "success_message": "Message when problem is resolved",
+        "escalation_message": "Message when bot can't help"
+    }}
+
+    IMPORTANT: Extract the actual conversation flow, not just a summary.
+
+    JSON Response:"""
+                )
+                
+                # Use instance's LLM
+                result = self.llm.invoke(prompt.format(document_content=full_content[:4000]))  # Limit content
+                response_text = result.content if hasattr(result, 'content') else str(result)
+                
+                # Parse JSON response
+                import json
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    flow_data = json.loads(json_match.group())
+                    flow_data["confidence"] = 0.9  # High confidence since we got valid JSON
+                    logger.info(f"Successfully extracted troubleshooting flow: {flow_data.get('title', 'Unknown')}")
+                    return flow_data
+                
+                return None
+                
+            finally:
+                # Clean up temp file if we downloaded one
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                        logger.info(f"Cleaned up temp extraction file: {temp_file_path}")
+                    except:
+                        pass
+                
+        except Exception as e:
+            logger.error(f"Error extracting troubleshooting flow: {e}")
+            return None
+
+
+
 
     async def get_crawl_metadata(self, vector_store_id: str) -> Optional[Dict]:
         """Get crawl metadata for a website knowledge base"""

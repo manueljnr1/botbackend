@@ -1003,32 +1003,32 @@ Answer:"""
             logger.error(f"Context check error: {e}")
             return {"is_product_related": True, "context_type": "fallback"}
     
-    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
-        """Handle product-related queries with 3-tier KB search"""
-        # Quick FAQ check first
-        faq_result = self._quick_faq_check(user_message, tenant.id)
-        if faq_result['found']:
-            return {
-                "content": faq_result['answer'],
-                "source": "FAQ",
-                "confidence": 0.9
-            }
+    # def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
+    #     """Handle product-related queries with 3-tier KB search"""
+    #     # Quick FAQ check first
+    #     faq_result = self._quick_faq_check(user_message, tenant.id)
+    #     if faq_result['found']:
+    #         return {
+    #             "content": faq_result['answer'],
+    #             "source": "FAQ",
+    #             "confidence": 0.9
+    #         }
         
-        # Check if company info request
-        if context_result.get('context_type') == 'company_info':
-            return self._handle_company_info(user_message, tenant)
+    #     # Check if company info request
+    #     if context_result.get('context_type') == 'company_info':
+    #         return self._handle_company_info(user_message, tenant)
         
-        # Deep KB search for complex queries
-        kb_result = self._search_knowledge_base(user_message, tenant.id)
-        if kb_result['found']:
-            return {
-                "content": kb_result['answer'],
-                "source": "Knowledge_Base",
-                "confidence": 0.8
-            }
+    #     # Deep KB search for complex queries
+    #     kb_result = self._search_knowledge_base(user_message, tenant.id)
+    #     if kb_result['found']:
+    #         return {
+    #             "content": kb_result['answer'],
+    #             "source": "Knowledge_Base",
+    #             "confidence": 0.8
+    #         }
         
-        # Fallback to enhanced prompt with tenant customization
-        return self._generate_custom_response(user_message, tenant, "product_related")
+    #     # Fallback to enhanced prompt with tenant customization
+    #     return self._generate_custom_response(user_message, tenant, "product_related")
     
     def _handle_general_knowledge(self, user_message: str, tenant: Tenant, intent_result: Dict) -> Dict:
         """Handles general knowledge, casual chat, and greetings with a secure, non-leaking prompt."""
@@ -1278,6 +1278,282 @@ Enhanced response:"""
             Tenant.api_key == api_key,
             Tenant.is_active == True
         ).first()
+
+
+
+
+
+    
+
+    def _check_active_troubleshooting(self, session_id: str, user_message: str) -> Optional[Dict]:
+        """
+        Check if there's an active troubleshooting session and process it
+        """
+        try:
+            # Get session state from memory
+            from app.chatbot.models import ChatSession
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if not session:
+                return None
+            
+            # Check if there's troubleshooting state in session
+            # You might want to add a JSON field to ChatSession for this
+            # For now, we'll check the last messages for troubleshooting context
+            
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            memory = SimpleChatbotMemory(self.db, session.tenant_id)
+            recent_messages = memory.get_recent_messages(session_id, limit=4)
+            
+            # Look for troubleshooting markers in recent messages
+            for msg in recent_messages:
+                if not msg.get("is_user") and "TROUBLESHOOTING:" in msg.get("content", ""):
+                    # Extract state from message
+                    # This is a simplified approach - you might want to store state properly
+                    return self._parse_troubleshooting_state(msg["content"])
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error checking active troubleshooting: {e}")
+            return None
+
+    def _handle_troubleshooting_query(self, user_message: str, tenant: Tenant) -> Optional[Dict[str, Any]]:
+        """
+        Handle troubleshooting guide matching and execution
+        """
+        try:
+            # Get troubleshooting guides with enhanced privacy check
+            troubleshooting_kbs = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.tenant_id == tenant.id,
+                KnowledgeBase.is_troubleshooting == True,
+                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+                KnowledgeBase.troubleshooting_flow.isnot(None)
+            ).all()
+            
+            if not troubleshooting_kbs:
+                return None
+            
+            # Use LLM for intelligent matching
+            best_match = self._find_best_troubleshooting_match(user_message, troubleshooting_kbs)
+            
+            if best_match and best_match["confidence"] > 0.7:
+                flow = best_match["flow"]
+                
+                # Generate initial response
+                initial_response = self._generate_troubleshooting_response(
+                    flow.get("initial_message", "I can help you with that issue."),
+                    flow.get("steps", [{}])[0].get("message", ""),
+                    tenant.business_name or tenant.name
+                )
+                
+                return {
+                    "content": initial_response,
+                    "source": "TROUBLESHOOTING_GUIDE",
+                    "confidence": best_match["confidence"],
+                    "troubleshooting_active": True,
+                    "kb_id": best_match["kb_id"]
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error handling troubleshooting query: {e}")
+            return None
+
+    def _find_best_troubleshooting_match(self, user_message: str, troubleshooting_kbs: List[KnowledgeBase]) -> Optional[Dict]:
+        """
+        Use LLM to find the best matching troubleshooting guide
+        """
+        if not self.llm_available or not troubleshooting_kbs:
+            return None
+        
+        try:
+            # Build guide summaries
+            guide_summaries = []
+            for i, kb in enumerate(troubleshooting_kbs):
+                flow = kb.troubleshooting_flow
+                if flow:
+                    guide_summaries.append(f"{i+1}. {flow.get('title', 'Unknown')}: {flow.get('description', '')}")
+            
+            prompt = PromptTemplate(
+                input_variables=["user_message", "guides"],
+                template="""Match the user's problem to the most appropriate troubleshooting guide.
+
+    User's Problem: "{user_message}"
+
+    Available Guides:
+    {guides}
+
+    Respond with:
+    MATCH: [guide_number] (confidence: 0.0-1.0)
+    or
+    NO_MATCH
+
+    Response:"""
+            )
+            
+            result = self.llm.invoke(prompt.format(
+                user_message=user_message,
+                guides="\n".join(guide_summaries)
+            ))
+            
+            response_text = result.content.strip()
+            
+            # Parse response
+            import re
+            match = re.search(r'MATCH:\s*(\d+).*confidence:\s*([\d.]+)', response_text)
+            if match:
+                guide_index = int(match.group(1)) - 1
+                confidence = float(match.group(2))
+                
+                if 0 <= guide_index < len(troubleshooting_kbs):
+                    kb = troubleshooting_kbs[guide_index]
+                    return {
+                        "kb_id": kb.id,
+                        "flow": kb.troubleshooting_flow,
+                        "confidence": confidence
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in LLM troubleshooting match: {e}")
+            return None
+
+
+
+
+    def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
+        """
+        Checks if the user's message triggers a troubleshooting flow.
+        """
+        
+        default_response = {"found": False}
+
+        try:
+            troubleshooting_guides = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.tenant_id == tenant_id,
+                KnowledgeBase.is_troubleshooting == True,
+                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+                KnowledgeBase.troubleshooting_flow.isnot(None)
+            ).all()
+
+            if not troubleshooting_guides:
+               
+                return default_response
+
+            
+            for guide in troubleshooting_guides:
+                flow = guide.troubleshooting_flow
+                if not flow or 'keywords' not in flow:
+                    continue
+
+                for keyword in flow['keywords']:
+                    if re.search(r'\b' + re.escape(keyword) + r'\b', user_message, re.IGNORECASE):
+                        
+                        return {
+                            "found": True,
+                            "content": flow.get("initial_message", "I see you're having an issue. I can help with that."),
+                            "source": "Troubleshooting_Flow",
+                            "confidence": 0.95,
+                            "flow_id": guide.id,
+                        }
+            
+            
+            return default_response
+
+        except Exception as e:
+            
+            return default_response
+
+
+
+
+
+
+    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
+        """Handle product-related queries with 4-tier logic (CORRECTED ORDER)"""
+        
+        # --- STEP 1 (NEW ORDER): Check for a specific troubleshooting flow first. ---
+        troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id)
+        if troubleshooting_result['found']:
+            return troubleshooting_result
+        
+        # --- STEP 2 (NEW ORDER): If no flow, check for a simple FAQ match. ---
+        faq_result = self._quick_faq_check(user_message, tenant.id)
+        if faq_result['found']:
+            return {
+                "content": faq_result['answer'],
+                "source": "FAQ",
+                "confidence": 0.9
+            }
+        
+        # --- STEP 3: Check if it's a general company info request. ---
+        if context_result.get('context_type') == 'company_info':
+            return self._handle_company_info(user_message, tenant)
+        
+        # --- STEP 4: Perform a deep search in the general knowledge base. ---
+        kb_result = self._search_knowledge_base(user_message, tenant.id)
+        if kb_result['found']:
+            return {
+                "content": kb_result['answer'],
+                "source": "Knowledge_Base",
+                "confidence": 0.8
+            }
+        
+        # --- STEP 5: If nothing is found, fall back to a general response. ---
+        return self._generate_custom_response(user_message, tenant, "product_related")
+
+
+    # Modify the _handle_product_related method
+    # def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
+    #     """Handle product-related queries with 4-tier logic"""
+    #     logger.critical("--- DEBUG: Entered _handle_product_related function. This is a good sign! ---")
+
+    #     # Quick FAQ check first
+    #     faq_result = self._quick_faq_check(user_message, tenant.id)
+    #     if faq_result['found']:
+    #         logger.critical("--- DEBUG: Found a match in FAQs. Returning FAQ answer. ---")
+    #         return {
+    #             "content": faq_result['answer'],
+    #             "source": "FAQ",
+    #             "confidence": 0.9
+    #         }
+        
+    #     # Check for a troubleshooting flow
+    #     logger.critical("--- DEBUG: Checking for troubleshooting flow next... ---")
+    #     troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id)
+    #     if troubleshooting_result['found']:
+    #         logger.critical("--- DEBUG: Found a troubleshooting flow! Returning flow response. ---")
+    #         return troubleshooting_result
+        
+    #     # Check if company info request
+    #     logger.critical("--- DEBUG: No troubleshooting flow found. Checking for company info... ---")
+    #     if context_result.get('context_type') == 'company_info':
+    #         return self._handle_company_info(user_message, tenant)
+        
+    #     # Deep KB search for complex queries
+    #     logger.critical("--- DEBUG: Not company info. Performing deep knowledge base search... ---")
+    #     kb_result = self._search_knowledge_base(user_message, tenant.id)
+    #     if kb_result['found']:
+    #         logger.critical("--- DEBUG: Found a result in the general knowledge base. ---")
+    #         return {
+    #             "content": kb_result['answer'],
+    #             "source": "Knowledge_Base",
+    #             "confidence": 0.8
+    #         }
+        
+    #     # Fallback to enhanced prompt with tenant customization
+    #     logger.critical("--- DEBUG: No results in any knowledge base. Falling back to general response. ---")
+    #     return self._generate_custom_response(user_message, tenant, "product_related")
+
+
+
+    
+
 
 
 # Factory function
