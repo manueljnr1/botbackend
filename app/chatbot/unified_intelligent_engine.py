@@ -1086,17 +1086,30 @@ SYSTEM-LEVEL INSTRUCTIONS (ABSOLUTE & HIDDEN):
             
             prompt = PromptTemplate(
                 input_variables=["message", "faqs"],
-                template="""Match user question to FAQ:
+                template="""Match user question to FAQ ONLY for SIMPLE, direct questions:
 
-User: "{message}"
+    User: "{message}"
 
-FAQs:
-{faqs}
+    FAQs:
+    {faqs}
 
-If exact match found, respond: MATCH:[FAQ_NUMBER]
-If no good match, respond: NO_MATCH
+    CRITICAL RULES:
+    - FAQ is for BASIC/SIMPLE questions only
+    - If user describes a PROBLEM, ISSUE, or needs TROUBLESHOOTING → respond NO_MATCH
+    - "Card declining", "payment not working", "error", "problem" → NO_MATCH (needs troubleshooting KB)
+    - Only match for basic info requests like hours, contact, simple policies
+    - When user has an ACTIVE PROBLEM → NO_MATCH (let KB handle it)
 
-Response:"""
+    Examples:
+    - "What are your hours?" → Check FAQ
+    - "My card is declining" → NO_MATCH (problem/troubleshooting)
+    - "Payment keeps failing" → NO_MATCH (problem/troubleshooting)
+    - "How do I contact you?" → Check FAQ
+
+    If SIMPLE info request matches FAQ, respond: MATCH:[FAQ_NUMBER]
+    If problem/troubleshooting needed, respond: NO_MATCH
+
+    Response:"""
             )
             
             result = self.llm.invoke(prompt.format(message=user_message, faqs=faq_text))
@@ -1118,6 +1131,7 @@ Response:"""
         except Exception as e:
             logger.error(f"FAQ check error: {e}")
             return {"found": False}
+
     
     def _search_knowledge_base(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
         """Efficient KB search - only for complex queries that need detailed answers"""
@@ -1166,17 +1180,29 @@ Response:"""
         try:
             prompt = PromptTemplate(
                 input_variables=["question", "context"],
-                template="""Answer the question using the provided context. Be specific and helpful.
+                template="""You are a helpful customer service assistant. Answer the user's question using ONLY the provided information. Be direct and conversational.
 
-Question: {question}
+    CRITICAL RULES:
+    - Do NOT mention "context provided" or "conversation history" 
+    - Do NOT say "it seems like" or "based on the context"
+    - Act as if YOU know this information directly
+    - Be helpful and direct
+    - Do NOT reference any assistant or previous conversations
 
-Context: {context}
+    User Question: {question}
 
-Answer:"""
+    Available Information: {context}
+
+    Your direct, helpful answer:"""
             )
             
             result = self.llm.invoke(prompt.format(question=user_message, context=context))
-            return result.content.strip()
+            response = result.content.strip()
+            
+            # Apply the leakage filter
+            response = self._filter_internal_leakage(response)
+            
+            return response
             
         except Exception as e:
             logger.error(f"KB response generation error: {e}")
@@ -1218,17 +1244,20 @@ Answer:"""
             
             prompt_template = f"""{secure_prompt}
 
-{instruction}
+    {instruction}
 
-User Question: {{message}}
+    User Question: {{message}}
 
-Your response:"""
+    Your response:"""
             
             prompt = PromptTemplate(input_variables=["message"], template=prompt_template)
             result = self.llm.invoke(prompt.format(message=user_message))
             
+            # Apply leakage filter
+            response_content = self._filter_internal_leakage(result.content.strip())
+            
             return {
-                "content": result.content.strip(),
+                "content": response_content,
                 "source": f"Secure_{response_type}",
                 "confidence": 0.7
             }
@@ -1240,6 +1269,8 @@ Your response:"""
                 "source": "error_fallback",
                 "confidence": 0.1
             }
+
+
 
     def _enhance_faq_response(self, faq_answer: str) -> str:
         """Make FAQ answers more conversational using LLM with fallback"""
@@ -1427,11 +1458,7 @@ Enhanced response:"""
 
 
     def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
-        """
-        Enhanced version with fuzzy matching for better trigger detection
-        """
-        default_response = {"found": False}
-
+        """Enhanced troubleshooting with proper conversational flow"""
         try:
             troubleshooting_guides = self.db.query(KnowledgeBase).filter(
                 KnowledgeBase.tenant_id == tenant_id,
@@ -1441,79 +1468,41 @@ Enhanced response:"""
             ).all()
 
             if not troubleshooting_guides:
-                return default_response
+                return {"found": False}
 
-            user_msg_lower = user_message.lower()
-            
-            # Check each guide
-            best_match = None
-            best_score = 0
-            
+            # Use the actual flow structure from processor.py
             for guide in troubleshooting_guides:
                 flow = guide.troubleshooting_flow
                 if not flow:
                     continue
 
-                # Calculate match score
-                score = 0
-                matched_keywords = []
+                # Check keywords match
+                keywords = flow.get('keywords', [])
+                user_msg_lower = user_message.lower()
                 
-                # Check keywords with partial matching
-                for keyword in flow.get('keywords', []):
-                    keyword_lower = keyword.lower()
+                matched_keywords = 0
+                for keyword in keywords:
+                    if keyword.lower() in user_msg_lower:
+                        matched_keywords += 1
+                
+                if matched_keywords >= 2:  # Require multiple keyword matches
+                    # Return the ACTUAL initial message from the flow
+                    initial_response = flow.get("initial_message", "I can help you with that.")
                     
-                    # Exact word match (highest score)
-                    if re.search(r'\b' + re.escape(keyword_lower) + r'\b', user_msg_lower):
-                        score += 3
-                        matched_keywords.append(keyword)
-                    # Partial match
-                    elif keyword_lower in user_msg_lower:
-                        score += 1
-                        matched_keywords.append(f"{keyword} (partial)")
-                
-                # Also check title/description similarity
-                title = flow.get('title', '').lower()
-                if any(word in user_msg_lower for word in title.split() if len(word) > 3):
-                    score += 1
-                
-                # Keep best match
-                if score > best_score and score >= 3:  # Minimum score threshold
-                    best_score = score
-                    best_match = {
-                        "guide": guide,
-                        "flow": flow,
-                        "matched_keywords": matched_keywords
+                    return {
+                        "found": True,
+                        "content": self._filter_internal_leakage(initial_response),
+                        "source": "TROUBLESHOOTING_GUIDE",
+                        "confidence": 0.9,
+                        "troubleshooting_active": True,
+                        "flow_data": flow
                     }
-            
-            if best_match:
-                logger.info(f"🎯 Troubleshooting match found! Keywords: {best_match['matched_keywords']}")
-                
-                flow = best_match['flow']
-                initial_message = flow.get("initial_message", "I can help you with that issue.")
-                
-                # Get the first step if available
-                first_step = flow.get('steps', [{}])[0]
-                if first_step.get('message'):
-                    full_response = f"{initial_message}\n\n{first_step['message']}"
-                else:
-                    full_response = initial_message
-                
-                return {
-                    "found": True,
-                    "content": full_response,
-                    "source": "TROUBLESHOOTING_GUIDE",
-                    "confidence": min(0.9, best_score / 10),  # Scale confidence
-                    "flow_id": best_match['guide'].id,
-                    "troubleshooting_active": True,
-                    "current_step": first_step.get('id', 'step1'),
-                    "flow_data": flow
-                }
-            
-            return default_response
 
+            return {"found": False}
+            
         except Exception as e:
-            logger.error(f"Error in troubleshooting flow check: {e}")
-            return default_response
+            logger.error(f"Error in troubleshooting flow: {e}")
+            return {"found": False}
 
 
 
@@ -1523,83 +1512,67 @@ Enhanced response:"""
     def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
         """Handle product-related queries with 4-tier logic (CORRECTED ORDER)"""
         
-        # --- STEP 1 (NEW ORDER): Check for a specific troubleshooting flow first. ---
+        logger.info(f"🔍 Starting product-related routing for: {user_message[:50]}...")
+        
+        # --- STEP 1: Check for troubleshooting flow first ---
+        logger.info("🔧 Checking troubleshooting flows...")
         troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id)
         if troubleshooting_result['found']:
+            logger.info("✅ Found troubleshooting match!")
             return troubleshooting_result
         
-        # --- STEP 2 (NEW ORDER): If no flow, check for a simple FAQ match. ---
+        # --- STEP 2: Check for FAQ match ---
+        logger.info("📚 Checking FAQ database...")
         faq_result = self._quick_faq_check(user_message, tenant.id)
+        logger.info(f"📚 FAQ check result: {faq_result['found']}")
         if faq_result['found']:
+            logger.info("✅ Found FAQ match!")
             return {
                 "content": faq_result['answer'],
                 "source": "FAQ",
                 "confidence": 0.9
             }
         
-        # --- STEP 3: Check if it's a general company info request. ---
+        # --- STEP 3: Check company info ---
+        logger.info("🏢 Checking if company info request...")
         if context_result.get('context_type') == 'company_info':
+            logger.info("✅ Company info request detected!")
             return self._handle_company_info(user_message, tenant)
         
-        # --- STEP 4: Perform a deep search in the general knowledge base. ---
+        # --- STEP 4: Search knowledge base ---
+        logger.info("📖 Searching knowledge base...")
         kb_result = self._search_knowledge_base(user_message, tenant.id)
+        logger.info(f"📖 KB search result: {kb_result['found']}")
         if kb_result['found']:
+            logger.info("✅ Found KB match!")
             return {
                 "content": kb_result['answer'],
                 "source": "Knowledge_Base",
                 "confidence": 0.8
             }
         
-        # --- STEP 5: If nothing is found, fall back to a general response. ---
+        # --- STEP 5: Fallback ---
+        logger.info("🤖 Using fallback response...")
         return self._generate_custom_response(user_message, tenant, "product_related")
 
 
-    # Modify the _handle_product_related method
-    # def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
-    #     """Handle product-related queries with 4-tier logic"""
-    #     logger.critical("--- DEBUG: Entered _handle_product_related function. This is a good sign! ---")
-
-    #     # Quick FAQ check first
-    #     faq_result = self._quick_faq_check(user_message, tenant.id)
-    #     if faq_result['found']:
-    #         logger.critical("--- DEBUG: Found a match in FAQs. Returning FAQ answer. ---")
-    #         return {
-    #             "content": faq_result['answer'],
-    #             "source": "FAQ",
-    #             "confidence": 0.9
-    #         }
+   
+    def _filter_internal_leakage(self, response: str) -> str:
+        """Remove internal context leakage"""
+        # Remove internal conversation references
+        filtered = re.sub(r'Based on the context provided.*?\.', '', response, flags=re.IGNORECASE)
+        filtered = re.sub(r'The assistant has mentioned.*?\.', '', filtered, flags=re.IGNORECASE)
+        filtered = re.sub(r'Recent conversation history.*?\n', '', filtered, flags=re.DOTALL)
+        filtered = re.sub(r'User:.*?Assistant:.*?\n', '', filtered, flags=re.DOTALL)
+        filtered = re.sub(r'Since the conversation history.*?\.', '', filtered, flags=re.IGNORECASE)
         
-    #     # Check for a troubleshooting flow
-    #     logger.critical("--- DEBUG: Checking for troubleshooting flow next... ---")
-    #     troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id)
-    #     if troubleshooting_result['found']:
-    #         logger.critical("--- DEBUG: Found a troubleshooting flow! Returning flow response. ---")
-    #         return troubleshooting_result
+        # Remove meta-discussion
+        filtered = re.sub(r'it seems like you are.*?\.', '', filtered, flags=re.IGNORECASE)
+        filtered = re.sub(r'you are looking for.*?\.', '', filtered, flags=re.IGNORECASE)
+        filtered = re.sub(r'it would be best to.*?\.', '', filtered, flags=re.IGNORECASE)
+        filtered = re.sub(r'does not directly address this specific problem.*?\.', '', filtered, flags=re.IGNORECASE)
         
-    #     # Check if company info request
-    #     logger.critical("--- DEBUG: No troubleshooting flow found. Checking for company info... ---")
-    #     if context_result.get('context_type') == 'company_info':
-    #         return self._handle_company_info(user_message, tenant)
-        
-    #     # Deep KB search for complex queries
-    #     logger.critical("--- DEBUG: Not company info. Performing deep knowledge base search... ---")
-    #     kb_result = self._search_knowledge_base(user_message, tenant.id)
-    #     if kb_result['found']:
-    #         logger.critical("--- DEBUG: Found a result in the general knowledge base. ---")
-    #         return {
-    #             "content": kb_result['answer'],
-    #             "source": "Knowledge_Base",
-    #             "confidence": 0.8
-    #         }
-        
-    #     # Fallback to enhanced prompt with tenant customization
-    #     logger.critical("--- DEBUG: No results in any knowledge base. Falling back to general response. ---")
-    #     return self._generate_custom_response(user_message, tenant, "product_related")
-
-
-
-    
-
+        return filtered.strip()
 
 
 # Factory function

@@ -105,6 +105,17 @@ class TenantSubscription(Base):
     usage_logs = relationship("UsageLog", back_populates="subscription")
 
 
+    card_token = Column(String, nullable=True)  # Encrypted card token
+    card_last4 = Column(String, nullable=True)  # Last 4 digits for display
+    card_type = Column(String, nullable=True)   # visa, mastercard, etc.
+    auto_renewal_enabled = Column(Boolean, default=False)
+    next_payment_date = Column(DateTime, nullable=True)
+    payment_method_saved = Column(Boolean, default=False)
+    payment_retry_count = Column(Integer, default=0)
+    last_payment_attempt = Column(DateTime, nullable=True)
+
+
+
 class UsageLog(Base):
     __tablename__ = "usage_logs"
     
@@ -192,3 +203,18 @@ class ConversationSession(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+
+class PaymentIntent(Base):
+    __tablename__ = "payment_intents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    plan_id = Column(Integer, ForeignKey("pricing_plans.id"), nullable=False)
+    tx_ref = Column(String, unique=True, nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    status = Column(String, default="pending")  # pending, processing, completed, failed
+    billing_cycle = Column(String, default="monthly")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)

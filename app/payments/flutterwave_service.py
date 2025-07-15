@@ -228,3 +228,114 @@ class FlutterwaveService:
         except Exception as e:
             logger.error(f"Error verifying payment: {e}")
             return {"success": False, "error": str(e)}
+        
+
+    
+
+    def save_customer_card(self, tx_ref: str) -> Dict[str, Any]:
+        """Get customer and card details after successful payment for future charges"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/transactions/{tx_ref}/verify",
+                headers=self._get_headers()
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data["status"] == "success":
+                    transaction = data["data"]
+                    
+                    # Check if card info is available
+                    card_info = transaction.get("card", {})
+                    customer_info = transaction.get("customer", {})
+                    
+                    return {
+                        "success": True,
+                        "customer_id": customer_info.get("id"),
+                        "card_token": card_info.get("token"),
+                        "card_last4": card_info.get("last_4digits"),
+                        "card_type": card_info.get("type"),
+                        "card_brand": card_info.get("issuer"),
+                        "customer_email": customer_info.get("email")
+                    }
+            
+            logger.error(f"Failed to get card details for {tx_ref}: {response.text}")
+            return {"success": False, "error": "Could not retrieve card details"}
+            
+        except Exception as e:
+            logger.error(f"Error saving card details: {e}")
+            return {"success": False, "error": str(e)}
+
+    def charge_saved_card(self, 
+                        card_token: str,
+                        amount: float,
+                        customer_email: str,
+                        tenant_id: int,
+                        description: str = "Recurring subscription payment") -> Dict[str, Any]:
+        """Charge a previously saved card token"""
+        try:
+            tx_ref = f"recurring_{tenant_id}_{int(datetime.now().timestamp())}"
+            
+            payload = {
+                "token": card_token,
+                "currency": "NGN",
+                "amount": amount,
+                "email": customer_email,
+                "tx_ref": tx_ref,
+                "narration": description,
+                "meta": {
+                    "tenant_id": tenant_id,
+                    "charge_type": "recurring",
+                    "description": description
+                }
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/tokenized-charges",
+                json=payload,
+                headers=self._get_headers()
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "success": data["status"] == "success",
+                    "tx_ref": tx_ref,
+                    "amount": amount,
+                    "status": data.get("data", {}).get("status", "failed"),
+                    "flw_ref": data.get("data", {}).get("flw_ref"),
+                    "charged_amount": data.get("data", {}).get("charged_amount"),
+                    "response_data": data
+                }
+            
+            logger.error(f"Card charge failed: {response.text}")
+            return {"success": False, "error": response.text}
+            
+        except Exception as e:
+            logger.error(f"Error charging saved card: {e}")
+            return {"success": False, "error": str(e)}
+
+    def validate_card_token(self, card_token: str) -> bool:
+        """Check if a card token is still valid"""
+        try:
+            # Test with a small amount (0.50 NGN) to validate
+            test_payload = {
+                "token": card_token,
+                "currency": "NGN",
+                "amount": 0.50,
+                "email": "test@validation.com",
+                "tx_ref": f"validation_{int(datetime.now().timestamp())}"
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/tokenized-charges",
+                json=test_payload,
+                headers=self._get_headers()
+            )
+            
+            # If we get any response (even failure), token format is valid
+            return response.status_code == 200
+            
+        except Exception as e:
+            logger.error(f"Card token validation error: {e}")
+            return False

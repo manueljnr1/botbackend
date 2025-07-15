@@ -513,26 +513,23 @@ class DocumentProcessor:
 
     def _extract_troubleshooting_flow(self, file_path: str, doc_type: DocumentType) -> Optional[Dict]:
         """
-        Use LLM to extract troubleshooting flow from document
+        Enhanced LLM extraction that converts ANY troubleshooting document into conversational flow
         """
         if not self.llm_available:
             logger.warning("LLM not available for troubleshooting extraction")
             return None
         
         try:
-            # Download file from cloud to temp location
+            # Download and load document content
             temp_file_path = None
             
             try:
-                # Download the file if it's a cloud path
                 if file_path.startswith('tenant_'):
                     temp_file_path = self.storage.download_to_temp("knowledge-base-files", file_path)
-                    logger.info(f"Downloaded file for extraction: {temp_file_path}")
                     file_to_process = temp_file_path
                 else:
                     file_to_process = file_path
                 
-                # Load document content
                 loader = self._get_loader(file_to_process, doc_type)
                 documents = loader.load()
                 
@@ -542,77 +539,235 @@ class DocumentProcessor:
                 # Combine all document content
                 full_content = "\n".join([doc.page_content for doc in documents])
                 
-                # LLM prompt for extraction
+                # Enhanced LLM prompt for smart conversion
                 from langchain.prompts import PromptTemplate
                 
                 prompt = PromptTemplate(
                     input_variables=["document_content"],
-                    template="""Analyze this troubleshooting guide and extract the conversation flow.
+                    template="""You are an expert conversation designer. Convert this troubleshooting document into a smart conversational flow.
 
     Document Content:
     {document_content}
 
-    Extract the following:
-    1. Problem title and description
-    2. Keywords that would trigger this guide
-    3. Step-by-step conversation flow with branches
+    TASK: Transform this into a conversational troubleshooting flow where the bot guides users step-by-step.
 
-    Format the response as JSON:
+    ANALYSIS PROCESS:
+    1. Identify the main problem/issue being addressed
+    2. Extract all possible causes and solutions
+    3. Create a logical conversation flow that diagnoses the issue
+    4. Convert static steps into bot questions and user responses
+
+    CONVERSATION DESIGN RULES:
+    - Start with an empathetic acknowledgment of the problem
+    - Ask diagnostic questions to narrow down the issue
+    - Provide clear next steps based on user responses
+    - Include fallback options for unclear responses
+    - End with either resolution or escalation
+
+    OUTPUT FORMAT (JSON):
     {{
-        "title": "Problem title",
-        "description": "Brief description",
-        "keywords": ["keyword1", "keyword2"],
-        "initial_message": "Bot's opening message when guide is triggered",
+        "title": "Main problem title",
+        "description": "Brief description of what this troubleshooting flow handles",
+        "keywords": ["trigger", "words", "that", "indicate", "this", "problem"],
+        "initial_message": "Empathetic opening message acknowledging the problem",
         "steps": [
             {{
                 "id": "step1",
-                "type": "question|information|action",
-                "message": "What the bot says",
-                "wait_for_response": true/false,
+                "type": "diagnostic_question",
+                "message": "First diagnostic question to narrow down the issue",
+                "wait_for_response": true,
                 "branches": {{
-                    "yes|positive|confirmed": {{"next": "step2"}},
-                    "no|negative|denied": {{"next": "step3", "message": "Response for no"}},
-                    "default": {{"next": "step1", "message": "Please answer yes or no"}}
+                    "option1|synonym1|related_word1": {{
+                        "next": "step2",
+                        "message": "Optional immediate response before next step"
+                    }},
+                    "option2|synonym2|related_word2": {{
+                        "next": "solution_branch_a"
+                    }},
+                    "default": {{
+                        "next": "clarification",
+                        "message": "I'm not sure I understand. Could you clarify..."
+                    }}
+                }}
+            }},
+            {{
+                "id": "step2",
+                "type": "diagnostic_question",
+                "message": "Second diagnostic question",
+                "wait_for_response": true,
+                "branches": {{
+                    "yes|confirmed|correct": {{"next": "step3"}},
+                    "no|incorrect|different": {{"next": "alternative_path"}},
+                    "default": {{"next": "step2", "message": "Please answer yes or no so I can help you better."}}
+                }}
+            }},
+            {{
+                "id": "solution_branch_a",
+                "type": "solution",
+                "message": "Here's how to fix this specific issue: [detailed steps]",
+                "wait_for_response": false,
+                "branches": {{
+                    "worked|fixed|solved": {{"next": "success"}},
+                    "still_not_working|didn't_work": {{"next": "escalation"}},
+                    "default": {{"next": "success"}}
                 }}
             }}
         ],
-        "success_message": "Message when problem is resolved",
-        "escalation_message": "Message when bot can't help"
+        "success_message": "Great! I'm glad we could resolve that for you. Is there anything else I can help with?",
+        "escalation_message": "I understand this is frustrating. Let me connect you with our technical support team who can provide more specialized assistance.",
+        "confidence": 0.95
     }}
 
-    IMPORTANT: Extract the actual conversation flow, not just a summary.
+    EXAMPLES OF GOOD CONVERSATIONAL FLOW:
+
+    For a "Card Declining" document:
+    - Initial: "I see you're having trouble with your card being declined. Let me help you figure out what's happening."
+    - Step 1: "First, do you have sufficient funds in your account?"
+    - If YES → "Is your card expired? Please check the expiry date on your card."
+    - If NO → "Please check your account balance or try a different card."
+
+    For a "Login Issues" document:
+    - Initial: "I understand you're having trouble logging in. Let's get this sorted out."  
+    - Step 1: "Are you getting any specific error messages when you try to log in?"
+    - If YES → "What does the error message say exactly?"
+    - If NO → "Is your account password working, or do you think it might need to be reset?"
+
+    IMPORTANT: Create a logical flow that feels natural and helpful, not robotic. The bot should sound like a knowledgeable support agent having a real conversation.
 
     JSON Response:"""
                 )
                 
-                # Use instance's LLM
-                result = self.llm.invoke(prompt.format(document_content=full_content[:4000]))  # Limit content
+                # Use enhanced LLM call with more tokens
+                result = self.llm.invoke(prompt.format(document_content=full_content[:6000]))  # Increased limit
                 response_text = result.content if hasattr(result, 'content') else str(result)
                 
-                # Parse JSON response
+                # Parse JSON response with better error handling
                 import json
                 import re
+                
+                # Try to extract JSON from response
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
-                    flow_data = json.loads(json_match.group())
-                    flow_data["confidence"] = 0.9  # High confidence since we got valid JSON
-                    logger.info(f"Successfully extracted troubleshooting flow: {flow_data.get('title', 'Unknown')}")
-                    return flow_data
-                
-                return None
-                
+                    try:
+                        flow_data = json.loads(json_match.group())
+                        
+                        # Validate the extracted flow
+                        if self._validate_conversation_flow(flow_data):
+                            flow_data["confidence"] = 0.95
+                            flow_data["extraction_method"] = "enhanced_llm_conversion"
+                            logger.info(f"✅ Successfully converted document to conversational flow: {flow_data.get('title', 'Unknown')}")
+                            return flow_data
+                        else:
+                            logger.warning("⚠️ Extracted flow failed validation")
+                            return self._create_fallback_flow(full_content)
+                            
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ JSON parsing failed: {e}")
+                        return self._create_fallback_flow(full_content)
+                else:
+                    logger.warning("⚠️ No JSON found in LLM response")
+                    return self._create_fallback_flow(full_content)
+                    
             finally:
-                # Clean up temp file if we downloaded one
+                # Clean up temp file
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
                         logger.info(f"Cleaned up temp extraction file: {temp_file_path}")
                     except:
                         pass
-                
+                    
         except Exception as e:
-            logger.error(f"Error extracting troubleshooting flow: {e}")
+            logger.error(f"Error in enhanced troubleshooting extraction: {e}")
             return None
+
+    def _validate_conversation_flow(self, flow_data: Dict) -> bool:
+        """Validate that the extracted flow has proper conversational structure"""
+        try:
+            required_fields = ['title', 'keywords', 'initial_message', 'steps']
+            
+            # Check required fields
+            for field in required_fields:
+                if field not in flow_data:
+                    logger.error(f"Missing required field: {field}")
+                    return False
+            
+            # Validate keywords
+            if not isinstance(flow_data['keywords'], list) or len(flow_data['keywords']) < 2:
+                logger.error("Keywords must be a list with at least 2 items")
+                return False
+            
+            # Validate steps structure
+            steps = flow_data['steps']
+            if not isinstance(steps, list) or len(steps) < 1:
+                logger.error("Steps must be a list with at least 1 step")
+                return False
+            
+            # Validate each step
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    logger.error(f"Step {i} must be a dictionary")
+                    return False
+                
+                if 'id' not in step or 'message' not in step:
+                    logger.error(f"Step {i} missing required fields (id, message)")
+                    return False
+                
+                # Check branches if step expects response
+                if step.get('wait_for_response', False):
+                    if 'branches' not in step or not isinstance(step['branches'], dict):
+                        logger.error(f"Step {i} expects response but has no valid branches")
+                        return False
+            
+            logger.info("✅ Conversation flow validation passed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Flow validation error: {e}")
+            return False
+
+    def _create_fallback_flow(self, content: str) -> Dict:
+        """Create a basic fallback flow when extraction fails"""
+        # Extract basic info from content
+        first_lines = content.split('\n')[:10]
+        title = next((line.strip() for line in first_lines if len(line.strip()) > 10), "Technical Support")
+        
+        # Simple keyword extraction
+        keywords = []
+        common_issue_words = ['error', 'problem', 'issue', 'fail', 'not working', 'decline', 'login', 'access', 'payment', 'card']
+        content_lower = content.lower()
+        
+        for word in common_issue_words:
+            if word in content_lower:
+                keywords.append(word)
+        
+        if not keywords:
+            keywords = ['help', 'support', 'issue']
+        
+        return {
+            "title": title,
+            "description": "Technical support assistance",
+            "keywords": keywords[:5],
+            "initial_message": "I understand you're experiencing an issue. Let me help you resolve this.",
+            "steps": [
+                {
+                    "id": "step1",
+                    "type": "information_gathering",
+                    "message": "Can you describe exactly what's happening when you encounter this issue?",
+                    "wait_for_response": True,
+                    "branches": {
+                        "default": {
+                            "next": "escalation",
+                            "message": "Thank you for the details. Let me connect you with our technical support team."
+                        }
+                    }
+                }
+            ],
+            "success_message": "I'm glad I could help resolve your issue!",
+            "escalation_message": "Let me connect you with our specialized support team for further assistance.",
+            "confidence": 0.3,
+            "extraction_method": "fallback_creation"
+        }
 
 
 

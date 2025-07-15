@@ -37,6 +37,12 @@ class WebsiteKnowledgeBaseCreate(BaseModel):
     include_patterns: Optional[List[str]] = None
     exclude_patterns: Optional[List[str]] = None
 
+# In router.py - Replace the existing KnowledgeBaseOut class
+
+import json
+from pydantic import BaseModel, field_validator
+from typing import List, Optional, Union
+
 class KnowledgeBaseOut(BaseModel):
     id: int
     name: str
@@ -53,6 +59,26 @@ class KnowledgeBaseOut(BaseModel):
     last_crawled_at: Optional[datetime] = None
     include_patterns: Optional[List[str]] = None
     exclude_patterns: Optional[List[str]] = None
+    
+    @field_validator('include_patterns', 'exclude_patterns', mode='before')
+    @classmethod
+    def parse_json_patterns(cls, v: Union[str, List[str], None]) -> Optional[List[str]]:
+        """Parse JSON string patterns into Python lists"""
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                # Try to parse as JSON
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+                return None
+            except (json.JSONDecodeError, TypeError):
+                # If it's not valid JSON, return None
+                return None
+        return None
     
     class Config:
         from_attributes = True
@@ -894,7 +920,7 @@ async def upload_troubleshooting_guide(
     db.refresh(kb)
     
     # Process document with enhanced troubleshooting extraction
-    processor = DocumentProcessor(tenant_id)
+    processor = DocumentProcessor(tenant_id)  # REMOVED llm_service line
     try:
         kb.processing_status = ProcessingStatus.PROCESSING
         db.commit()
