@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Boolean
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Boolean, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -17,6 +17,7 @@ class ChatSession(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     user_email = Column(String, nullable=True) 
+    session_metadata = Column(JSON, nullable=True)
     
     # === FIX START ===
     # Add the missing fields for the smart feedback system

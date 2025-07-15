@@ -948,3 +948,38 @@ async def upload_troubleshooting_guide(
     
     db.commit()
     return kb
+
+
+@router.get("/troubleshooting/{kb_id}/debug")
+async def debug_troubleshooting_flow(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Debug extracted troubleshooting flow"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id,
+        KnowledgeBase.is_troubleshooting == True
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Troubleshooting KB not found")
+    
+    return {
+        "kb_id": kb_id,
+        "name": kb.name,
+        "extraction_status": kb.flow_extraction_status,
+        "extraction_confidence": kb.flow_extraction_confidence,
+        "troubleshooting_flow": kb.troubleshooting_flow,
+        "document_type": kb.document_type.value if kb.document_type else None,
+        "is_troubleshooting": kb.is_troubleshooting,
+        "flow_summary": {
+            "title": kb.troubleshooting_flow.get('title') if kb.troubleshooting_flow else None,
+            "keywords": kb.troubleshooting_flow.get('keywords') if kb.troubleshooting_flow else None,
+            "steps_count": len(kb.troubleshooting_flow.get('steps', [])) if kb.troubleshooting_flow else 0,
+            "initial_message": kb.troubleshooting_flow.get('initial_message') if kb.troubleshooting_flow else None
+        }
+    }

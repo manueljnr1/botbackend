@@ -584,3 +584,98 @@ class SimpleChatbotMemory:
                 "tenant_id": self.tenant_id,
                 "maintenance_completed_at": datetime.utcnow().isoformat()
             }
+        
+    def store_troubleshooting_state(self, session_id: str, kb_id: int, current_step: str, flow_data: Dict):
+        """Store current troubleshooting state in session"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session:
+                troubleshooting_state = {
+                    "kb_id": kb_id,
+                    "current_step": current_step,
+                    "flow_data": flow_data,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "active": True
+                }
+                
+                # Use session_metadata instead of metadata
+                if not hasattr(session, 'session_metadata') or session.session_metadata is None:
+                    session.session_metadata = {}
+                
+                session.session_metadata["troubleshooting_state"] = troubleshooting_state
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                
+                self.db.commit()
+                logger.info(f"✅ Stored troubleshooting state for session {session_id}: step {current_step}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error storing troubleshooting state: {e}")
+            return False
+
+    def get_troubleshooting_state(self, session_id: str) -> Optional[Dict]:
+        """Get current troubleshooting state"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and hasattr(session, 'session_metadata') and session.session_metadata:
+                state = session.session_metadata.get("troubleshooting_state")
+                
+                if state and state.get("active", False):
+                    logger.info(f"📋 Found active troubleshooting state: step {state.get('current_step')}")
+                    return state
+                    
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting troubleshooting state: {e}")
+            return None
+
+    def update_troubleshooting_step(self, session_id: str, next_step: str):
+        """Move to next step in troubleshooting flow"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata and "troubleshooting_state" in session.session_metadata:
+                session.session_metadata["troubleshooting_state"]["current_step"] = next_step
+                session.session_metadata["troubleshooting_state"]["updated_at"] = datetime.utcnow().isoformat()
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                
+                self.db.commit()
+                logger.info(f"🔄 Updated troubleshooting step to: {next_step}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error updating troubleshooting step: {e}")
+            return False
+
+    def clear_troubleshooting_state(self, session_id: str):
+        """Clear troubleshooting state when flow completes"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata and "troubleshooting_state" in session.session_metadata:
+                session.session_metadata["troubleshooting_state"]["active"] = False
+                session.session_metadata["troubleshooting_state"]["completed_at"] = datetime.utcnow().isoformat()
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                self.db.commit()
+                
+                logger.info(f"✅ Cleared troubleshooting state for session {session_id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error clearing troubleshooting state: {e}")

@@ -75,138 +75,16 @@ class UnifiedIntelligentEngine:
             'sensitive_data': re.compile(r'\b(password|token|secret|key|credential)\s*[:=]\s*\S+', re.IGNORECASE)
         }
 
-    # def process_message(
-    #     self,
-    #     api_key: str,
-    #     user_message: str,
-    #     user_identifier: str,
-    #     platform: str = "web"
-    # ) -> Dict[str, Any]:
-    #     """
-    #     Enhanced processing pipeline with privacy-first approach
-    #     """
-    #     try:
-    #         # --- PRE-PROCESSING & SECURITY ---
-    #         tenant = self._get_tenant_by_api_key(api_key)
-    #         if not tenant:
-    #             logger.error(f"Invalid API key provided.")
-    #             return {"error": "Invalid API key", "success": False}
-
-    #         is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
-    #         if not is_safe:
-    #             logger.warning(f"🔒 Security risk blocked: {user_message[:50]}...")
-    #             return {
-    #                 "success": True,
-    #                 "response": security_response,
-    #                 "session_id": "security_violation",
-    #                 "answered_by": "security_system",
-    #                 "intent": "security_risk",
-    #                 "architecture": "enhanced_unified_security"
-    #             }
-
-    #         # Initialize memory and manage session lifecycle
-    #         memory = SimpleChatbotMemory(self.db, tenant.id)
-    #         session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
-            
-    #         # 🆕 SESSION LIFECYCLE MANAGEMENT
-    #         self._manage_session_lifecycle(memory, session_id, user_identifier)
-            
-    #         # --- ENHANCED CONTEXT ANALYSIS (3-hour window + LLM override) ---
-    #         conversation_context = {"is_contextual": False, "enhanced_message": user_message}
-    #         original_user_message = user_message
-    #         conversation_history = []
-            
-    #         if not is_new_session and self.llm_available:
-    #             conversation_history = memory.get_recent_messages(session_id, limit=6)
-                
-    #             if conversation_history and len(conversation_history) >= 2:
-    #                 conversation_context = self._enhanced_context_analysis(
-    #                     current_message=user_message,
-    #                     conversation_history=conversation_history,
-    #                     tenant=tenant,
-    #                     llm_instance=self.llm
-    #                 )
-                    
-    #                 if conversation_context['is_contextual']:
-    #                     user_message = conversation_context['enhanced_message']
-    #                     logger.info(f"🔗 Contextual message detected. Enhanced: {user_message}")
-
-    #         # Store the original user message
-    #         memory.store_message(session_id, original_user_message, True)
-
-    #         # --- INTENT CLASSIFICATION ---
-    #         intent_result = self._classify_intent(user_message, tenant)
-
-    #         # --- CONTEXT CHECK ---
-    #         context_result = self._check_context_relevance(user_message, intent_result, tenant)
-
-    #         # --- SMART ROUTING & RESPONSE GENERATION ---
-    #         if context_result['is_product_related']:
-    #             response = self._handle_product_related(user_message, tenant, context_result)
-    #         else:
-    #             response = self._handle_general_knowledge(user_message, tenant, intent_result)
-
-    #         # --- 🆕 PRIVACY-FIRST RESPONSE FILTERING ---
-    #         base_response = self._privacy_filter_response(
-    #             response=response,
-    #             user_message=original_user_message,
-    #             conversation_history=conversation_history,
-    #             tenant=tenant
-    #         )
-
-    #         base_response['content'] = fix_response_formatting(base_response['content'])
-
-    #         # --- 🆕 SMART CONVERSATION FLOW ENHANCEMENT (Every 5th + Topic-based) ---
-    #         flow_enhancement = {"enhanced_response": base_response['content'], "flow_type": "no_enhancement"}
-            
-    #         if self._should_enhance_conversation(session_id, intent_result, tenant):
-    #             flow_enhancement = self._smart_conversation_enhancement(
-    #                 current_response=base_response['content'],
-    #                 user_message=original_user_message,
-    #                 conversation_history=conversation_history,
-    #                 intent_result=intent_result,
-    #                 response_source=base_response.get('source', 'unknown'),
-    #                 tenant=tenant,
-    #                 session_id=session_id
-    #             )
-            
-    #         final_response_content = flow_enhancement['enhanced_response']
-
-    #         # Store the final bot response in memory
-    #         memory.store_message(session_id, final_response_content, False)
-
-    #         return {
-    #             "success": True,
-    #             "response": final_response_content,
-    #             "session_id": session_id,
-    #             "is_new_session": is_new_session,
-    #             "answered_by": base_response.get('source', 'unknown'),
-    #             "intent": intent_result['intent'],
-    #             "context": context_result['context_type'],
-    #             "conversation_context": conversation_context.get('context_type', 'unknown'),
-    #             "was_contextual": conversation_context['is_contextual'],
-    #             "flow_enhancement": flow_enhancement['flow_type'],
-    #             "engagement_level": flow_enhancement.get('engagement_level', 'unknown'),
-    #             "privacy_filtered": base_response.get('privacy_filtered', False),
-    #             "session_lifecycle": "active",
-    #             "architecture": "enhanced_unified"
-    #         }
-
-    #     except Exception as e:
-    #         import traceback
-    #         logger.error(f"Error in enhanced processing pipeline: {e}\n{traceback.format_exc()}")
-    #         return {"error": str(e), "success": False}
-
-
+    
 
 
     def process_message(
-        self,
-        api_key: str,
-        user_message: str,
-        user_identifier: str,
-        platform: str = "web"
-    ) -> Dict[str, Any]:
+    self,
+    api_key: str,
+    user_message: str,
+    user_identifier: str,
+    platform: str = "web"
+) -> Dict[str, Any]:
         """
         This is the new "Intelligent Router". It orchestrates the entire response process.
         """
@@ -216,34 +94,36 @@ class UnifiedIntelligentEngine:
             if not tenant:
                 return {"error": "Invalid API key", "success": False}
 
-            # Security check remains crucial
-            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name) #
+            # Initialize memory and get session FIRST
+            memory = SimpleChatbotMemory(self.db, tenant.id)
+            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+
+            # Security check
+            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
             if not is_safe:
-                # This part of your security logic is already good
-                return {"success": True, "response": security_response, "answered_by": "security_system"}
+                return {
+                    "success": True, 
+                    "response": security_response, 
+                    "answered_by": "security_system",
+                    "session_id": session_id  # Now session_id is defined
+                }
 
             # --- 2. INTENT & CONTEXT ANALYSIS ---
-            # These functions you've already built will now guide the routing
-            intent_result = self._classify_intent(user_message, tenant) #
-            context_result = self._check_context_relevance(user_message, intent_result, tenant) #
+            intent_result = self._classify_intent(user_message, tenant)
+            context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
             # --- 3. ROUTING TO SPECIALIZED HANDLERS ---
             if context_result['is_product_related']:
-                # If the query is about the tenant's product/service
-                response_data = self._handle_product_related(user_message, tenant, context_result) #
+                response_data = self._handle_product_related(user_message, tenant, context_result, session_id)
             else:
-                # If it's a general question or casual chat
-                response_data = self._handle_general_knowledge(user_message, tenant, intent_result) #
+                response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
             # --- 4. POST-PROCESSING & MEMORY ---
-            # Clean up the final response
-            final_content = fix_response_formatting(response_data['content']) #
-
-            # Store the conversation in memory
-            memory = SimpleChatbotMemory(self.db, tenant.id)
-            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform) #
-            memory.store_message(session_id, user_message, True) #
-            memory.store_message(session_id, final_content, False) #
+            final_content = fix_response_formatting(response_data['content'])
+            
+            # Store messages
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, final_content, False)
 
             return {
                 "success": True,
@@ -258,7 +138,6 @@ class UnifiedIntelligentEngine:
         except Exception as e:
             logger.error(f"Error in intelligent router: {e}")
             return {"error": str(e), "success": False}
-
 
 
 
@@ -1457,66 +1336,182 @@ Enhanced response:"""
 
 
 
-    def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int) -> Dict[str, Any]:
-        """Enhanced troubleshooting with proper conversational flow"""
+    def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
+        """Enhanced troubleshooting with state management"""
         try:
-            troubleshooting_guides = self.db.query(KnowledgeBase).filter(
-                KnowledgeBase.tenant_id == tenant_id,
-                KnowledgeBase.is_troubleshooting == True,
-                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
-                KnowledgeBase.troubleshooting_flow.isnot(None)
-            ).all()
-
-            if not troubleshooting_guides:
-                return {"found": False}
-
-            # Use the actual flow structure from processor.py
-            for guide in troubleshooting_guides:
-                flow = guide.troubleshooting_flow
-                if not flow:
-                    continue
-
-                # Check keywords match
-                keywords = flow.get('keywords', [])
-                user_msg_lower = user_message.lower()
+            # Initialize memory to check for existing state
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            memory = SimpleChatbotMemory(self.db, tenant_id)
+            
+            # Check if user is already in a troubleshooting flow
+            if session_id:
+                current_state = memory.get_troubleshooting_state(session_id)
                 
-                matched_keywords = 0
-                for keyword in keywords:
-                    if keyword.lower() in user_msg_lower:
-                        matched_keywords += 1
-                
-                if matched_keywords >= 2:  # Require multiple keyword matches
-                    # Return the ACTUAL initial message from the flow
-                    initial_response = flow.get("initial_message", "I can help you with that.")
-                    
-                    return {
-                        "found": True,
-                        "content": self._filter_internal_leakage(initial_response),
-                        "source": "TROUBLESHOOTING_GUIDE",
-                        "confidence": 0.9,
-                        "troubleshooting_active": True,
-                        "flow_data": flow
-                    }
-
-            return {"found": False}
+                if current_state:
+                    # Process user's response and move to next step
+                    return self._process_troubleshooting_response(user_message, current_state, memory, session_id)
+            
+            # Start new troubleshooting flow if no active state
+            return self._start_troubleshooting_flow(user_message, tenant_id, memory, session_id)
             
         except Exception as e:
             logger.error(f"Error in troubleshooting flow: {e}")
             return {"found": False}
 
+    def _start_troubleshooting_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
+        """Start a new troubleshooting flow"""
+        troubleshooting_guides = self.db.query(KnowledgeBase).filter(
+            KnowledgeBase.tenant_id == tenant_id,
+            KnowledgeBase.is_troubleshooting == True,
+            KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+            KnowledgeBase.troubleshooting_flow.isnot(None)
+        ).all()
+
+        if not troubleshooting_guides:
+            return {"found": False}
+
+        # Find matching guide
+        for guide in troubleshooting_guides:
+            flow = guide.troubleshooting_flow
+            if not flow:
+                continue
+
+            keywords = flow.get('keywords', [])
+            user_msg_lower = user_message.lower()
+            
+            matched_keywords = 0
+            for keyword in keywords:
+                if keyword.lower() in user_msg_lower:
+                    matched_keywords += 1
+            
+            if matched_keywords >= 2:
+                # Store initial state
+                if session_id:
+                    memory.store_troubleshooting_state(session_id, guide.id, "step1", flow)
+                
+                # Return first step
+                steps = flow.get('steps', [])
+                if steps:
+                    initial_message = flow.get("initial_message", "I can help you with that.")
+                    first_question = steps[0].get("message", "")
+                    
+                    response = f"{initial_message}\n\n{first_question}"
+                    
+                    return {
+                        "found": True,
+                        "content": response,
+                        "source": "TROUBLESHOOTING_GUIDE",
+                        "confidence": 0.9
+                    }
+
+        return {"found": False}
+
+    def _process_troubleshooting_response(self, user_message: str, current_state: Dict, memory: Any, session_id: str) -> Dict[str, Any]:
+        """Process user response in active troubleshooting flow"""
+        try:
+            flow_data = current_state.get("flow_data", {})
+            current_step_id = current_state.get("current_step", "step1")
+            
+            # Find current step in flow
+            steps = flow_data.get("steps", [])
+            current_step = None
+            
+            for step in steps:
+                if step.get("id") == current_step_id:
+                    current_step = step
+                    break
+            
+            if not current_step:
+                # Flow completed or error
+                memory.clear_troubleshooting_state(session_id)
+                return {
+                    "found": True,
+                    "content": flow_data.get("escalation_message", "Let me connect you with our support team."),
+                    "source": "TROUBLESHOOTING_GUIDE"
+                }
+            
+            # Process user response against branches
+            branches = current_step.get("branches", {})
+            user_response_lower = user_message.lower()
+            
+            next_step_info = None
+            
+            # Check each branch
+            for branch_key, branch_value in branches.items():
+                if branch_key == "default":
+                    continue
+                    
+                # Check if user response matches this branch
+                branch_keywords = branch_key.split("|")
+                for keyword in branch_keywords:
+                    if keyword.strip().lower() in user_response_lower:
+                        next_step_info = branch_value
+                        break
+                
+                if next_step_info:
+                    break
+            
+            # Use default if no match
+            if not next_step_info:
+                next_step_info = branches.get("default", {})
+            
+            next_step_id = next_step_info.get("next")
+            response_message = next_step_info.get("message", "")
+            
+            # Update state
+            if next_step_id:
+                memory.update_troubleshooting_step(session_id, next_step_id)
+                
+                # Find next step content
+                next_step = None
+                for step in steps:
+                    if step.get("id") == next_step_id:
+                        next_step = step
+                        break
+                
+                if next_step:
+                    if response_message:
+                        full_response = f"{response_message}\n\n{next_step.get('message', '')}"
+                    else:
+                        full_response = next_step.get('message', '')
+                else:
+                    # End of flow
+                    memory.clear_troubleshooting_state(session_id)
+                    full_response = response_message or flow_data.get("success_message", "Great! I'm glad I could help.")
+            else:
+                # End of flow
+                memory.clear_troubleshooting_state(session_id)
+                full_response = response_message or flow_data.get("success_message", "Thank you for the information.")
+            
+            return {
+                "found": True,
+                "content": full_response,
+                "source": "TROUBLESHOOTING_GUIDE",
+                "confidence": 0.9
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing troubleshooting response: {e}")
+            memory.clear_troubleshooting_state(session_id)
+            return {
+                "found": True,
+                "content": "I'm having trouble with the troubleshooting flow. Let me connect you with our support team.",
+                "source": "TROUBLESHOOTING_ERROR"
+            }
 
 
 
 
 
-    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
+
+    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None) -> Dict[str, Any]:
         """Handle product-related queries with 4-tier logic (CORRECTED ORDER)"""
         
         logger.info(f"🔍 Starting product-related routing for: {user_message[:50]}...")
         
         # --- STEP 1: Check for troubleshooting flow first ---
         logger.info("🔧 Checking troubleshooting flows...")
-        troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id)
+        troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id, session_id)
         if troubleshooting_result['found']:
             logger.info("✅ Found troubleshooting match!")
             return troubleshooting_result

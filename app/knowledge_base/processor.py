@@ -544,101 +544,141 @@ class DocumentProcessor:
                 
                 prompt = PromptTemplate(
                     input_variables=["document_content"],
-                    template="""You are an expert conversation designer. Convert this troubleshooting document into a smart conversational flow.
+                    template="""You are an expert conversation designer. Convert this troubleshooting document into a comprehensive conversational flow that covers EVERY SINGLE ISSUE mentioned.
 
-    Document Content:
-    {document_content}
+Document Content:
+{document_content}
 
-    TASK: Transform this into a conversational troubleshooting flow where the bot guides users step-by-step.
+CRITICAL REQUIREMENTS:
+1. EXTRACT ALL ISSUES - Do not skip any issue mentioned in the document
+2. COUNT the issues first - if document has 10 issues, your flow must handle all 10
+3. Create a branching conversation that covers every scenario
+4. Include both customer-facing and technical issues with simple explanations
 
-    ANALYSIS PROCESS:
-    1. Identify the main problem/issue being addressed
-    2. Extract all possible causes and solutions
-    3. Create a logical conversation flow that diagnoses the issue
-    4. Convert static steps into bot questions and user responses
+ANALYSIS PROCESS:
+1. First, identify ALL distinct issues/problems in the document
+2. Extract keywords that would trigger each issue
+3. Create diagnostic questions to identify which specific issue the user has
+4. Design solution paths for each issue
+5. Ensure every issue mentioned gets a resolution path
 
-    CONVERSATION DESIGN RULES:
-    - Start with an empathetic acknowledgment of the problem
-    - Ask diagnostic questions to narrow down the issue
-    - Provide clear next steps based on user responses
-    - Include fallback options for unclear responses
-    - End with either resolution or escalation
+CONVERSATION DESIGN RULES:
+- Start with empathetic acknowledgment of the problem
+- Use diagnostic questions to narrow down the specific issue
+- Provide clear, actionable solutions for each issue
+- Use simple language for technical concepts
+- If no solution works, offer alternative approaches
+- Never suggest contacting support agents (not available)
 
-    OUTPUT FORMAT (JSON):
-    {{
-        "title": "Main problem title",
-        "description": "Brief description of what this troubleshooting flow handles",
-        "keywords": ["trigger", "words", "that", "indicate", "this", "problem"],
-        "initial_message": "Empathetic opening message acknowledging the problem",
-        "steps": [
-            {{
-                "id": "step1",
-                "type": "diagnostic_question",
-                "message": "First diagnostic question to narrow down the issue",
-                "wait_for_response": true,
-                "branches": {{
-                    "option1|synonym1|related_word1": {{
-                        "next": "step2",
-                        "message": "Optional immediate response before next step"
-                    }},
-                    "option2|synonym2|related_word2": {{
-                        "next": "solution_branch_a"
-                    }},
-                    "default": {{
-                        "next": "clarification",
-                        "message": "I'm not sure I understand. Could you clarify..."
-                    }}
-                }}
-            }},
-            {{
-                "id": "step2",
-                "type": "diagnostic_question",
-                "message": "Second diagnostic question",
-                "wait_for_response": true,
-                "branches": {{
-                    "yes|confirmed|correct": {{"next": "step3"}},
-                    "no|incorrect|different": {{"next": "alternative_path"}},
-                    "default": {{"next": "step2", "message": "Please answer yes or no so I can help you better."}}
-                }}
-            }},
-            {{
-                "id": "solution_branch_a",
-                "type": "solution",
-                "message": "Here's how to fix this specific issue: [detailed steps]",
-                "wait_for_response": false,
-                "branches": {{
-                    "worked|fixed|solved": {{"next": "success"}},
-                    "still_not_working|didn't_work": {{"next": "escalation"}},
-                    "default": {{"next": "success"}}
-                }}
+EXAMPLES OF GOOD CONVERSATIONAL FLOW PATTERNS:
+
+Pattern 1 - Problem Acknowledgment + Diagnostic:
+- Initial: "I see you're having trouble with [PROBLEM]. Let me help you figure out what's happening."
+- Step 1: "First, [DIAGNOSTIC QUESTION]?"
+- If YES → "[NEXT DIAGNOSTIC OR SOLUTION]"
+- If NO → "[ALTERNATIVE PATH OR SOLUTION]"
+
+Pattern 2 - Understanding + Symptom Check:
+- Initial: "I understand you're experiencing [ISSUE TYPE]. Let's get this sorted out."  
+- Step 1: "Are you getting any [SPECIFIC SYMPTOMS/INDICATORS]?"
+- If YES → "What exactly [SPECIFIC DETAILS]?"
+- If NO → "[ALTERNATIVE DIAGNOSTIC PATH]"
+
+Pattern 3 - Direct Solution with Validation:
+- Solution: "Here's how to fix [SPECIFIC ISSUE]: [STEP-BY-STEP INSTRUCTIONS]"
+- Follow-up: "Did that resolve the issue for you?"
+- If YES → Success message
+- If NO → Alternative solution or escalation
+
+CONVERSATION TONE GUIDELINES:
+- Sound like a knowledgeable helper having a real conversation
+- Be empathetic but solution-focused
+- Ask specific, actionable questions
+- Provide clear, step-by-step guidance
+- Acknowledge user responses appropriately
+- Avoid robotic or scripted language
+- Use natural, friendly tone
+- You can at times use  reactive language like "hmmmm" or "this is strange/odd" to make it feel more human  
+- Use contractions and casual phrasing to sound more conversational
+
+OUTPUT FORMAT (JSON):
+{{
+    "title": "Main problem from document title",
+    "description": "Brief description covering all issues addressed",
+    "keywords": ["comprehensive", "list", "of", "all", "trigger", "words", "from", "all", "issues"],
+    "initial_message": "Empathetic opening acknowledging the problem and offering help",
+    "steps": [
+        {{
+            "id": "step1",
+            "type": "diagnostic_question",
+            "message": "Broad diagnostic question to categorize the issue",
+            "wait_for_response": true,
+            "branches": {{
+                "issue1_keywords|synonyms": {{"next": "issue1_solution"}},
+                "issue2_keywords|synonyms": {{"next": "issue2_solution"}},
+                "issue3_keywords|synonyms": {{"next": "issue3_solution"}},
+                "default": {{"next": "detailed_questions"}}
             }}
-        ],
-        "success_message": "Great! I'm glad we could resolve that for you. Is there anything else I can help with?",
-        "escalation_message": "I understand this is frustrating. Let me connect you with our technical support team who can provide more specialized assistance.",
-        "confidence": 0.95
-    }}
+        }},
+        {{
+            "id": "issue1_solution",
+            "type": "solution",
+            "message": "Here's how to resolve [specific issue 1]: [clear step-by-step solution]",
+            "wait_for_response": true,
+            "branches": {{
+                "worked|fixed|resolved|yes": {{"next": "success"}},
+                "didn't_work|still_problem|no": {{"next": "alternative_solution1"}},
+                "default": {{"next": "success"}}
+            }}
+        }},
+        {{
+            "id": "issue2_solution", 
+            "type": "solution",
+            "message": "Here's how to resolve [specific issue 2]: [clear step-by-step solution]",
+            "wait_for_response": true,
+            "branches": {{
+                "worked|fixed|resolved|yes": {{"next": "success"}},
+                "didn't_work|still_problem|no": {{"next": "alternative_solution2"}},
+                "default": {{"next": "success"}}
+            }}
+        }},
+        {{
+            "id": "detailed_questions",
+            "type": "diagnostic_question", 
+            "message": "Let me ask more specific questions to identify your exact issue. What symptoms are you experiencing?",
+            "wait_for_response": true,
+            "branches": {{
+                "symptom1|indicator1": {{"next": "issue1_solution"}},
+                "symptom2|indicator2": {{"next": "issue2_solution"}},
+                "default": {{"next": "general_guidance"}}
+            }}
+        }},
+        {{
+            "id": "general_guidance",
+            "type": "information",
+            "message": "Here are the most common solutions you can try: [list main solutions from document]",
+            "wait_for_response": false
+        }}
+    ],
+    "success_message": "Excellent! I'm glad we could resolve that issue for you. Is there anything else I can help with?",
+    "escalation_message": "I've provided all the available solutions. You might want to try the alternative methods mentioned or seek additional resources for this specific issue.",
+    "confidence": 0.95
+}}
 
-    EXAMPLES OF GOOD CONVERSATIONAL FLOW:
+IMPORTANT REMINDERS:
+- Include ALL issues from the document, not just the first few
+- Create specific solution paths for each distinct issue
+- Use customer-friendly language for technical concepts
+- Provide actionable steps, not just general advice
+- Don't mention technical support or agents
+- Make the conversation feel natural and helpful
+- Follow the patterns shown in examples but adapt to your specific content
 
-    For a "Card Declining" document:
-    - Initial: "I see you're having trouble with your card being declined. Let me help you figure out what's happening."
-    - Step 1: "First, do you have sufficient funds in your account?"
-    - If YES → "Is your card expired? Please check the expiry date on your card."
-    - If NO → "Please check your account balance or try a different card."
-
-    For a "Login Issues" document:
-    - Initial: "I understand you're having trouble logging in. Let's get this sorted out."  
-    - Step 1: "Are you getting any specific error messages when you try to log in?"
-    - If YES → "What does the error message say exactly?"
-    - If NO → "Is your account password working, or do you think it might need to be reset?"
-
-    IMPORTANT: Create a logical flow that feels natural and helpful, not robotic. The bot should sound like a knowledgeable support agent having a real conversation.
-
-    JSON Response:"""
-                )
+JSON Response:"""
+)
                 
                 # Use enhanced LLM call with more tokens
-                result = self.llm.invoke(prompt.format(document_content=full_content[:6000]))  # Increased limit
+                result = self.llm.invoke(prompt.format(document_content=full_content[:12000]))  # Increased limit
                 response_text = result.content if hasattr(result, 'content') else str(result)
                 
                 # Parse JSON response with better error handling
