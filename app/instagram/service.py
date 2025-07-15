@@ -455,12 +455,15 @@ class InstagramWebhookProcessor:
         token = params.get("hub.verify_token")
         challenge = params.get("hub.challenge")
         
-        # This should match the verify token set in Meta Developer Console
-        expected_token = getattr(settings, 'META_WEBHOOK_VERIFY_TOKEN', 'your_verify_token')
-        
-        if mode == "subscribe" and token == expected_token:
-            logger.info("✅ Instagram webhook verified successfully")
-            return challenge
+        if mode == "subscribe" and token:
+            # Check against database tokens for any integration
+            integration = self.db.query(InstagramIntegration).filter(
+                InstagramIntegration.webhook_verify_token == token
+            ).first()
+            
+            if integration:
+                logger.info(f"✅ Instagram webhook verified for tenant {integration.tenant_id}")
+                return challenge
         
         logger.warning("❌ Instagram webhook verification failed")
         return None
