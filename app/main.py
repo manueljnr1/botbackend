@@ -82,8 +82,8 @@ app = FastAPI(
     title="LYRA",
     description="AI-powered customer support chatbot for multiple businesses",
     version="1.0.0",
-    debug=settings.is_development()
-    # openapi_url="/backend/openapi.json"
+    debug=settings.is_development(),
+    openapi_url="/backend/openapi.json"
     # docs_url="/admin-docs" if settings.is_development() else None,
     # redoc_url="/admin-redoc" if settings.is_development() else None
 )
@@ -134,19 +134,7 @@ if settings.requires_security_validation():  # Both staging and production
     
 #     return response
 
-@app.middleware("http")
-async def debug_requests(request: Request, call_next):
-    """Debug middleware to see what's causing redirects"""
-    print(f"🔍 Incoming request: {request.method} {request.url}")
-    print(f"🔍 Headers: {dict(request.headers)}")
-    
-    response = await call_next(request)
-    
-    print(f"🔍 Response status: {response.status_code}")
-    if hasattr(response, 'headers'):
-        print(f"🔍 Response headers: {dict(response.headers)}")
-    
-    return response
+
 
 
 
@@ -186,15 +174,13 @@ app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanc
 
 
 
-# @app.get("/")
-# def root():
-#     return {"message": "LYRA is saying Hello!"}
-
-
-
 @app.get("/")
-async def root():
-    return {"message": "LYRA is saying Hello!", "status": "ok"}
+def root():
+    return {"message": "LYRA is saying Hello!"}
+
+
+
+
 
 
 
