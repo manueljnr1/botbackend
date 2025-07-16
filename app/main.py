@@ -8,6 +8,7 @@ load_dotenv(env_file)
 
 
 from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from app.database import engine, Base, get_db
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -119,18 +120,33 @@ if settings.requires_security_validation():  # Both staging and production
 
 
 # Add security headers
+# @app.middleware("http")
+# async def add_security_headers(request, call_next):
+#     response = await call_next(request)
+#     response.headers["X-Content-Type-Options"] = "nosniff"
+#     response.headers["X-Frame-Options"] = "DENY"
+#     response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    
+#     if settings.requires_security_validation():
+#         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+#         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+#     return response
+
 @app.middleware("http")
-async def add_security_headers(request, call_next):
+async def conditional_https_redirect(request: Request, call_next):
+    # Check if we're on Railway (they handle HTTPS at edge)
+    if request.headers.get("x-forwarded-proto") == "https" or os.getenv("RAILWAY_ENVIRONMENT"):
+        response = await call_next(request)
+        return response
+    
+    # Only redirect if not on Railway and in production
+    if settings.requires_security_validation() and request.url.scheme == "http":
+        redirect_url = request.url.replace(scheme="https")
+        return RedirectResponse(redirect_url, status_code=301)
+    
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    
-    
-    if settings.requires_security_validation():
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    
     return response
 
 
