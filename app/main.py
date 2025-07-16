@@ -106,10 +106,16 @@ logger.info(f"🌐 CORS configured for {settings.ENVIRONMENT}: Open (API key pro
 
 
 # HTTPS redirect for production
-if settings.requires_security_validation():  # Both staging and production
+railway_environment = os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RAILWAY_ENVIRONMENT")
+
+if settings.requires_security_validation() and not railway_environment:
     app.add_middleware(HTTPSRedirectMiddleware)
-    
-    # Add trusted host middleware
+    logger.info("🔒 HTTPS redirect middleware enabled")
+else:
+    logger.info("🚂 Railway detected or dev mode - HTTPS redirect disabled")
+
+# Add trusted host middleware
+if settings.requires_security_validation():
     trusted_hosts = settings.get_allowed_domains_list()
     if trusted_hosts:
         # app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
