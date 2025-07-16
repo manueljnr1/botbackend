@@ -82,8 +82,8 @@ app = FastAPI(
     title="LYRA",
     description="AI-powered customer support chatbot for multiple businesses",
     version="1.0.0",
-    debug=settings.is_development(),
-    openapi_url="/backend/openapi.json"
+    debug=settings.is_development()
+    # openapi_url="/backend/openapi.json"
     # docs_url="/admin-docs" if settings.is_development() else None,
     # redoc_url="/admin-redoc" if settings.is_development() else None
 )
@@ -135,18 +135,17 @@ if settings.requires_security_validation():  # Both staging and production
 #     return response
 
 @app.middleware("http")
-async def conditional_https_redirect(request: Request, call_next):
-    # Check if we're on Railway (they handle HTTPS at edge)
-    if request.headers.get("x-forwarded-proto") == "https" or os.getenv("RAILWAY_ENVIRONMENT"):
-        response = await call_next(request)
-        return response
-    
-    # Only redirect if not on Railway and in production
-    if settings.requires_security_validation() and request.url.scheme == "http":
-        redirect_url = request.url.replace(scheme="https")
-        return RedirectResponse(redirect_url, status_code=301)
+async def debug_requests(request: Request, call_next):
+    """Debug middleware to see what's causing redirects"""
+    print(f"🔍 Incoming request: {request.method} {request.url}")
+    print(f"🔍 Headers: {dict(request.headers)}")
     
     response = await call_next(request)
+    
+    print(f"🔍 Response status: {response.status_code}")
+    if hasattr(response, 'headers'):
+        print(f"🔍 Response headers: {dict(response.headers)}")
+    
     return response
 
 
@@ -185,17 +184,17 @@ app.add_middleware(CustomerDetectionMiddleware, enabled=True)
 app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
 app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
 
-# Initialize WhatsApp router
-# try:
-#     include_whatsapp_router(app)
-#     logger.info("WhatsApp router initialized successfully")
-# except Exception as e:
-#     logger.error(f"Failed to initialize WhatsApp router: {e}")
+
+
+# @app.get("/")
+# def root():
+#     return {"message": "LYRA is saying Hello!"}
+
+
 
 @app.get("/")
-def root():
-    return {"message": "LYRA is saying Hello!"}
-
+async def root():
+    return {"message": "LYRA is saying Hello!", "status": "ok"}
 
 
 
