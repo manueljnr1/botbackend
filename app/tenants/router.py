@@ -506,15 +506,14 @@ async def register_tenant_enhanced(tenant: TenantCreate, db: Session = Depends(g
         supabase_result = await supabase_auth_service.create_user_with_confirmation(
             email=normalized_email,
             password=tenant.password,
-            
+            confirmation_url=f"{settings.FRONTEND_URL}/auth/verify-email",
             metadata={
                 "display_name": f"{tenant.name}_{secure_tenant_id}",
                 "tenant_name": tenant.name,
                 "role": "tenant_admin",
                 "account_type": "tenant",
                 "tenant_id": secure_tenant_id,  # 🔒 INCLUDE SECURE ID
-                "tenant_status": "pending_confirmation", # 📧 PENDING until confirmed
-                "emailRedirectTo": f"{settings.FRONTEND_URL}/auth/verify-email"
+                "tenant_status": "pending_confirmation" # 📧 PENDING until confirmed 
             }
         )
         
