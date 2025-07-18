@@ -34,7 +34,7 @@ class TelegramBotManager:
         base_url = getattr(settings, 'WEBHOOK_BASE_URL', None)
         if not base_url:
             # Fallback to frontend URL or default
-            base_url = settings.FRONTEND_URL or "https://botbackend-qtbf.onrender.com"
+            base_url = settings.FRONTEND_URL or "https://chatbot-api-production-2de6.up.railway.app"
         
         # Ensure no trailing slash
         return base_url.rstrip('/')

@@ -650,7 +650,7 @@ class AdvancedSmartFeedbackManager:
                     """
             
             # Generate feedback URL
-            feedback_base_url = os.getenv("FEEDBACK_BASE_URL") or os.getenv("APP_BASE_URL", "https://botbackend-qtbf.onrender.com")
+            feedback_base_url = os.getenv("FEEDBACK_BASE_URL") or os.getenv("APP_BASE_URL", "https://chatbot-api-production-2de6.up.railway.app")
             feedback_url = f"{feedback_base_url}/chatbot/feedback/form/{feedback_id}"
             
             # Load and render template
