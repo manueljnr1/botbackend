@@ -117,7 +117,7 @@ def get_tenant_from_api_key(api_key: str, db: Session):
     return tenant
 
 # Existing endpoints (unchanged)
-@router.get("/", response_model=List[KnowledgeBaseOut])
+@router.get("", response_model=List[KnowledgeBaseOut])
 async def list_knowledge_bases(
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
