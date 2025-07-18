@@ -559,6 +559,90 @@ class SupabaseAuthService:
             }
 
 
+
+    async def create_user_with_otp(self, email: str, password: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create user and send OTP for email verification"""
+        try:
+            # Create user without email confirmation
+            auth_response = self.admin_client.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": False,
+                "user_metadata": metadata or {}
+            })
+            
+            if auth_response.user:
+                # Send OTP
+                otp_response = self.public_client.auth.sign_in_with_otp({
+                    "email": email,
+                    "options": {
+                        "should_create_user": False
+                    }
+                })
+                
+                return {
+                    "success": True,
+                    "user": auth_response.user,
+                    "message": "User created and OTP sent"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Failed to create user"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def verify_otp(self, email: str, otp: str) -> Dict[str, Any]:
+        """Verify OTP and return user session"""
+        try:
+            verification_response = self.public_client.auth.verify_otp({
+                "email": email,
+                "token": otp,
+                "type": "email"
+            })
+            
+            if verification_response.user and verification_response.session:
+                return {
+                    "success": True,
+                    "user": verification_response.user,
+                    "session": verification_response.session
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Invalid OTP"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def resend_otp(self, email: str) -> Dict[str, Any]:
+        """Resend OTP to email"""
+        try:
+            response = self.public_client.auth.resend({
+                "type": "signup",
+                "email": email
+            })
+            
+            return {
+                "success": True,
+                "message": "OTP resent successfully"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+
+
+
 class DummySupabaseService:
     """Fallback service for development when Supabase is not configured"""
     
@@ -628,6 +712,36 @@ class DummySupabaseService:
             "success": False,
             "error": "Supabase not configured"
         }
+    
+
+
+    async def create_user_with_otp(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Dummy create user with OTP method"""
+        logger.warning("⚠️ Using dummy Supabase service - create_user_with_otp")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+
+    async def verify_otp(self, email: str, otp: str) -> Dict[str, Any]:
+        """Dummy verify OTP method"""
+        logger.warning("⚠️ Using dummy Supabase service - verify_otp")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+
+    async def resend_otp(self, email: str) -> Dict[str, Any]:
+        """Dummy resend OTP method"""
+        logger.warning("⚠️ Using dummy Supabase service - resend_otp")
+        return {
+            "success": False,
+            "error": "Supabase not configured"
+        }
+
+
+
+
 
 
 def check_supabase_config() -> bool:
@@ -642,6 +756,10 @@ def check_supabase_config() -> bool:
     anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
     
     return bool(supabase_url and service_key and anon_key)
+
+
+
+ 
 
 
 # Create the global service instance
