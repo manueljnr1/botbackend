@@ -304,6 +304,19 @@ async def startup_event():
     try:
         env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
+
+
+        from app.database import retry_database_initialization
+        
+        db_success = await retry_database_initialization()
+        if not db_success:
+            logger.error("❌ Database initialization failed - some features may not work")
+            if settings.is_production():
+                # In production, you might want to exit
+                logger.error("🚨 Exiting due to database failure in production")
+                import sys
+                sys.exit(1)
+
         
         # 1. Start Discord, Slack, Instagram, and Telegram bots
         try:
