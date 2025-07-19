@@ -3227,7 +3227,7 @@ async def smart_chat_with_followup_streaming(
             
             # 🧠 Get or create session and retrieve conversation history
             session_id, is_new_session = memory.get_or_create_session(user_id, "web")
-            conversation_history = memory.get_conversation_history(user_id, request.max_context)
+            conversation_history = memory.get_conversation_history(user_id, min(7, request.max_context))
             
             # Send initial metadata with memory info
             yield f"{json.dumps({

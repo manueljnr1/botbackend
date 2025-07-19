@@ -82,12 +82,12 @@ class UnifiedIntelligentEngine:
 
 
     def process_message(
-    self,
-    api_key: str,
-    user_message: str,
-    user_identifier: str,
-    platform: str = "web"
-) -> Dict[str, Any]:
+        self,
+        api_key: str,
+        user_message: str,
+        user_identifier: str,
+        platform: str = "web"
+        ) -> Dict[str, Any]:
         """
         This is the new "Intelligent Router". It orchestrates the entire response process.
         """
@@ -108,20 +108,43 @@ class UnifiedIntelligentEngine:
                     "success": True, 
                     "response": security_response, 
                     "answered_by": "security_system",
-                    "session_id": session_id  # Now session_id is defined
+                    "session_id": session_id
                 }
 
-            # --- 2. INTENT & CONTEXT ANALYSIS ---
+            # Get conversation history for greeting analysis
+            conversation_history = memory.get_conversation_history(user_identifier, 6)
+
+            # --- 2. LLM GREETING ANALYSIS (before intent classification) ---
+            greeting_analysis = self.analyze_greeting_with_llm(user_message, conversation_history, session_id)
+            
+            if greeting_analysis.get("is_greeting") and greeting_analysis.get("suggested_response"):
+                # Store the greeting exchange
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, greeting_analysis["suggested_response"], False)
+                
+                return {
+                    "success": True,
+                    "response": greeting_analysis["suggested_response"],
+                    "session_id": session_id,
+                    "is_new_session": is_new_session,
+                    "answered_by": "LLM_SMART_GREETING",
+                    "greeting_type": greeting_analysis.get("greeting_type"),
+                    "continue_previous": greeting_analysis.get("continue_previous"),
+                    "intent": "greeting",
+                    "architecture": "hybrid_intelligent_router"
+                }
+
+            # --- 3. INTENT & CONTEXT ANALYSIS ---
             intent_result = self._classify_intent(user_message, tenant)
             context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
-            # --- 3. ROUTING TO SPECIALIZED HANDLERS ---
+            # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
             if context_result['is_product_related']:
                 response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
             else:
                 response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
-            # --- 4. POST-PROCESSING & MEMORY ---
+            # --- 5. POST-PROCESSING & MEMORY ---
             final_content = fix_response_formatting(response_data['content'])
             
             # Store messages
@@ -190,223 +213,378 @@ class UnifiedIntelligentEngine:
 
 
 
-    def _enhanced_context_analysis(
-        self,
-        *,
-        current_message: str,
-        conversation_history: List[Dict[str, Any]],
-        tenant: Tenant,
-        llm_instance: Any = None
-    ) -> Dict[str, Any]:
+
+    def analyze_greeting_with_llm(self, user_message: str, conversation_history: List[Dict], session_id: str) -> Dict[str, Any]:
         """
-        Enhanced context analysis with 3-hour time window and LLM manual override detection
+        LLM-powered greeting analysis with conversation continuity logic
         """
+        if not self.llm_available:
+            return {"is_greeting": False}
         
-        if not conversation_history or len(conversation_history) < 2 or not llm_instance:
-            return {
-                "is_contextual": False,
-                "relevant_context": "",
-                "context_type": "standalone",
-                "enhanced_message": current_message,
-                "confidence": 0.0
-            }
+        # Get timing context
+        timing_context = self._get_timing_context(conversation_history)
+        
+        # Get conversation state context
+        conversation_state = self._get_conversation_state_context(session_id, conversation_history)
+        
+        prompt = PromptTemplate(
+            input_variables=["user_message", "timing_context", "conversation_context"],
+            template="""You are analyzing if a user message is a greeting and how to respond appropriately.
+
+    USER MESSAGE: "{user_message}"
+
+    TIMING CONTEXT: {timing_context}
+
+    CONVERSATION CONTEXT: {conversation_context}
+
+    GREETING ANALYSIS RULES:
+    1. Identify if this is a greeting (hello, hi, hey, good morning, etc.)
+    2. Consider timing - recent activity vs new session
+    3. Consider conversation state - was user in middle of something?
+
+    RESPONSE LOGIC:
+    - NEW SESSION + GREETING → Standard greeting + offer help
+    - RECENT ACTIVITY (1 sec - 10 min) + GREETING → Acknowledge + offer to continue previous topic OR new help
+    - ACTIVE FLOW + GREETING → Acknowledge + suggest continuing current conversation
+    - NOT A GREETING → Process normally
+
+    EXAMPLES:
+    User: "Hello" (new session) → Standard greeting
+    User: "Hi" (2 minutes after pricing discussion) → "Hi! Would you like to continue discussing pricing, or can I help with something else?"
+    User: "Hey" (mid troubleshooting flow) → "Hi! Shall we continue troubleshooting your issue, or do you need help with something new?"
+
+    RESPONSE FORMAT (JSON):
+    {{
+        "is_greeting": true/false,
+        "greeting_type": "new_session|recent_return|mid_conversation|not_greeting",
+        "suggested_response": "The exact response to send",
+        "continue_previous": true/false,
+        "previous_topic": "brief description of what they were discussing"
+    }}
+
+    Analysis:"""
+        )
         
         try:
-            time_filtered_history = []
-            # 🆕 TIME-BASED FILTERING (3-hour window)
-            current_time = utc_now()
-            # Replace 'some_db_datetime' with a valid datetime object from the conversation history
-            if conversation_history and 'timestamp' in conversation_history[-1]:
-                last_message_time = datetime.fromisoformat(conversation_history[-1]['timestamp'].replace('Z', '+00:00'))
-                time_diff = safe_datetime_subtract(current_time, last_message_time)
-            else:
-                time_diff = timedelta(0)  # Default to zero if no valid timestamp is found
-            
-            for msg in conversation_history:
-                if 'timestamp' in msg:
-                    if isinstance(msg['timestamp'], str):
-                        msg_time = datetime.fromisoformat(msg['timestamp'].replace('Z', '+00:00'))
-                    else:
-                        msg_time = msg['timestamp']
-                    
-                    # Check if message is within 3-hour window
-                    time_diff = safe_datetime_subtract(current_time, msg_time)
-                    if time_diff <= timedelta(hours=3):
-                        time_filtered_history.append(msg)
-                else:
-                    # Fallback: include recent messages if no timestamp
-                    time_filtered_history.append(msg)
-            
-            # If no recent messages in 3-hour window, check for manual override
-            if not time_filtered_history:
-                manual_override = self._check_manual_context_override(current_message, llm_instance)
-                if not manual_override['is_override']:
-                    return {
-                        "is_contextual": False,
-                        "relevant_context": "",
-                        "context_type": "time_expired",
-                        "enhanced_message": current_message,
-                        "confidence": 0.0
-                    }
-                else:
-                    # Use full history for manual override
-                    time_filtered_history = conversation_history[-6:]
-            
-            # Build conversation history string
-            history_text = ""
-            for i, msg in enumerate(time_filtered_history):
-                role = "User" if msg.get("role") == "user" or msg.get("is_user", True) else "Bot"
-                history_text += f"{role}: {msg.get('content', '')}\n"
-            
-            # Enhanced context analysis prompt
-            analysis_prompt = PromptTemplate(
-                input_variables=["current_message", "history", "company"],
-                template="""Analyze if the current user message relates to the recent conversation context.
-
-Company: {company}
-
-Recent Conversation (within 3-hour window):
-{history}
-
-Current User Message: "{current_message}"
-
-ANALYSIS TASK:
-Determine if the current message is a follow-up question that relates to something previously discussed.
-
-Look for these patterns:
-1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
-2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
-3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
-4. CONTINUATION: Building on a previous topic without re-stating context
-
-STRICT RULES:
-- Only consider messages within the provided conversation window
-- If current message seems unrelated to recent context, mark as NOT CONTEXTUAL
-- Focus on clear, obvious connections only
-
-RESPONSE FORMAT:
-CONTEXTUAL: YES|NO
-CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
-RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
-ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
-CONFIDENCE: [0.1-1.0]
-
-Analysis:"""
-            )
-            
-            # Get LLM analysis
-            result = llm_instance.invoke(analysis_prompt.format(
-                current_message=current_message,
-                history=history_text,
-                company=tenant.business_name or tenant.name
+            result = self.llm.invoke(prompt.format(
+                user_message=user_message,
+                timing_context=timing_context,
+                conversation_context=conversation_state
             ))
             
             response_text = result.content.strip()
             
-            # Parse the structured response
-            analysis_result = {
-                "is_contextual": False,
-                "relevant_context": "",
-                "context_type": "standalone", 
-                "enhanced_message": current_message,
-                "confidence": 0.0
-            }
-            
-            # Extract structured data from response
-            lines = response_text.split('\n')
-            for line in lines:
-                line = line.strip()
+            # Parse JSON response
+            import json
+            import re
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                analysis = json.loads(json_match.group())
                 
-                if line.startswith('CONTEXTUAL:'):
-                    is_contextual = 'YES' in line.upper()
-                    analysis_result["is_contextual"] = is_contextual
-                    
-                elif line.startswith('CONTEXT_TYPE:'):
-                    context_type = line.split(':', 1)[1].strip()
-                    analysis_result["context_type"] = context_type
-                    
-                elif line.startswith('RELEVANT_CONTEXT:'):
-                    relevant_context = line.split(':', 1)[1].strip()
-                    analysis_result["relevant_context"] = relevant_context
-                    
-                elif line.startswith('ENHANCED_MESSAGE:'):
-                    enhanced_message = line.split(':', 1)[1].strip()
-                    analysis_result["enhanced_message"] = enhanced_message
-                    
-                elif line.startswith('CONFIDENCE:'):
-                    try:
-                        confidence = float(line.split(':', 1)[1].strip())
-                        analysis_result["confidence"] = max(0.0, min(1.0, confidence))
-                    except:
-                        analysis_result["confidence"] = 0.5
-            
-            # Validation and cleanup
-            if analysis_result["is_contextual"]:
-                if not analysis_result["relevant_context"] or len(analysis_result["relevant_context"]) < 10:
-                    analysis_result["is_contextual"] = False
-                    analysis_result["context_type"] = "standalone"
-                    analysis_result["confidence"] = 0.1
-                
-                if analysis_result["enhanced_message"] == current_message:
-                    if analysis_result["relevant_context"]:
-                        analysis_result["enhanced_message"] = f"Regarding {analysis_result['relevant_context']}: {current_message}"
-            
-            logger.info(f"Enhanced Context Analysis - Contextual: {analysis_result['is_contextual']}, "
-                       f"Type: {analysis_result['context_type']}, "
-                       f"Time Window: 3 hours, "
-                       f"Confidence: {analysis_result['confidence']}")
-            
-            return analysis_result
+                logger.info(f"🎭 LLM Greeting Analysis: {analysis.get('greeting_type')} - Continue: {analysis.get('continue_previous')}")
+                return analysis
             
         except Exception as e:
-            logger.error(f"Enhanced conversation context analysis failed: {e}")
-            return {
-                "is_contextual": False,
-                "relevant_context": "",
-                "context_type": "error_fallback",
-                "enhanced_message": current_message,
-                "confidence": 0.0
-            }
-
-
-
-    def _check_manual_context_override(self, current_message: str, llm_instance: Any) -> Dict[str, Any]:
-        """
-        Check if user is manually trying to reference older conversation
-        """
-        try:
-            override_prompt = PromptTemplate(
-                input_variables=["message"],
-                template="""Determine if the user is trying to reference something from an earlier conversation.
-
-User Message: "{message}"
-
-Look for phrases that indicate the user wants to reference previous conversation:
-- "you mentioned earlier"
-- "what you said before"
-- "that thing we talked about"
-- "go back to"
-- "remember when"
-- "earlier you said"
-- "previously"
-
-RESPONSE: YES|NO
-
-Answer:"""
-            )
-            
-            result = llm_instance.invoke(override_prompt.format(message=current_message))
-            is_override = 'YES' in result.content.strip().upper()
-            
-            return {
-                "is_override": is_override,
-                "reasoning": "Manual context override detected" if is_override else "No manual reference detected"
-            }
-            
-        except Exception as e:
-            logger.error(f"Manual context override check failed: {e}")
-            return {"is_override": False, "reasoning": "Error in override detection"}
+            logger.error(f"LLM greeting analysis failed: {e}")
         
+        # Fallback
+        return {"is_greeting": False}
+
+    def _get_timing_context(self, conversation_history: List[Dict]) -> str:
+        """Build timing context for LLM analysis"""
+        if not conversation_history:
+            return "NEW SESSION - No previous conversation"
+        
+        last_message = conversation_history[-1]
+        last_timestamp = last_message.get('timestamp')
+        
+        if last_timestamp:
+            try:
+                if isinstance(last_timestamp, str):
+                    last_time = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
+                else:
+                    last_time = last_timestamp
+                
+                time_diff = datetime.now(timezone.utc) - last_time.replace(tzinfo=timezone.utc)
+                
+                if time_diff < timedelta(seconds=10):
+                    return f"IMMEDIATE FOLLOW-UP - Last message {time_diff.seconds} seconds ago"
+                elif time_diff < timedelta(minutes=10):
+                    return f"RECENT ACTIVITY - Last message {time_diff.seconds//60} minutes ago"
+                elif time_diff < timedelta(hours=1):
+                    return f"SHORT BREAK - Last message {time_diff.seconds//3600} hour ago"
+                else:
+                    return f"LONG BREAK - Last message {time_diff.days} days ago"
+                    
+            except Exception as e:
+                logger.error(f"Timing calculation error: {e}")
+        
+        return f"EXISTING SESSION - {len(conversation_history)} previous messages"
+
+    def _get_conversation_state_context(self, session_id: str, conversation_history: List[Dict]) -> str:
+        """Build conversation state context"""
+        context_parts = []
+        
+        # Check active flows
+        from app.chatbot.simple_memory import SimpleChatbotMemory
+        memory = SimpleChatbotMemory(self.db, self.tenant_id)
+        
+        # Check troubleshooting state
+        troubleshooting_state = memory.get_troubleshooting_state(session_id)
+        if troubleshooting_state and troubleshooting_state.get("active"):
+            context_parts.append(f"ACTIVE TROUBLESHOOTING FLOW - Step: {troubleshooting_state.get('current_step')}")
+        
+        # Check sales conversation state
+        sales_state = memory.get_sales_conversation_state(session_id)
+        if sales_state and sales_state.get("active"):
+            context_parts.append(f"ACTIVE SALES CONVERSATION - Type: {sales_state.get('flow_type')}")
+        
+        # Add recent conversation topic
+        if conversation_history and len(conversation_history) >= 2:
+            recent_messages = conversation_history[-4:]  # Last 2 exchanges
+            last_user_msg = None
+            last_bot_msg = None
+            
+            for msg in reversed(recent_messages):
+                if msg.get('role') == 'user' and not last_user_msg:
+                    last_user_msg = msg.get('content', '')[:100]
+                elif msg.get('role') == 'assistant' and not last_bot_msg:
+                    last_bot_msg = msg.get('content', '')[:100]
+            
+            if last_user_msg:
+                context_parts.append(f"RECENT TOPIC - User asked: '{last_user_msg}'")
+            if last_bot_msg:
+                context_parts.append(f"LAST RESPONSE - Bot said: '{last_bot_msg}'")
+        
+        return " | ".join(context_parts) if context_parts else "NO SPECIFIC CONTEXT"
+
+
+
+
+
+
+
+
+
+
+#     def _enhanced_context_analysis(
+#         self,
+#         *,
+#         current_message: str,
+#         conversation_history: List[Dict[str, Any]],
+#         tenant: Tenant,
+#         llm_instance: Any = None
+#     ) -> Dict[str, Any]:
+#         """
+#         Enhanced context analysis with 3-hour time window and LLM manual override detection
+#         """
+        
+#         if not conversation_history or len(conversation_history) < 2 or not llm_instance:
+#             return {
+#                 "is_contextual": False,
+#                 "relevant_context": "",
+#                 "context_type": "standalone",
+#                 "enhanced_message": current_message,
+#                 "confidence": 0.0
+#             }
+        
+#         try:
+#             time_filtered_history = []
+#             # 🆕 TIME-BASED FILTERING (3-hour window)
+#             current_time = utc_now()
+#             # Replace 'some_db_datetime' with a valid datetime object from the conversation history
+#             if conversation_history and 'timestamp' in conversation_history[-1]:
+#                 last_message_time = datetime.fromisoformat(conversation_history[-1]['timestamp'].replace('Z', '+00:00'))
+#                 time_diff = safe_datetime_subtract(current_time, last_message_time)
+#             else:
+#                 time_diff = timedelta(0)  # Default to zero if no valid timestamp is found
+            
+#             for msg in conversation_history:
+#                 if 'timestamp' in msg:
+#                     if isinstance(msg['timestamp'], str):
+#                         msg_time = datetime.fromisoformat(msg['timestamp'].replace('Z', '+00:00'))
+#                     else:
+#                         msg_time = msg['timestamp']
+                    
+#                     # Check if message is within 3-hour window
+#                     time_diff = safe_datetime_subtract(current_time, msg_time)
+#                     if time_diff <= timedelta(hours=3):
+#                         time_filtered_history.append(msg)
+#                 else:
+#                     # Fallback: include recent messages if no timestamp
+#                     time_filtered_history.append(msg)
+            
+#             # If no recent messages in 3-hour window, check for manual override
+#             if not time_filtered_history:
+#                 manual_override = self._check_manual_context_override(current_message, llm_instance)
+#                 if not manual_override['is_override']:
+#                     return {
+#                         "is_contextual": False,
+#                         "relevant_context": "",
+#                         "context_type": "time_expired",
+#                         "enhanced_message": current_message,
+#                         "confidence": 0.0
+#                     }
+#                 else:
+#                     # Use full history for manual override
+#                     time_filtered_history = conversation_history[-6:]
+            
+#             # Build conversation history string
+#             history_text = ""
+#             for i, msg in enumerate(time_filtered_history):
+#                 role = "User" if msg.get("role") == "user" or msg.get("is_user", True) else "Bot"
+#                 history_text += f"{role}: {msg.get('content', '')}\n"
+            
+#             # Enhanced context analysis prompt
+#             analysis_prompt = PromptTemplate(
+#                 input_variables=["current_message", "history", "company"],
+#                 template="""Analyze if the current user message relates to the recent conversation context.
+
+# Company: {company}
+
+# Recent Conversation (within 3-hour window):
+# {history}
+
+# Current User Message: "{current_message}"
+
+# ANALYSIS TASK:
+# Determine if the current message is a follow-up question that relates to something previously discussed.
+
+# Look for these patterns:
+# 1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
+# 2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
+# 3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
+# 4. CONTINUATION: Building on a previous topic without re-stating context
+
+# STRICT RULES:
+# - Only consider messages within the provided conversation window
+# - If current message seems unrelated to recent context, mark as NOT CONTEXTUAL
+# - Focus on clear, obvious connections only
+
+# RESPONSE FORMAT:
+# CONTEXTUAL: YES|NO
+# CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
+# RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
+# ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
+# CONFIDENCE: [0.1-1.0]
+
+# Analysis:"""
+#             )
+            
+#             # Get LLM analysis
+#             result = llm_instance.invoke(analysis_prompt.format(
+#                 current_message=current_message,
+#                 history=history_text,
+#                 company=tenant.business_name or tenant.name
+#             ))
+            
+#             response_text = result.content.strip()
+            
+#             # Parse the structured response
+#             analysis_result = {
+#                 "is_contextual": False,
+#                 "relevant_context": "",
+#                 "context_type": "standalone", 
+#                 "enhanced_message": current_message,
+#                 "confidence": 0.0
+#             }
+            
+#             # Extract structured data from response
+#             lines = response_text.split('\n')
+#             for line in lines:
+#                 line = line.strip()
+                
+#                 if line.startswith('CONTEXTUAL:'):
+#                     is_contextual = 'YES' in line.upper()
+#                     analysis_result["is_contextual"] = is_contextual
+                    
+#                 elif line.startswith('CONTEXT_TYPE:'):
+#                     context_type = line.split(':', 1)[1].strip()
+#                     analysis_result["context_type"] = context_type
+                    
+#                 elif line.startswith('RELEVANT_CONTEXT:'):
+#                     relevant_context = line.split(':', 1)[1].strip()
+#                     analysis_result["relevant_context"] = relevant_context
+                    
+#                 elif line.startswith('ENHANCED_MESSAGE:'):
+#                     enhanced_message = line.split(':', 1)[1].strip()
+#                     analysis_result["enhanced_message"] = enhanced_message
+                    
+#                 elif line.startswith('CONFIDENCE:'):
+#                     try:
+#                         confidence = float(line.split(':', 1)[1].strip())
+#                         analysis_result["confidence"] = max(0.0, min(1.0, confidence))
+#                     except:
+#                         analysis_result["confidence"] = 0.5
+            
+#             # Validation and cleanup
+#             if analysis_result["is_contextual"]:
+#                 if not analysis_result["relevant_context"] or len(analysis_result["relevant_context"]) < 10:
+#                     analysis_result["is_contextual"] = False
+#                     analysis_result["context_type"] = "standalone"
+#                     analysis_result["confidence"] = 0.1
+                
+#                 if analysis_result["enhanced_message"] == current_message:
+#                     if analysis_result["relevant_context"]:
+#                         analysis_result["enhanced_message"] = f"Regarding {analysis_result['relevant_context']}: {current_message}"
+            
+#             logger.info(f"Enhanced Context Analysis - Contextual: {analysis_result['is_contextual']}, "
+#                        f"Type: {analysis_result['context_type']}, "
+#                        f"Time Window: 3 hours, "
+#                        f"Confidence: {analysis_result['confidence']}")
+            
+#             return analysis_result
+            
+#         except Exception as e:
+#             logger.error(f"Enhanced conversation context analysis failed: {e}")
+#             return {
+#                 "is_contextual": False,
+#                 "relevant_context": "",
+#                 "context_type": "error_fallback",
+#                 "enhanced_message": current_message,
+#                 "confidence": 0.0
+#             }
+
+
+
+#     def _check_manual_context_override(self, current_message: str, llm_instance: Any) -> Dict[str, Any]:
+#         """
+#         Check if user is manually trying to reference older conversation
+#         """
+#         try:
+#             override_prompt = PromptTemplate(
+#                 input_variables=["message"],
+#                 template="""Determine if the user is trying to reference something from an earlier conversation.
+
+# User Message: "{message}"
+
+# Look for phrases that indicate the user wants to reference previous conversation:
+# - "you mentioned earlier"
+# - "what you said before"
+# - "that thing we talked about"
+# - "go back to"
+# - "remember when"
+# - "earlier you said"
+# - "previously"
+
+# RESPONSE: YES|NO
+
+# Answer:"""
+#             )
+            
+#             result = llm_instance.invoke(override_prompt.format(message=current_message))
+#             is_override = 'YES' in result.content.strip().upper()
+            
+#             return {
+#                 "is_override": is_override,
+#                 "reasoning": "Manual context override detected" if is_override else "No manual reference detected"
+#             }
+            
+#         except Exception as e:
+#             logger.error(f"Manual context override check failed: {e}")
+#             return {"is_override": False, "reasoning": "Error in override detection"}
+        
+
 
 
     def _privacy_filter_response(
