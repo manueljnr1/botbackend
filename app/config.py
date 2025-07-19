@@ -138,7 +138,15 @@ class Settings(BaseSettings):
             # Validate domains only in production
             if self.is_production() and not self.get_allowed_domains_list() and not self.PRODUCTION_DOMAINS:
                 raise ValueError("ALLOWED_DOMAINS or PRODUCTION_DOMAINS is required in production")
-    
+            
+            # Add database URL validation
+            if not self.DATABASE_URL or "postgresql" not in self.DATABASE_URL:
+                raise ValueError("DATABASE_URL must be a valid PostgreSQL connection string")
+            
+            # Validate database URL format
+            if self.DATABASE_URL and not self.DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://")):
+                raise ValueError("DATABASE_URL must start with 'postgresql://' or 'postgresql+psycopg://'")
+        
    
     
     def get_cors_origins(self) -> list:

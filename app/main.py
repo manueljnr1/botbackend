@@ -77,7 +77,21 @@ except ValueError as e:
         logger.warning("⚠️ Configuration issues detected but continuing in development mode")
 
 # Create database tables
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
+
+from app.database import create_tables_safely
+
+try:
+    create_tables_safely()
+except Exception as e:
+    logger.error(f"❌ Failed to create database tables: {e}")
+    if settings.is_production():
+        raise  # Fail fast in production
+    else:
+        logger.warning("⚠️ Continuing without table creation in development mode")
+
+
+
 
 app = FastAPI(
     title="LYRA",
@@ -211,25 +225,33 @@ def health_check():
     """Enhanced health check with database monitoring"""
     from app.database import database_health_check
     
-    # Check database health
-    db_health = database_health_check()
-    
-    # Check environment variables
-    env_vars = {
-        "TWILIO_ACCOUNT_SID": os.getenv("TWILIO_ACCOUNT_SID", "Not set"),
-        "TWILIO_AUTH_TOKEN": os.getenv("TWILIO_AUTH_TOKEN", "Not set") != "Not set",
-        "Database URL": os.getenv("DATABASE_URL", "Default SQLite"),
-        "OpenAI API Key": os.getenv("OPENAI_API_KEY", "Not set") != "Not set",
-        "Frontend URL": settings.FRONTEND_URL or "Using default localhost:3000",
-        "Environment": settings.ENVIRONMENT,
-        "Database Health": db_health
-    }
-    
-    return {
-        "status": "healthy" if db_health["status"] == "healthy" else "degraded",
-        "environment": env_vars,
-        "database": db_health
-    }
+    try:
+        # Check database health
+        db_health = database_health_check()
+        
+        # Check environment variables
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": bool(os.getenv("TWILIO_ACCOUNT_SID")),
+            "TWILIO_AUTH_TOKEN": bool(os.getenv("TWILIO_AUTH_TOKEN")),
+            "Database URL": "✅ Configured" if os.getenv("DATABASE_URL") else "❌ Missing",
+            "OpenAI API Key": bool(os.getenv("OPENAI_API_KEY")),
+            "Frontend URL": settings.FRONTEND_URL or "Using default localhost:3000",
+            "Environment": settings.ENVIRONMENT
+        }
+        
+        return {
+            "status": "healthy" if db_health["status"] == "healthy" else "degraded",
+            "environment": env_vars,
+            "database": db_health,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 

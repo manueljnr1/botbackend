@@ -36,13 +36,11 @@
 #         db.close()
 
 
-
-
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import Pool
-from sqlalchemy.exc import DisconnectionError, TimeoutError
+from sqlalchemy.exc import DisconnectionError, TimeoutError, OperationalError
 from contextlib import contextmanager
 import logging
 import time
@@ -52,10 +50,72 @@ from app.config import settings
 logging.basicConfig(level=logging.INFO)
 db_logger = logging.getLogger('database')
 
+def get_engine_config():
+    """Get database engine configuration based on environment"""
+    base_config = {
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,  # 1 hour
+        "pool_timeout": 30,
+        "connect_args": {
+            "options": "-c statement_timeout=30000",
+            "keepalives_idle": "600",
+            "keepalives_interval": "30", 
+            "keepalives_count": "3",
+        }
+    }
+    
+    if settings.is_production():
+        return {
+            **base_config,
+            "pool_size": 5,
+            "max_overflow": 10,
+            "echo": False,
+        }
+    elif settings.is_staging():
+        return {
+            **base_config,
+            "pool_size": 3,
+            "max_overflow": 7,
+            "echo": False,
+        }
+    else:  # development
+        return {
+            **base_config,
+            "pool_size": 2,
+            "max_overflow": 5,
+            "echo": True,  # Log SQL in development
+        }
+
 # Create engine with robust configuration
 database_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
-engine = create_engine(database_url, **settings.get_database_engine_config)
+engine_config = get_engine_config()
 
+# Create engine with retry logic for startup
+def create_engine_with_retry(max_retries=5):
+    """Create engine with connection retry logic"""
+    for attempt in range(max_retries):
+        try:
+            db_logger.info(f"Creating database engine (attempt {attempt + 1}/{max_retries})...")
+            engine = create_engine(database_url, **engine_config)
+            
+            # Test the connection
+            with engine.connect() as conn:
+                conn.execute("SELECT 1")
+            
+            db_logger.info("✅ Database engine created successfully")
+            return engine
+            
+        except (OperationalError, DisconnectionError, TimeoutError) as e:
+            if attempt == max_retries - 1:
+                db_logger.error(f"❌ Failed to create database engine after {max_retries} attempts: {e}")
+                raise
+            
+            wait_time = 2 ** attempt
+            db_logger.warning(f"⚠️ Database connection attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+            time.sleep(wait_time)
+
+# Initialize engine
+engine = create_engine_with_retry()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -82,9 +142,12 @@ def get_db_connection(retries=3):
             connection = engine.connect()
             yield connection
             break
-        except (DisconnectionError, TimeoutError) as e:
+        except (DisconnectionError, TimeoutError, OperationalError) as e:
             if connection:
-                connection.close()
+                try:
+                    connection.close()
+                except:
+                    pass
             if attempt == retries - 1:
                 db_logger.error(f"DB connection failed after {retries} attempts: {e}")
                 raise
@@ -93,20 +156,29 @@ def get_db_connection(retries=3):
             time.sleep(wait_time)
         finally:
             if connection:
-                connection.close()
+                try:
+                    connection.close()
+                except:
+                    pass
 
-# Enhanced session dependency
+# Enhanced session dependency with error handling
 def get_db():
     """Enhanced database session with retry logic"""
     db = SessionLocal()
     try:
         yield db
-    except (DisconnectionError, TimeoutError) as e:
+    except (DisconnectionError, TimeoutError, OperationalError) as e:
         db_logger.error(f"Database session error: {e}")
-        db.rollback()
+        try:
+            db.rollback()
+        except:
+            pass
         raise
     finally:
-        db.close()
+        try:
+            db.close()
+        except:
+            pass
 
 # Health check function
 def database_health_check():
@@ -114,9 +186,31 @@ def database_health_check():
     try:
         with get_db_connection() as conn:
             conn.execute("SELECT 1")
-        return {"status": "healthy", "pool_size": engine.pool.size()}
+        return {
+            "status": "healthy", 
+            "pool_size": engine.pool.size(),
+            "checked_out": engine.pool.checkedout()
+        }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
+
+# Safe table creation function
+def create_tables_safely():
+    """Create tables with retry logic"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            db_logger.info(f"Creating database tables (attempt {attempt + 1}/{max_retries})...")
+            Base.metadata.create_all(bind=engine)
+            db_logger.info("✅ Database tables created successfully")
+            return True
+        except (OperationalError, DisconnectionError, TimeoutError) as e:
+            if attempt == max_retries - 1:
+                db_logger.error(f"❌ Failed to create tables after {max_retries} attempts: {e}")
+                raise
+            wait_time = 2 ** attempt
+            db_logger.warning(f"⚠️ Table creation attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
+            time.sleep(wait_time)
 
 # Import your models (keep existing imports)
 from app.auth.models import User, PasswordReset
