@@ -35,8 +35,7 @@
 #     finally:
 #         db.close()
 
-
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import Pool
@@ -100,7 +99,8 @@ def create_engine_with_retry(max_retries=5):
             
             # Test the connection
             with engine.connect() as conn:
-                conn.execute("SELECT 1")
+                conn.execute(text("SELECT 1"))
+            
             
             db_logger.info("✅ Database engine created successfully")
             return engine
@@ -185,7 +185,7 @@ def database_health_check():
     """Health check for monitoring"""
     try:
         with get_db_connection() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return {
             "status": "healthy", 
             "pool_size": engine.pool.size(),
