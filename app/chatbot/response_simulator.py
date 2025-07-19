@@ -10,17 +10,17 @@ class SimpleHumanDelaySimulator:
     """Optimized human-like response delays for modern chat expectations"""
     
     def __init__(self):
-        # Optimized response delay ranges (in seconds)
-        self.quick_response_range = (0.3, 0.8)      # FAQs and simple answers
-        self.normal_response_range = (0.8, 2.0)     # Regular questions
-        self.complex_response_range = (1.5, 3.5)    # Complex explanations
-        self.very_complex_range = (2.5, 5.0)        # Maximum for any response
+        # Halved response delay ranges (in seconds)
+        self.quick_response_range = (0.15, 0.4)     # FAQs and simple answers
+        self.normal_response_range = (0.4, 1.0)     # Regular questions
+        self.complex_response_range = (0.75, 1.75)  # Complex explanations
+        self.very_complex_range = (1.25, 2.5)      # Maximum for any response
         
-        # Reduced factors for better UX
-        self.response_length_factor = 0.005  # Reduced from 0.02 to 0.005
-        self.randomness_factor = 0.2         # Reduced from 0.3 to 0.2
-        self.min_delay = 0.2                 # Absolute minimum
-        self.max_delay = 5.0                 # Absolute maximum
+        # Halved factors for better UX
+        self.response_length_factor = 0.0025  # Halved from 0.005 to 0.0025
+        self.randomness_factor = 0.1          # Halved from 0.2 to 0.1
+        self.min_delay = 0.1                  # Halved from 0.2 to 0.1
+        self.max_delay = 2.5                  # Halved from 5.0 to 2.5
         
     def calculate_response_delay(self, user_message: str, bot_response: str) -> float:
         """Calculate optimized delay for modern chat expectations"""
@@ -112,5 +112,3 @@ class SimpleHumanDelaySimulator:
                 break
         
         return max(0.0, min(1.0, complexity))
-    
-    

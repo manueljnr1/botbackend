@@ -132,6 +132,11 @@ async def list_knowledge_bases(
     
     return knowledge_bases
 
+
+
+
+
+
 @router.delete("/{kb_id}")
 async def delete_knowledge_base(
     kb_id: int,
@@ -147,6 +152,15 @@ async def delete_knowledge_base(
     if not kb:
         logger.warning(f"Knowledge base not found: {kb_id}")
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+    
+    # Delete associated intent patterns
+    try:
+        from app.chatbot.intent_extraction_service import get_tenant_intent_extraction_service
+        extraction_service = get_tenant_intent_extraction_service(db)
+        extraction_service.delete_document_patterns(kb.id)
+        logger.info(f"🗑️ Deleted intent patterns for KB {kb.id}")
+    except Exception as e:
+        logger.warning(f"Failed to delete intent patterns: {e}")
     
     # Delete the vector store from cloud
     processor = DocumentProcessor(tenant_id)
@@ -179,6 +193,10 @@ async def delete_knowledge_base(
     logger.info(f"Knowledge base deleted from database")
     
     return {"message": "Knowledge base deleted successfully"}
+
+
+
+
 
 @router.post("/upload", response_model=KnowledgeBaseOut)
 async def upload_knowledge_base(
@@ -242,6 +260,15 @@ async def upload_knowledge_base(
         kb.processed_at = datetime.utcnow()
         kb.processing_error = None
         
+        # Extract intent patterns for enhanced routing
+        try:
+            from app.chatbot.intent_extraction_service import get_tenant_intent_extraction_service
+            extraction_service = get_tenant_intent_extraction_service(db)
+            asyncio.create_task(extraction_service.extract_intents_from_document(kb.id))
+            logger.info(f"🧠 Started intent extraction for KB {kb.id}")
+        except Exception as e:
+            logger.warning(f"Intent extraction failed to start: {e}")
+        
         logger.info(f"Document processed successfully: {kb.vector_store_id}")
         
     except Exception as e:
@@ -258,6 +285,9 @@ async def upload_knowledge_base(
         
     db.commit()
     return kb
+
+
+
 
 # NEW WEBSITE CRAWLING ENDPOINTS
 
@@ -818,7 +848,6 @@ async def get_processing_status(
 
 
 
-
 @router.get("/{kb_id}/vector-content")
 async def get_vector_content(
     kb_id: int,
@@ -862,9 +891,7 @@ async def get_vector_content(
     
 
 
-# In router.py - Add this endpoint for troubleshooting document upload
-
-@router.post("/knowledge-base/troubleshooting/upload", response_model=KnowledgeBaseOut)
+@router.post("/troubleshooting/upload", response_model=KnowledgeBaseOut)
 async def upload_troubleshooting_guide(
     request: Request,
     file: UploadFile = File(...),
@@ -920,7 +947,7 @@ async def upload_troubleshooting_guide(
     db.refresh(kb)
     
     # Process document with enhanced troubleshooting extraction
-    processor = DocumentProcessor(tenant_id)  # REMOVED llm_service line
+    processor = DocumentProcessor(tenant_id)
     try:
         kb.processing_status = ProcessingStatus.PROCESSING
         db.commit()
@@ -937,6 +964,15 @@ async def upload_troubleshooting_guide(
         kb.flow_extraction_confidence = result.get("extraction_confidence", 0)
         kb.flow_extraction_status = "completed" if result.get("flow_extracted") else "failed"
         kb.processing_error = None
+        
+        # Extract intent patterns for enhanced routing
+        try:
+            from app.chatbot.intent_extraction_service import get_tenant_intent_extraction_service
+            extraction_service = get_tenant_intent_extraction_service(db)
+            asyncio.create_task(extraction_service.extract_intents_from_document(kb.id))
+            logger.info(f"🧠 Started intent extraction for troubleshooting KB {kb.id}")
+        except Exception as e:
+            logger.warning(f"Intent extraction failed to start for troubleshooting doc: {e}")
         
         logger.info(f"Troubleshooting guide processed: {kb.vector_store_id}")
         
@@ -981,5 +1017,133 @@ async def debug_troubleshooting_flow(
             "keywords": kb.troubleshooting_flow.get('keywords') if kb.troubleshooting_flow else None,
             "steps_count": len(kb.troubleshooting_flow.get('steps', [])) if kb.troubleshooting_flow else 0,
             "initial_message": kb.troubleshooting_flow.get('initial_message') if kb.troubleshooting_flow else None
+        }
+    }
+
+
+
+@router.post("/sales/upload", response_model=KnowledgeBaseOut)
+async def upload_sales_document(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Upload sales document with content extraction"""
+    logger.info(f"Sales document upload requested: {name}")
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    
+    # Get document type
+    file_extension = file.filename.split('.')[-1].lower()
+    if file_extension not in ['txt', 'pdf', 'docx']:
+        raise HTTPException(status_code=400, detail="Sales documents must be TXT, PDF, or DOCX")
+    
+    try:
+        doc_type = DocumentType(file_extension)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
+    
+    # Read and upload file
+    try:
+        file_content = await file.read()
+        cloud_file_path = storage_service.upload_knowledge_base_file(
+            tenant_id, file.filename, file_content
+        )
+        logger.info(f"Uploaded sales file to cloud: {cloud_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to upload file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file")
+    
+    # Create database record
+    kb = KnowledgeBase(
+        tenant_id=tenant_id,
+        name=name,
+        description=description,
+        file_path=cloud_file_path,
+        document_type=DocumentType.SALES,
+        vector_store_id=f"kb_{tenant_id}_{uuid.uuid4()}",
+        processing_status=ProcessingStatus.PENDING,
+        is_sales=True,
+        sales_extraction_status="pending"
+    )
+    db.add(kb)
+    db.commit()
+    db.refresh(kb)
+    
+    # Process document with sales extraction
+    processor = DocumentProcessor(tenant_id)
+    try:
+        kb.processing_status = ProcessingStatus.PROCESSING
+        db.commit()
+        
+        # Process as sales document
+        result = processor.process_sales_document(
+            cloud_file_path, doc_type, kb.vector_store_id
+        )
+        
+        # Update KB with results
+        kb.processing_status = ProcessingStatus.COMPLETED
+        kb.processed_at = datetime.utcnow()
+        kb.sales_content = result.get("sales_data")
+        kb.sales_extraction_confidence = result.get("extraction_confidence", 0)
+        kb.sales_extraction_status = "completed" if result.get("sales_extracted") else "failed"
+        kb.processing_error = None
+        
+        # Extract intent patterns for enhanced routing
+        try:
+            from app.chatbot.intent_extraction_service import get_tenant_intent_extraction_service
+            extraction_service = get_tenant_intent_extraction_service(db)
+            asyncio.create_task(extraction_service.extract_intents_from_document(kb.id))
+            logger.info(f"🧠 Started intent extraction for sales KB {kb.id}")
+        except Exception as e:
+            logger.warning(f"Intent extraction failed to start for sales doc: {e}")
+        
+        logger.info(f"Sales document processed: {kb.vector_store_id}")
+        
+    except Exception as e:
+        kb.processing_status = ProcessingStatus.FAILED
+        kb.processing_error = str(e)
+        kb.sales_extraction_status = "failed"
+        logger.error(f"Failed to process sales document: {e}")
+    
+    db.commit()
+    return kb
+
+
+
+@router.get("/sales/{kb_id}/debug")
+async def debug_sales_content(
+    kb_id: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Debug extracted sales content"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.tenant_id == tenant.id,
+        KnowledgeBase.is_sales == True
+    ).first()
+    
+    if not kb:
+        raise HTTPException(status_code=404, detail="Sales KB not found")
+    
+    return {
+        "kb_id": kb_id,
+        "name": kb.name,
+        "extraction_status": kb.sales_extraction_status,
+        "extraction_confidence": kb.sales_extraction_confidence,
+        "sales_content": kb.sales_content,
+        "document_type": kb.document_type.value if kb.document_type else None,
+        "is_sales": kb.is_sales,
+        "content_summary": {
+            "products_count": len(kb.sales_content.get('products', [])) if kb.sales_content else 0,
+            "conversation_flows": list(kb.sales_content.get('conversation_flows', {}).keys()) if kb.sales_content else [],
+            "has_pricing": bool(kb.sales_content.get('pricing_structure')) if kb.sales_content else False,
+            "keywords_count": len(kb.sales_content.get('sales_keywords', [])) if kb.sales_content else 0
         }
     }

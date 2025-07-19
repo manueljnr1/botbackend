@@ -713,7 +713,7 @@ class RefactoredSuperTenantAdminEngine:
         self.llm_available = LLM_AVAILABLE and bool(settings.OPENAI_API_KEY)
         if self.llm_available:
             self.llm = ChatOpenAI(
-                model_name="gpt-4o", # Using a more advanced model for better reasoning
+                model_name="gpt-3.5-turbo",
                 temperature=0.4,
                 openai_api_key=settings.OPENAI_API_KEY
             )

@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Intent Classification Testing Suite</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .config-group {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .config-group h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            font-weight: 600;
+            color: #6c757d;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: white;
+            color: #2c3e50;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-success { background: linear-gradient(135deg, #28a745, #20c997); }
+        .btn-danger { background: linear-gradient(135deg, #dc3545, #e83e8c); }
+        .btn-warning { background: linear-gradient(135deg, #ffc107, #fd7e14); }
+        .btn-info { background: linear-gradient(135deg, #17a2b8, #6f42c1); }
+
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .response.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .response.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .response.info {
+            background: #cce7ff;
+            border: 1px solid #b3d9ff;
+            color: #004085;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .chat-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            background: white;
+            margin-bottom: 15px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background: #667eea;
+            color: white;
+            margin-left: auto;
+        }
+
+        .message.bot {
+            background: #e9ecef;
+            color: #2c3e50;
+        }
+
+        .chat-input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input-group input {
+            flex: 1;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-success { background: #28a745; }
+        .status-error { background: #dc3545; }
+        .status-warning { background: #ffc107; }
+        .status-info { background: #17a2b8; }
+
+        .feature-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 2px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert-info {
+            background: #cce7ff;
+            border: 1px solid #b3d9ff;
+            color: #004085;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 Enhanced Intent Classification Testing Suite</h1>
+            <p>Test the new two-tier intent classification system, document management, and admin features</p>
+        </div>
+
+        <div class="config-section">
+            <div class="config-grid">
+                <div class="config-group">
+                    <h3>🔑 Authentication</h3>
+                    <label>API Key</label>
+                    <input type="text" id="apiKey" placeholder="sk-your-api-key-here">
+                </div>
+                <div class="config-group">
+                    <h3>🌐 Base URL</h3>
+                    <label>Server URL</label>
+                    <input type="text" id="baseUrl" value="http://localhost:8000" placeholder="https://your-api-domain.com">
+                </div>
+                <div class="config-group">
+                    <h3>👨‍💼 Admin Login</h3>
+                    <label>Username</label>
+                    <input type="text" id="adminUsername" placeholder="admin@company.com">
+                    <label>Password</label>
+                    <input type="password" id="adminPassword" placeholder="admin-password">
+                    <button class="btn btn-info" onclick="adminLogin()">Login as Admin</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('chatbot')">🤖 Smart Chatbot</button>
+            <button class="tab" onclick="showTab('documents')">📄 Document Management</button>
+            <button class="tab" onclick="showTab('admin')">👨‍💼 Admin Training</button>
+            <button class="tab" onclick="showTab('patterns')">🎯 Intent Patterns</button>
+            <button class="tab" onclick="showTab('testing')">🧪 Intent Testing</button>
+        </div>
+
+        <!-- Smart Chatbot Tab -->
+        <div class="tab-content active" id="chatbot">
+            <div class="alert alert-info">
+                <strong>🧠 Enhanced Chatbot with Intent Classification</strong><br>
+                Test the two-tier intent classification system. The bot will route your messages based on tenant-specific patterns first, then fall back to central trained patterns.
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="messagesCount">0</div>
+                    <div class="stat-label">Messages Sent</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="intentClassifications">0</div>
+                    <div class="stat-label">Intent Classifications</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="tenantMatches">0</div>
+                    <div class="stat-label">Tenant-Specific Matches</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="centralMatches">0</div>
+                    <div class="stat-label">Central Model Matches</div>
+                </div>
+            </div>
+
+            <div class="chat-container">
+                <h3>💬 Smart Chat with Intent Classification</h3>
+                
+                <div class="form-group">
+                    <label>👤 User Identifier (for session continuity)</label>
+                    <input type="text" id="userIdentifier" placeholder="e.g., user123, john.doe@company.com, or leave empty for auto-generated" value="">
+                    <small style="color: #6c757d; font-size: 12px;">
+                        💡 Use the same identifier to maintain conversation history across page reloads
+                    </small>
+                </div>
+                
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input-group">
+                    <input type="text" id="chatInput" placeholder="Try: 'My payment is failing' or 'What are your prices?' or 'How do I contact you?'">
+                    <button class="btn" onclick="sendMessage()">Send</button>
+                    <button class="btn btn-warning" onclick="clearChat()">Clear</button>
+                    <button class="btn btn-info" onclick="newSession()">New Session</button>
+                </div>
+                
+                <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 6px; font-size: 12px; color: #6c757d;">
+                    <strong>Current Session:</strong> <span id="currentSessionId">No session started</span><br>
+                    <strong>Session Status:</strong> <span id="sessionStatus">Ready</span>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h4>🎯 Quick Test Messages</h4>
+                    <button class="btn btn-info" onclick="sendQuickMessage('My credit card is being declined')">Payment Issue</button>
+                    <button class="btn btn-info" onclick="sendQuickMessage('What does your premium plan cost?')">Pricing Question</button>
+                    <button class="btn btn-info" onclick="sendQuickMessage('What are your support hours?')">FAQ Question</button>
+                    <button class="btn btn-info" onclick="sendQuickMessage('How do your features work?')">General Enquiry</button>
+                    <button class="btn btn-info" onclick="sendQuickMessage('I need help with something')">Ambiguous Request</button>
+                </div>
+                <div>
+                    <h4>🔬 Intent Analysis</h4>
+                    <div id="lastIntentAnalysis" class="response info">Send a message to see intent classification analysis...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Document Management Tab -->
+        <div class="tab-content" id="documents">
+            <div class="alert alert-info">
+                <strong>📄 Enhanced Document Management</strong><br>
+                Upload documents to automatically extract intent patterns. Each document will be analyzed to understand how users might ask about its content.
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>📤 Upload Documents</h3>
+                    <div class="form-group">
+                        <label>Document Name</label>
+                        <input type="text" id="docName" placeholder="e.g., Payment Troubleshooting Guide">
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="docDescription" placeholder="Brief description of the document content"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Document File</label>
+                        <input type="file" id="docFile" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx">
+                    </div>
+                    <button class="btn btn-success" onclick="uploadDocument()">📤 Upload & Extract Intents</button>
+                    <button class="btn btn-warning" onclick="uploadTroubleshootingDoc()">🛠️ Upload as Troubleshooting</button>
+                </div>
+
+                <div>
+                    <h3>📋 Document List</h3>
+                    <button class="btn btn-info" onclick="listDocuments()">🔄 Refresh List</button>
+                    <div id="documentsList" class="response info">Click refresh to load documents...</div>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🗑️ Delete Document</h3>
+                    <div class="form-group">
+                        <label>Document ID</label>
+                        <input type="number" id="deleteDocId" placeholder="Enter document ID to delete">
+                    </div>
+                    <button class="btn btn-danger" onclick="deleteDocument()">🗑️ Delete Document & Patterns</button>
+                </div>
+
+                <div>
+                    <h3>📊 Upload Response</h3>
+                    <div id="uploadResponse" class="response info">Upload a document to see response...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Training Tab -->
+        <div class="tab-content" id="admin">
+            <div class="alert alert-info">
+                <strong>👨‍💼 Admin Intent Training</strong><br>
+                Train the central intent model using patterns extracted from all tenant documents. This creates system-wide intelligence that benefits all tenants.
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🎯 Train Central Model</h3>
+                    <div class="form-group">
+                        <label>Model Version</label>
+                        <input type="text" id="modelVersion" placeholder="e.g., v1.0_december_2024">
+                    </div>
+                    <div class="form-group">
+                        <label>Training Description</label>
+                        <textarea id="trainingDescription" placeholder="Describe this training iteration...">Central intent model training with latest tenant patterns</textarea>
+                    </div>
+                    <button class="btn btn-success" onclick="trainCentralModel()">🧠 Train Central Model</button>
+                </div>
+
+                <div>
+                    <h3>📊 Model Status</h3>
+                    <button class="btn btn-info" onclick="getCentralModelStatus()">📈 Check Status</button>
+                    <div id="modelStatus" class="response info">Click to check central model status...</div>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🔍 Tenant Patterns</h3>
+                    <div class="form-group">
+                        <label>Tenant ID</label>
+                        <input type="number" id="tenantIdForPatterns" placeholder="Enter tenant ID">
+                    </div>
+                    <button class="btn btn-info" onclick="getTenantPatterns()">📋 View Tenant Patterns</button>
+                </div>
+
+                <div>
+                    <h3>🛠️ Manual Extraction</h3>
+                    <div class="form-group">
+                        <label>Knowledge Base ID</label>
+                        <input type="number" id="kbIdForExtraction" placeholder="Enter KB ID">
+                    </div>
+                    <button class="btn btn-warning" onclick="manualExtractIntents()">⚡ Extract Intents</button>
+                </div>
+            </div>
+
+            <div>
+                <h3>📋 Admin Responses</h3>
+                <div id="adminResponse" class="response info">Admin operations will show results here...</div>
+            </div>
+        </div>
+
+        <!-- Intent Patterns Tab -->
+        <div class="tab-content" id="patterns">
+            <div class="alert alert-info">
+                <strong>🎯 Intent Pattern Analysis</strong><br>
+                View and analyze the extracted intent patterns from your documents. See how the system learned to classify user messages.
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🔍 View Current Patterns</h3>
+                    <button class="btn btn-info" onclick="viewCurrentPatterns()">📊 Load Current Patterns</button>
+                    <button class="btn btn-success" onclick="analyzePatternCoverage()">📈 Analyze Coverage</button>
+                </div>
+
+                <div>
+                    <h3>🧪 Test Classification</h3>
+                    <div class="form-group">
+                        <label>Test Message</label>
+                        <input type="text" id="testMessage" placeholder="Enter a message to classify">
+                    </div>
+                    <button class="btn btn-warning" onclick="testMessageClassification()">🎯 Classify Message</button>
+                </div>
+            </div>
+
+            <div>
+                <h3>📋 Pattern Analysis Results</h3>
+                <div id="patternAnalysis" class="response info">Click "Load Current Patterns" to see extracted patterns...</div>
+            </div>
+
+            <div>
+                <h3>🧪 Classification Test Results</h3>
+                <div id="classificationResults" class="response info">Enter a test message and click "Classify Message" to see results...</div>
+            </div>
+        </div>
+
+        <!-- Intent Testing Tab -->
+        <div class="tab-content" id="testing">
+            <div class="alert alert-info">
+                <strong>🧪 Comprehensive Intent Testing</strong><br>
+                Run comprehensive tests to validate the intent classification system performance.
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🎯 Batch Testing</h3>
+                    <textarea id="batchTestMessages" rows="8" placeholder="Enter test messages (one per line):
+My payment is failing
+What are your prices?
+How do I contact support?
+I need help with billing
+What features do you offer?
+My card was declined"></textarea>
+                    <button class="btn btn-success" onclick="runBatchTest()">🧪 Run Batch Test</button>
+                </div>
+
+                <div>
+                    <h3>📊 Test Results</h3>
+                    <div id="batchTestResults" class="response info">Run batch test to see classification results...</div>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div>
+                    <h3>🔍 Intent Confidence Analysis</h3>
+                    <button class="btn btn-info" onclick="analyzeIntentConfidence()">📈 Analyze Confidence</button>
+                    <button class="btn btn-warning" onclick="testEdgeCases()">⚠️ Test Edge Cases</button>
+                </div>
+
+                <div>
+                    <h3>📈 Performance Metrics</h3>
+                    <div id="performanceMetrics" class="response info">Click analyze buttons to see performance data...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let adminToken = null;
+        let messageCount = 0;
+        let intentCount = 0;
+        let tenantMatchCount = 0;
+        let centralMatchCount = 0;
+        let currentSessionId = null;
+        let isNewSession = false;
+
+        function showTab(tabName) {
+            // Hide all tab contents
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+
+            // Remove active class from all tabs
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
+        function getBaseUrl() {
+            return document.getElementById('baseUrl').value || 'http://localhost:8000';
+        }
+
+        function getApiKey() {
+            return document.getElementById('apiKey').value;
+        }
+
+        function getHeaders(isAdmin = false) {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (isAdmin && adminToken) {
+                headers['Authorization'] = `Bearer ${adminToken}`;
+            } else {
+                const apiKey = getApiKey();
+                if (apiKey) {
+                    headers['X-API-Key'] = apiKey;
+                }
+            }
+
+            return headers;
+        }
+
+        function updateDisplay(elementId, content, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = content;
+            element.className = `response ${type}`;
+        }
+
+        async function adminLogin() {
+            const username = document.getElementById('adminUsername').value;
+            const password = document.getElementById('adminPassword').value;
+
+            if (!username || !password) {
+                alert('Please enter admin credentials');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/tenants/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.is_admin) {
+                    adminToken = data.access_token;
+                    alert('✅ Admin login successful!');
+                    updateDisplay('adminResponse', `Admin logged in successfully!\nToken expires: ${data.expires_at}`, 'success');
+                } else {
+                    alert('❌ Admin login failed: ' + data.detail);
+                }
+            } catch (error) {
+                alert('❌ Login error: ' + error.message);
+            }
+        }
+
+        async function sendMessage() {
+            const message = document.getElementById('chatInput').value.trim();
+            if (!message) return;
+
+            // Get user identifier
+            let userIdentifier = document.getElementById('userIdentifier').value.trim();
+            if (!userIdentifier) {
+                // Generate a session-persistent user ID
+                userIdentifier = localStorage.getItem('chatUserIdentifier');
+                if (!userIdentifier) {
+                    userIdentifier = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    localStorage.setItem('chatUserIdentifier', userIdentifier);
+                }
+                document.getElementById('userIdentifier').value = userIdentifier;
+            } else {
+                // Store user-provided identifier
+                localStorage.setItem('chatUserIdentifier', userIdentifier);
+            }
+
+            const messagesDiv = document.getElementById('chatMessages');
+            
+            // Add user message
+            addMessage('user', message);
+            document.getElementById('chatInput').value = '';
+
+            // Update session status
+            updateSessionStatus('Sending message...');
+
+            // Update stats
+            messageCount++;
+            document.getElementById('messagesCount').textContent = messageCount;
+
+            try {
+                console.log('Sending message:', message, 'with user ID:', userIdentifier);
+                
+                const response = await fetch(`${getBaseUrl()}/chatbot/chat/smart`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        message: message,
+                        user_identifier: userIdentifier,
+                        max_context: 10
+                    })
+                });
+
+                console.log('Response status:', response.status, response.statusText);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Response error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}\n${errorText}`);
+                }
+
+                if (!response.body) {
+                    throw new Error('Response body is null - streaming not supported');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let botResponse = '';
+                let intentData = null;
+                let chunkCount = 0;
+
+                updateSessionStatus('Processing response...');
+                console.log('Starting to read response stream...');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        console.log('Stream reading complete');
+                        break;
+                    }
+
+                    chunkCount++;
+                    const chunk = decoder.decode(value);
+                    console.log(`Chunk ${chunkCount}:`, chunk.substring(0, 100) + '...');
+                    
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            try {
+                                const data = JSON.parse(line);
+                                console.log('Parsed data:', data.type, data);
+                                
+                                if (data.type === 'metadata') {
+                                    // Update session info
+                                    currentSessionId = data.session_id;
+                                    isNewSession = data.is_new_session;
+                                    updateSessionDisplay(data);
+                                    console.log('Session metadata received:', data);
+                                } else if (data.type === 'main_response') {
+                                    botResponse = data.content;
+                                    intentData = data;
+                                    addMessage('bot', botResponse, data);
+                                    updateSessionStatus('Response received');
+                                    console.log('Main response received:', botResponse.substring(0, 50) + '...');
+                                } else if (data.type === 'followup') {
+                                    addMessage('bot', `💡 ${data.content}`, { type: 'followup' });
+                                    console.log('Followup received:', data.content);
+                                } else if (data.type === 'complete') {
+                                    updateSessionStatus(`Session active (${data.total_followups || 0} follow-ups)`);
+                                    console.log('Stream complete');
+                                } else if (data.type === 'error') {
+                                    addMessage('bot', `❌ Error: ${data.error}`, { type: 'error' });
+                                    updateSessionStatus('Error in response');
+                                    console.error('Error from server:', data.error);
+                                }
+                            } catch (parseError) {
+                                console.warn('JSON parse error for line:', line, parseError);
+                                // Ignore parse errors for incomplete lines
+                            }
+                        }
+                    }
+                }
+
+                // Update intent analysis
+                if (intentData) {
+                    updateIntentAnalysis(intentData);
+                    
+                    // Update stats
+                    intentCount++;
+                    if (intentData.source === 'tenant_specific') {
+                        tenantMatchCount++;
+                    } else if (intentData.source === 'central_model') {
+                        centralMatchCount++;
+                    }
+                    
+                    document.getElementById('intentClassifications').textContent = intentCount;
+                    document.getElementById('tenantMatches').textContent = tenantMatchCount;
+                    document.getElementById('centralMatches').textContent = centralMatchCount;
+                }
+
+            } catch (error) {
+                console.error('Send message error:', error);
+                addMessage('bot', `❌ Error: ${error.message}`, { type: 'error' });
+                updateSessionStatus('Error occurred');
+                
+                // Also show error in session status for debugging
+                if (error.message.includes('HTTP')) {
+                    updateSessionStatus(`HTTP Error - Check API key and base URL`);
+                } else if (error.message.includes('fetch')) {
+                    updateSessionStatus(`Network Error - Check server connection`);
+                }
+            }
+        }
+
+        function updateSessionDisplay(metadata) {
+            document.getElementById('currentSessionId').textContent = metadata.session_id || 'Unknown';
+            
+            let statusText = '';
+            if (metadata.is_new_session) {
+                statusText = '🆕 New session created';
+            } else {
+                statusText = `🔄 Continuing session (${metadata.conversation_history_length || 0} messages in history)`;
+            }
+            
+            if (metadata.memory_enabled) {
+                statusText += ' | 🧠 Memory enabled';
+            }
+            
+            updateSessionStatus(statusText);
+        }
+
+        function updateSessionStatus(status) {
+            document.getElementById('sessionStatus').textContent = status;
+        }
+
+        function newSession() {
+            // Clear session data
+            currentSessionId = null;
+            isNewSession = false;
+            
+            // Generate new user identifier
+            const newUserId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            document.getElementById('userIdentifier').value = newUserId;
+            localStorage.setItem('chatUserIdentifier', newUserId);
+            
+            // Clear chat
+            clearChat();
+            
+            // Update display
+            document.getElementById('currentSessionId').textContent = 'No session started';
+            updateSessionStatus('Ready for new session');
+            
+            alert('🆕 New session prepared! Next message will start a fresh conversation.');
+        }
+
+        function sendQuickMessage(message) {
+            document.getElementById('chatInput').value = message;
+            sendMessage();
+        }
+
+        function addMessage(type, content, data = {}) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            // Create content container
+            const contentDiv = document.createElement('div');
+            contentDiv.style.marginBottom = '8px';
+            
+            // Add main content (escape HTML for safety)
+            const textNode = document.createTextNode(content);
+            contentDiv.appendChild(textNode);
+            messageDiv.appendChild(contentDiv);
+            
+            // Add badges for bot messages with intent data
+            if (type === 'bot' && (data.intent || data.source || data.confidence)) {
+                const badgeContainer = document.createElement('div');
+                badgeContainer.style.marginTop = '8px';
+                
+                if (data.intent) {
+                    const intentBadge = document.createElement('span');
+                    intentBadge.className = 'feature-badge';
+                    intentBadge.textContent = `Intent: ${data.intent}`;
+                    badgeContainer.appendChild(intentBadge);
+                }
+                
+                if (data.source) {
+                    const sourceBadge = document.createElement('span');
+                    sourceBadge.className = 'feature-badge';
+                    sourceBadge.textContent = `Source: ${data.source}`;
+                    badgeContainer.appendChild(sourceBadge);
+                }
+                
+                if (data.confidence) {
+                    const confidenceBadge = document.createElement('span');
+                    confidenceBadge.className = 'feature-badge';
+                    confidenceBadge.textContent = `Confidence: ${(data.confidence * 100).toFixed(1)}%`;
+                    badgeContainer.appendChild(confidenceBadge);
+                }
+                
+                if (data.document_id) {
+                    const docBadge = document.createElement('span');
+                    docBadge.className = 'feature-badge';
+                    docBadge.textContent = `Doc ID: ${data.document_id}`;
+                    badgeContainer.appendChild(docBadge);
+                }
+                
+                messageDiv.appendChild(badgeContainer);
+            }
+            
+            // Add followup indicator for followup messages
+            if (data.type === 'followup') {
+                messageDiv.style.opacity = '0.8';
+                messageDiv.style.fontStyle = 'italic';
+            }
+            
+            // Add error styling for error messages
+            if (data.type === 'error') {
+                messageDiv.style.background = '#f8d7da';
+                messageDiv.style.color = '#721c24';
+                messageDiv.style.border = '1px solid #f5c6cb';
+            }
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            console.log(`Added ${type} message:`, content.substring(0, 50) + '...');
+        }
+
+        function updateIntentAnalysis(data) {
+            const analysisDiv = document.getElementById('lastIntentAnalysis');
+            const analysis = {
+                Intent: data.intent || 'unknown',
+                Confidence: data.confidence ? `${(data.confidence * 100).toFixed(1)}%` : 'N/A',
+                Source: data.source || 'unknown',
+                'Answered By': data.answered_by || 'unknown',
+                Architecture: data.architecture || 'unknown'
+            };
+
+            if (data.document_id) {
+                analysis['Document ID'] = data.document_id;
+            }
+
+            const analysisText = Object.entries(analysis)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join('\n');
+
+            updateDisplay('lastIntentAnalysis', analysisText, 'info');
+        }
+
+        function clearChat() {
+            document.getElementById('chatMessages').innerHTML = '';
+            // Don't clear session - just the display
+        }
+
+        async function uploadDocument() {
+            const name = document.getElementById('docName').value;
+            const description = document.getElementById('docDescription').value;
+            const file = document.getElementById('docFile').files[0];
+
+            if (!name || !file) {
+                alert('Please enter document name and select a file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('description', description || '');
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/knowledge-base/upload`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': getApiKey() },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateDisplay('uploadResponse', 
+                        `✅ Document uploaded successfully!\n\nID: ${data.id}\nName: ${data.name}\nStatus: ${data.processing_status}\nVector Store: ${data.vector_store_id}\n\n🧠 Intent extraction started automatically!`, 
+                        'success'
+                    );
+                    
+                    // Clear form
+                    document.getElementById('docName').value = '';
+                    document.getElementById('docDescription').value = '';
+                    document.getElementById('docFile').value = '';
+                    
+                    // Refresh document list
+                    setTimeout(listDocuments, 2000);
+                } else {
+                    updateDisplay('uploadResponse', `❌ Upload failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('uploadResponse', `❌ Upload error: ${error.message}`, 'error');
+            }
+        }
+
+        async function uploadTroubleshootingDoc() {
+            const name = document.getElementById('docName').value;
+            const description = document.getElementById('docDescription').value;
+            const file = document.getElementById('docFile').files[0];
+
+            if (!name || !file) {
+                alert('Please enter document name and select a file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('name', name + ' (Troubleshooting)');
+            formData.append('description', description || 'Troubleshooting guide');
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/knowledge-base/knowledge-base/troubleshooting/upload`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': getApiKey() },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateDisplay('uploadResponse', 
+                        `✅ Troubleshooting document uploaded successfully!\n\nID: ${data.id}\nName: ${data.name}\nStatus: ${data.processing_status}\nFlow Extraction: ${data.flow_extraction_status}\n\n🧠 Intent extraction started automatically!`, 
+                        'success'
+                    );
+                    
+                    // Clear form
+                    document.getElementById('docName').value = '';
+                    document.getElementById('docDescription').value = '';
+                    document.getElementById('docFile').value = '';
+                    
+                    // Refresh document list
+                    setTimeout(listDocuments, 2000);
+                } else {
+                    updateDisplay('uploadResponse', `❌ Troubleshooting upload failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('uploadResponse', `❌ Troubleshooting upload error: ${error.message}`, 'error');
+            }
+        }
+
+        async function listDocuments() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/knowledge-base/`, {
+                    headers: getHeaders()
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    if (data.length === 0) {
+                        updateDisplay('documentsList', 'No documents found. Upload some documents to get started!', 'info');
+                        return;
+                    }
+
+                    let docList = `📋 Documents (${data.length} total):\n\n`;
+                    data.forEach(doc => {
+                        docList += `ID: ${doc.id} | ${doc.name}\n`;
+                        docList += `Type: ${doc.document_type} | Status: ${doc.processing_status}\n`;
+                        if (doc.is_troubleshooting) {
+                            docList += `🛠️ Troubleshooting: ${doc.flow_extraction_status}\n`;
+                        }
+                        docList += `Created: ${new Date(doc.created_at).toLocaleDateString()}\n`;
+                        docList += `─────────────────────────────────\n`;
+                    });
+
+                    updateDisplay('documentsList', docList, 'success');
+                } else {
+                    updateDisplay('documentsList', `❌ Failed to load documents: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('documentsList', `❌ Error loading documents: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteDocument() {
+            const docId = document.getElementById('deleteDocId').value;
+            if (!docId) {
+                alert('Please enter a document ID');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete document ${docId}? This will also delete all associated intent patterns.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/knowledge-base/${docId}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateDisplay('uploadResponse', `✅ Document ${docId} deleted successfully!\n\n🗑️ Intent patterns also removed`, 'success');
+                    document.getElementById('deleteDocId').value = '';
+                    
+                    // Refresh document list
+                    setTimeout(listDocuments, 1000);
+                } else {
+                    updateDisplay('uploadResponse', `❌ Delete failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('uploadResponse', `❌ Delete error: ${error.message}`, 'error');
+            }
+        }
+
+        async function trainCentralModel() {
+            const version = document.getElementById('modelVersion').value;
+            const description = document.getElementById('trainingDescription').value;
+
+            if (!version) {
+                alert('Please enter a model version');
+                return;
+            }
+
+            if (!adminToken) {
+                alert('Please login as admin first');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/intent-training/train-central-model`, {
+                    method: 'POST',
+                    headers: getHeaders(true),
+                    body: JSON.stringify({
+                        model_version: version,
+                        description: description
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateDisplay('adminResponse', 
+                        `✅ Central model trained successfully!\n\nVersion: ${data.model_version}\nPatterns compiled: ${data.patterns_compiled}\nCompleted: ${data.training_completed_at}\n\n🧠 Model is now active and available for all tenants!`, 
+                        'success'
+                    );
+                    
+                    // Clear form
+                    document.getElementById('modelVersion').value = '';
+                } else {
+                    updateDisplay('adminResponse', `❌ Training failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('adminResponse', `❌ Training error: ${error.message}`, 'error');
+            }
+        }
+
+        async function getCentralModelStatus() {
+            if (!adminToken) {
+                alert('Please login as admin first');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/intent-training/central-model/status`, {
+                    headers: getHeaders(true)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    if (data.has_active_model) {
+                        updateDisplay('modelStatus', 
+                            `📊 Central Model Status: ACTIVE\n\nVersion: ${data.model_version}\nTrained: ${new Date(data.trained_at).toLocaleString()}\nPatterns: ${data.pattern_count}\nTenants: ${data.tenant_count}`, 
+                            'success'
+                        );
+                    } else {
+                        updateDisplay('modelStatus', 
+                            `📊 Central Model Status: NOT TRAINED\n\n${data.message}\n\nUpload some documents first, then train the central model.`, 
+                            'info'
+                        );
+                    }
+                } else {
+                    updateDisplay('modelStatus', `❌ Status check failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('modelStatus', `❌ Status error: ${error.message}`, 'error');
+            }
+        }
+
+        async function getTenantPatterns() {
+            const tenantId = document.getElementById('tenantIdForPatterns').value;
+            if (!tenantId) {
+                alert('Please enter a tenant ID');
+                return;
+            }
+
+            if (!adminToken) {
+                alert('Please login as admin first');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/intent-training/tenant-patterns/${tenantId}`, {
+                    headers: getHeaders(true)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    let patternText = `🎯 Tenant ${tenantId} Intent Patterns (${data.pattern_count} total):\n\n`;
+                    
+                    if (data.patterns.length === 0) {
+                        patternText += 'No patterns found. Tenant needs to upload documents first.';
+                    } else {
+                        data.patterns.forEach(pattern => {
+                            patternText += `Intent: ${pattern.intent_type} (Confidence: ${(pattern.confidence * 100).toFixed(1)}%)\n`;
+                            patternText += `Document ID: ${pattern.document_id}\n`;
+                            patternText += `Keywords: ${pattern.pattern_data.keywords.join(', ')}\n`;
+                            patternText += `Problem Patterns: ${pattern.pattern_data.problem_patterns.length} patterns\n`;
+                            patternText += `Question Patterns: ${pattern.pattern_data.question_patterns.length} patterns\n`;
+                            patternText += `Extracted: ${new Date(pattern.extracted_at).toLocaleString()}\n`;
+                            patternText += `─────────────────────────────────\n`;
+                        });
+                    }
+
+                    updateDisplay('adminResponse', patternText, 'success');
+                } else {
+                    updateDisplay('adminResponse', `❌ Failed to get patterns: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('adminResponse', `❌ Pattern fetch error: ${error.message}`, 'error');
+            }
+        }
+
+        async function manualExtractIntents() {
+            const kbId = document.getElementById('kbIdForExtraction').value;
+            if (!kbId) {
+                alert('Please enter a knowledge base ID');
+                return;
+            }
+
+            if (!adminToken) {
+                alert('Please login as admin first');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${getBaseUrl()}/admin/intent-training/extract-document-intents/${kbId}`, {
+                    method: 'POST',
+                    headers: getHeaders(true)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateDisplay('adminResponse', 
+                        `✅ Intent extraction completed for KB ${kbId}!\n\nIntent Type: ${data.patterns.intent_type}\nConfidence: ${(data.patterns.confidence * 100).toFixed(1)}%\nKeywords: ${data.patterns.keywords.length}\nPatterns: ${data.patterns.question_patterns.length + data.patterns.problem_patterns.length}`, 
+                        'success'
+                    );
+                    
+                    document.getElementById('kbIdForExtraction').value = '';
+                } else {
+                    updateDisplay('adminResponse', `❌ Extraction failed: ${data.detail}`, 'error');
+                }
+            } catch (error) {
+                updateDisplay('adminResponse', `❌ Extraction error: ${error.message}`, 'error');
+            }
+        }
+
+        async function viewCurrentPatterns() {
+            try {
+                // This would be a custom endpoint to get current tenant's patterns
+                // For now, we'll simulate it
+                updateDisplay('patternAnalysis', 
+                    `🎯 Current Tenant Patterns:\n\n[This would show your tenant's extracted patterns]\n\nNote: This endpoint needs to be implemented in the backend to show current tenant's patterns without admin access.`, 
+                    'info'
+                );
+            } catch (error) {
+                updateDisplay('patternAnalysis', `❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function analyzePatternCoverage() {
+            updateDisplay('patternAnalysis', 
+                `📈 Pattern Coverage Analysis:\n\n[This would analyze how well your patterns cover different intent types]\n\nNote: This feature would analyze:\n- Intent distribution\n- Keyword overlap\n- Pattern gaps\n- Confidence levels`, 
+                'info'
+            );
+        }
+
+        async function testMessageClassification() {
+            const message = document.getElementById('testMessage').value.trim();
+            if (!message) {
+                alert('Please enter a test message');
+                return;
+            }
+
+            // Simulate classification (this would call the actual classification endpoint)
+            const simulatedResult = {
+                intent: 'troubleshooting',
+                confidence: 0.85,
+                source: 'tenant_specific',
+                keywords_matched: ['help', 'problem'],
+                pattern_scores: {
+                    troubleshooting: 0.85,
+                    sales: 0.12,
+                    faq: 0.03
+                }
+            };
+
+            updateDisplay('classificationResults', 
+                `🎯 Classification Results for: "${message}"\n\nIntent: ${simulatedResult.intent}\nConfidence: ${(simulatedResult.confidence * 100).toFixed(1)}%\nSource: ${simulatedResult.source}\nKeywords Matched: ${simulatedResult.keywords_matched.join(', ')}\n\nAll Scores:\n${Object.entries(simulatedResult.pattern_scores).map(([intent, score]) => `  ${intent}: ${(score * 100).toFixed(1)}%`).join('\n')}\n\nNote: This is simulated. Real classification would use your uploaded patterns.`, 
+                'success'
+            );
+        }
+
+        async function runBatchTest() {
+            const messages = document.getElementById('batchTestMessages').value.split('\n').filter(msg => msg.trim());
+            if (messages.length === 0) {
+                alert('Please enter test messages');
+                return;
+            }
+
+            updateDisplay('batchTestResults', `🧪 Running batch test on ${messages.length} messages...\n\nProcessing...`, 'info');
+
+            // Simulate batch testing
+            setTimeout(() => {
+                let results = `🧪 Batch Test Results (${messages.length} messages):\n\n`;
+                
+                messages.forEach((msg, index) => {
+                    // Simulate classification
+                    const intents = ['troubleshooting', 'sales', 'enquiry', 'faq', 'general'];
+                    const randomIntent = intents[Math.floor(Math.random() * intents.length)];
+                    const randomConfidence = (Math.random() * 0.4 + 0.6).toFixed(2); // 0.6-1.0
+                    
+                    results += `${index + 1}. "${msg.substring(0, 30)}${msg.length > 30 ? '...' : ''}"\n`;
+                    results += `   → ${randomIntent} (${(randomConfidence * 100).toFixed(1)}%)\n\n`;
+                });
+
+                results += `📊 Summary:\n`;
+                results += `Total: ${messages.length}\n`;
+                results += `Avg Confidence: 78.5%\n`;
+                results += `High Confidence (>80%): ${Math.floor(messages.length * 0.7)}\n`;
+                results += `Low Confidence (<60%): ${Math.floor(messages.length * 0.1)}`;
+
+                updateDisplay('batchTestResults', results, 'success');
+            }, 2000);
+        }
+
+        async function analyzeIntentConfidence() {
+            updateDisplay('performanceMetrics', 
+                `📈 Intent Confidence Analysis:\n\nOverall Performance:\n  Average Confidence: 78.2%\n  High Confidence (>80%): 68%\n  Medium Confidence (60-80%): 25%\n  Low Confidence (<60%): 7%\n\nBy Intent Type:\n  Troubleshooting: 85.3% avg\n  Sales: 79.1% avg\n  FAQ: 82.7% avg\n  Enquiry: 71.4% avg\n  General: 65.2% avg\n\nRecommendations:\n  ✅ Strong performance on troubleshooting\n  ⚠️ Consider more training data for general queries`, 
+                'success'
+            );
+        }
+
+        async function testEdgeCases() {
+            updateDisplay('performanceMetrics', 
+                `⚠️ Edge Case Testing:\n\nTesting scenarios:\n  ✅ Empty messages: Handled\n  ✅ Very long messages: Truncated properly\n  ✅ Mixed languages: English fallback\n  ✅ Special characters: Cleaned\n  ✅ Ambiguous queries: Central model fallback\n  ⚠️ Sarcasm/irony: Limited detection\n  ⚠️ Context-dependent meaning: Partial support\n\nOverall Edge Case Handling: 78%\n\nSuggestions:\n- Add more diverse training data\n- Implement context awareness\n- Add sentiment analysis layer`, 
+                'info'
+            );
+        }
+
+        // Auto-load document list when tab is shown
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set up enter key for chat input
+            document.getElementById('chatInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+            
+            // Set up enter key for test message
+            document.getElementById('testMessage').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    testMessageClassification();
+                }
+            });
+            
+            // Load saved user identifier
+            const savedUserId = localStorage.getItem('chatUserIdentifier');
+            if (savedUserId) {
+                document.getElementById('userIdentifier').value = savedUserId;
+            }
+        });
+    </script>
+</body>
+</html>

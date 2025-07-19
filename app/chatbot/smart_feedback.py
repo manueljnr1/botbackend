@@ -2,6 +2,7 @@
 """
 Advanced Smart Feedback System - Supabase + Resend Integration
 Efficient, trackable, and production-ready with 30-day email memory
+Now integrated with Email Scraper Engine for automatic email capture
 """
 
 import logging
@@ -85,6 +86,7 @@ class AdvancedSmartFeedbackManager:
     - Advanced analytics and monitoring
     - 30-day email memory system
     - Template-based email rendering
+    - Integrated Email Scraper Engine for automatic email capture
     """
     
     def __init__(self, db: Session, tenant_id: int):
@@ -93,6 +95,9 @@ class AdvancedSmartFeedbackManager:
         
         # Email memory configuration
         self.EMAIL_MEMORY_DURATION = timedelta(days=30)  # 30-day memory
+        
+        # Initialize email scraper engine
+        self.email_scraper = EmailScraperEngine(db)
         
         # Initialize Supabase
         self.supabase_url = os.getenv("SUPABASE_URL")
@@ -138,7 +143,7 @@ class AdvancedSmartFeedbackManager:
             r"that's outside my knowledge"
         ]
         
-        logger.info(f"✅ Advanced Smart Feedback Manager initialized for tenant {tenant_id} with 30-day email memory")
+        logger.info(f"✅ Advanced Smart Feedback Manager initialized for tenant {tenant_id} with 30-day email memory and email scraping")
 
         # Check LLM availability properly
         try:
@@ -158,12 +163,74 @@ class AdvancedSmartFeedbackManager:
         except Exception as e:
             logger.error(f"❌ Error loading template {template_name}: {e}")
             raise
-            
-    def should_request_email(self, session_id: str, user_identifier: str) -> bool:
+
+    def attempt_email_scraping(self, session_id: str, scraping_data: Dict) -> Optional[str]:
         """
-        Check if we should ask for email with 30-day memory logic + LOOP PREVENTION
+        Attempt to scrape email from various sources
+        Returns first valid email found, None if no email scraped
         """
         try:
+            if not scraping_data:
+                return None
+            
+            logger.info(f"🔍 Attempting email scraping for session {session_id}")
+            
+            # Use bulk processing from email scraper
+            result = self.email_scraper.bulk_process_scraping_data(
+                tenant_id=self.tenant_id,
+                scraping_data={
+                    **scraping_data,
+                    'session_id': session_id,
+                    'metadata': scraping_data.get('metadata', {})
+                }
+            )
+            
+            if result.get('success') and result.get('total_emails_captured', 0) > 0:
+                # Get the most recent scraped email for this session
+                scraped_emails = self.email_scraper.get_scraped_emails_for_tenant(
+                    tenant_id=self.tenant_id, 
+                    limit=10
+                )
+                
+                # Find email from this session
+                for email_record in scraped_emails:
+                    if email_record.get('session_id') == session_id:
+                        scraped_email = email_record.get('email')
+                        if scraped_email:
+                            logger.info(f"✅ Successfully scraped email {scraped_email} for session {session_id} via {email_record.get('source')}")
+                            return scraped_email
+                
+                # If no session-specific email, return first recent email
+                if scraped_emails:
+                    scraped_email = scraped_emails[0].get('email')
+                    logger.info(f"✅ Using recent scraped email {scraped_email} for session {session_id}")
+                    return scraped_email
+            
+            logger.info(f"📭 No emails scraped for session {session_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error during email scraping: {e}")
+            return None
+            
+    def should_request_email(self, session_id: str, user_identifier: str, scraping_data: Dict = None) -> bool:
+        """
+        Check if we should ask for email with 30-day memory logic + LOOP PREVENTION
+        Now includes automatic email scraping attempt
+        """
+        try:
+            # FIRST: Attempt email scraping if data provided
+            if scraping_data:
+                scraped_email = self.attempt_email_scraping(session_id, scraping_data)
+                if scraped_email:
+                    # Store scraped email automatically
+                    if self.store_user_email(session_id, scraped_email, source="scraped"):
+                        logger.info(f"🎯 Email scraping successful - skipping manual request for session {session_id}")
+                        return False  # Skip manual email request
+                    else:
+                        logger.warning(f"⚠️ Failed to store scraped email, falling back to manual request")
+            
+            # FALLBACK: Continue with existing logic if scraping failed or no data
             from app.chatbot.simple_memory import SimpleChatbotMemory
             
             memory = SimpleChatbotMemory(self.db, self.tenant_id)
@@ -348,9 +415,10 @@ class AdvancedSmartFeedbackManager:
         
         return None
     
-    def store_user_email(self, session_id: str, email: str) -> bool:
+    def store_user_email(self, session_id: str, email: str, source: str = "manual") -> bool:
         """
         Store user email with 30-day expiration tracking - FIXED TO PREVENT LEAKS
+        Now supports both manual and scraped email sources
         """
         try:
             session = self.db.query(ChatSession).filter(
@@ -358,7 +426,7 @@ class AdvancedSmartFeedbackManager:
             ).first()
             
             if session:
-                # Store email with timestamp
+                # Store email with timestamp and source tracking
                 session.user_email = email.lower().strip()
                 session.email_captured_at = datetime.utcnow()
                 
@@ -366,14 +434,18 @@ class AdvancedSmartFeedbackManager:
                 if hasattr(session, 'email_expires_at'):
                     session.email_expires_at = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
                 
+                # Track email source for analytics
+                if hasattr(session, 'email_source'):
+                    session.email_source = source
+                
                 self.db.commit()
                 
                 # Track in Supabase for analytics (backend only)
-                self._track_email_capture(session_id, email)
+                self._track_email_capture(session_id, email, source)
                 
                 # Log for debugging (backend only)
                 expiry_date = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
-                logger.info(f"✅ Stored email {email} for session {session_id} (expires: {expiry_date.strftime('%Y-%m-%d')})")
+                logger.info(f"✅ Stored email {email} for session {session_id} via {source} (expires: {expiry_date.strftime('%Y-%m-%d')})")
                 return True
                 
         except Exception as e:
@@ -431,7 +503,8 @@ class AdvancedSmartFeedbackManager:
                     "captured_at": session.email_captured_at.isoformat(),
                     "age_days": email_age.days,
                     "days_remaining": max(0, days_remaining),
-                    "expires_at": (session.email_captured_at + self.EMAIL_MEMORY_DURATION).isoformat()
+                    "expires_at": (session.email_captured_at + self.EMAIL_MEMORY_DURATION).isoformat(),
+                    "email_source": getattr(session, 'email_source', 'unknown')
                 }
             else:
                 return {
@@ -756,8 +829,8 @@ class AdvancedSmartFeedbackManager:
         except Exception as e:
             logger.error(f"⚠️ Failed to track email failure: {e}")
     
-    def _track_email_capture(self, session_id: str, email: str):
-        """Track when user provides email with 30-day expiration info"""
+    def _track_email_capture(self, session_id: str, email: str, source: str = "manual"):
+        """Track when user provides email with 30-day expiration info and source"""
         try:
             expiry_date = datetime.utcnow() + self.EMAIL_MEMORY_DURATION
             
@@ -767,7 +840,8 @@ class AdvancedSmartFeedbackManager:
                 "tenant_id": self.tenant_id,
                 "captured_at": datetime.utcnow().isoformat(),
                 "expires_at": expiry_date.isoformat(),
-                "memory_duration_days": self.EMAIL_MEMORY_DURATION.days
+                "memory_duration_days": self.EMAIL_MEMORY_DURATION.days,
+                "email_source": source  # Track if manual vs scraped
             }
             
             self.supabase.table("email_captures").insert(capture_data).execute()
@@ -940,6 +1014,8 @@ class AdvancedSmartFeedbackManager:
                 ).eq("tenant_id", self.tenant_id).execute()
                 
                 email_captures = len(capture_analytics.data)
+                scraped_captures = len([c for c in capture_analytics.data if c.get("email_source") == "scraped"])
+                manual_captures = len([c for c in capture_analytics.data if c.get("email_source") == "manual"])
                 
                 # Get expiration analytics
                 expiry_analytics = self.supabase.table("email_expirations").select("*").gte(
@@ -954,11 +1030,14 @@ class AdvancedSmartFeedbackManager:
                 successful_emails = 0
                 failed_emails = 0
                 email_captures = 0
+                scraped_captures = 0
+                manual_captures = 0
                 email_expirations = 0
             
             # Calculate metrics
             resolution_rate = (resolved_requests / total_requests * 100) if total_requests > 0 else 0
             email_success_rate = (successful_emails / len(emails) * 100) if emails else 0
+            scraping_success_rate = (scraped_captures / email_captures * 100) if email_captures > 0 else 0
             
             return {
                 "success": True,
@@ -980,6 +1059,11 @@ class AdvancedSmartFeedbackManager:
                     "captures": email_captures,
                     "expirations": email_expirations,
                     "memory_duration_days": self.EMAIL_MEMORY_DURATION.days
+                },
+                "email_scraping": {
+                    "scraped_captures": scraped_captures,
+                    "manual_captures": manual_captures,
+                    "scraping_success_rate": round(scraping_success_rate, 2)
                 },
                 "tenant_id": self.tenant_id
             }

@@ -48,6 +48,7 @@ from app.live_chat.customer_detection_config import CustomerDetectionMiddleware,
 from app.live_chat.transcript_router import router as transcript_router
 
 from app.chatbot.admin_router import router as enhanced_admin_router
+from app.admin import intent_training_router
 
 
 
@@ -177,6 +178,7 @@ app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"
 app.add_middleware(CustomerDetectionMiddleware, enabled=True)
 app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
 app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
+app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
 
 
 

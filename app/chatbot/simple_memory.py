@@ -562,11 +562,7 @@ class SimpleChatbotMemory:
             # Clean old message content (90+ days old)
             cleaned = self.cleanup_old_messages(days_old=90)
             
-            # Could add more maintenance tasks here:
-            # - Compress old conversation data
-            # - Update session analytics
-            # - Generate performance reports
-            
+          
             maintenance_result = {
                 "archived_sessions": archived,
                 "cleaned_messages": cleaned,
@@ -679,3 +675,104 @@ class SimpleChatbotMemory:
                 
         except Exception as e:
             logger.error(f"❌ Error clearing troubleshooting state: {e}")
+
+
+
+    
+
+    
+    def store_sales_conversation_state(self, session_id: str, kb_id: int, flow_type: str, current_step: str, flow_data: Dict):
+        """Store current sales conversation state"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session:
+                sales_state = {
+                    "kb_id": kb_id,
+                    "flow_type": flow_type,  # "pricing_inquiry", "feature_inquiry", etc.
+                    "current_step": current_step,
+                    "flow_data": flow_data,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "active": True,
+                    "conversation_type": "sales"
+                }
+                
+                if not hasattr(session, 'session_metadata') or session.session_metadata is None:
+                    session.session_metadata = {}
+                
+                session.session_metadata["sales_conversation_state"] = sales_state
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                
+                self.db.commit()
+                logger.info(f"💼 Stored sales conversation state: {flow_type} - step {current_step}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error storing sales conversation state: {e}")
+            return False
+
+    def get_sales_conversation_state(self, session_id: str) -> Optional[Dict]:
+        """Get current sales conversation state"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and hasattr(session, 'session_metadata') and session.session_metadata:
+                state = session.session_metadata.get("sales_conversation_state")
+                
+                if state and state.get("active", False):
+                    logger.info(f"💼 Found active sales conversation: {state.get('flow_type')} - step {state.get('current_step')}")
+                    return state
+                    
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting sales conversation state: {e}")
+            return None
+
+    def update_sales_conversation_step(self, session_id: str, next_step: str):
+        """Move to next step in sales conversation"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata and "sales_conversation_state" in session.session_metadata:
+                session.session_metadata["sales_conversation_state"]["current_step"] = next_step
+                session.session_metadata["sales_conversation_state"]["updated_at"] = datetime.utcnow().isoformat()
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                
+                self.db.commit()
+                logger.info(f"💼 Updated sales conversation step to: {next_step}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error updating sales conversation step: {e}")
+            return False
+
+    def clear_sales_conversation_state(self, session_id: str):
+        """Clear sales conversation state when flow completes"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata and "sales_conversation_state" in session.session_metadata:
+                session.session_metadata["sales_conversation_state"]["active"] = False
+                session.session_metadata["sales_conversation_state"]["completed_at"] = datetime.utcnow().isoformat()
+                
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(session, "session_metadata")
+                self.db.commit()
+                
+                logger.info(f"💼 Cleared sales conversation state")
+                
+        except Exception as e:
+            logger.error(f"❌ Error clearing sales conversation state: {e}")

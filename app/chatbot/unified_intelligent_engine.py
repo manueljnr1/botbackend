@@ -1,17 +1,19 @@
 import logging
 import re
 from typing import Dict, Any, Optional, List, Tuple
+import json
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 
 from app.chatbot.simple_memory import SimpleChatbotMemory
-from app.knowledge_base.models import FAQ, KnowledgeBase, ProcessingStatus
 from app.knowledge_base.processor import DocumentProcessor
 from app.tenants.models import Tenant
 from app.config import settings
 from app.chatbot.security import SecurityPromptManager, build_secure_chatbot_prompt
 from app.chatbot.security import fix_response_formatting
 from app.chatbot.security import check_message_security
+from app.knowledge_base.models import TenantIntentPattern, CentralIntentModel, DocumentType, ProcessingStatus, KnowledgeBase,  FAQ
+
 
 try:
     from langchain_openai import ChatOpenAI
@@ -65,6 +67,7 @@ class UnifiedIntelligentEngine:
         self.privacy_patterns = self._initialize_privacy_filters()
         
         logger.info("🚀 Enhanced Unified Engine initialized - Privacy-First Architecture")
+
     
     def _initialize_privacy_filters(self) -> Dict[str, re.Pattern]:
         """Initialize regex patterns for privacy filtering"""
@@ -114,7 +117,7 @@ class UnifiedIntelligentEngine:
 
             # --- 3. ROUTING TO SPECIALIZED HANDLERS ---
             if context_result['is_product_related']:
-                response_data = self._handle_product_related(user_message, tenant, context_result, session_id)
+                response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
             else:
                 response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
@@ -138,7 +141,6 @@ class UnifiedIntelligentEngine:
         except Exception as e:
             logger.error(f"Error in intelligent router: {e}")
             return {"error": str(e), "success": False}
-
 
 
 
@@ -185,6 +187,8 @@ class UnifiedIntelligentEngine:
             
         except Exception as e:
             logger.error(f"Session lifecycle management error: {e}")
+
+
 
     def _enhanced_context_analysis(
         self,
@@ -364,6 +368,8 @@ Analysis:"""
                 "confidence": 0.0
             }
 
+
+
     def _check_manual_context_override(self, current_message: str, llm_instance: Any) -> Dict[str, Any]:
         """
         Check if user is manually trying to reference older conversation
@@ -400,6 +406,8 @@ Answer:"""
         except Exception as e:
             logger.error(f"Manual context override check failed: {e}")
             return {"is_override": False, "reasoning": "Error in override detection"}
+        
+
 
     def _privacy_filter_response(
         self,
@@ -475,6 +483,8 @@ Answer:"""
                 "confidence": 0.1
             }
 
+
+
     def _is_user_data_request(self, user_message: str) -> bool:
         """Check if user is asking for their personal data"""
         data_request_patterns = [
@@ -510,6 +520,8 @@ Answer:"""
             return f"Based on our conversation, here's what you've shared: {', '.join(set(user_data))}"
         
         return None
+    
+
 
     def _contains_prohibited_content(self, content: str) -> bool:
         """Check if content contains prohibited information"""
@@ -523,6 +535,8 @@ Answer:"""
             if re.search(pattern, content, re.IGNORECASE):
                 return True
         return False
+
+
 
     def _should_enhance_conversation(self, session_id: str, intent_result: Dict[str, Any], tenant: Tenant) -> bool:
         """
@@ -564,6 +578,8 @@ Answer:"""
         except Exception as e:
             logger.error(f"Enhancement decision error: {e}")
             return False
+        
+
 
     def _get_available_knowledge_topics_safe(self, tenant_id: int) -> Dict[str, List[str]]:
         """
@@ -608,6 +624,10 @@ Answer:"""
         except Exception as e:
             logger.error(f"Error getting available knowledge topics safely: {e}")
             return {"faq_topics": [], "kb_topics": []}
+        
+
+
+
 
     def _check_related_topics_exist(self, user_intent: str, available_topics: Dict[str, List[str]]) -> bool:
         """
@@ -767,51 +787,42 @@ Enhancement:"""
                 "engagement_level": "unknown"
             }
 
-    # Keep all existing methods from original UnifiedIntelligentEngine
-    def _classify_intent(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
-        """Lightweight intent classification - determines user's goal"""
-        if not self.llm_available:
-            return {"intent": "general", "confidence": 0.5}
+
         
+
+    def _classify_intent(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
+        """Enhanced intent classification using two-tier system"""
         try:
-            prompt = PromptTemplate(
-                input_variables=["message", "company"],
-                template="""Classify this user message intent for {company}:
-
-Message: "{message}"
-
-Intent Categories:
-- functional: User wants to DO something (reset password, upgrade, cancel, setup)
-- informational: User wants to LEARN something (how it works, features, pricing) 
-- support: User has a PROBLEM (error, not working, confused)
-- casual: General chat, greetings, jokes, weather, non-business
-- company: About the company itself (hours, contact, location, team)
-
-Response (single word): functional|informational|support|casual|company
-
-Intent:"""
-            )
+            from app.chatbot.enhanced_intent_classifier import get_enhanced_intent_classifier
             
-            result = self.llm.invoke(prompt.format(
-                message=user_message,
-                company=tenant.business_name or tenant.name
-            ))
+            classifier = get_enhanced_intent_classifier(self.db)
+            result = classifier.classify_intent(user_message, tenant.id)
             
-            intent = result.content.strip().lower()
-            
-            # Validate intent
-            valid_intents = ['functional', 'informational', 'support', 'casual', 'company']
-            if intent not in valid_intents:
-                intent = 'general'
-            
-            return {
-                "intent": intent,
-                "confidence": 0.9 if intent in valid_intents else 0.5
-            }
+            logger.info(f"🧠 Intent: {result['intent']} (confidence: {result['confidence']}, source: {result['source']})")
+            return result
             
         except Exception as e:
-            logger.error(f"Intent classification error: {e}")
-            return {"intent": "general", "confidence": 0.3}
+            logger.error(f"Enhanced intent classification failed: {e}")
+            # Fallback to basic classification
+            return self._basic_intent_classification(user_message)
+
+    def _basic_intent_classification(self, user_message: str) -> Dict[str, Any]:
+        """Fallback basic classification when enhanced fails"""
+        user_lower = user_message.lower()
+        
+        # Simple keyword-based classification
+        if any(word in user_lower for word in ['problem', 'issue', 'error', 'not working', 'broken', 'help', 'fix']):
+            return {"intent": "troubleshooting", "confidence": 0.6, "source": "basic_keywords"}
+        elif any(word in user_lower for word in ['price', 'cost', 'buy', 'purchase', 'plan', 'upgrade', 'pay']):
+            return {"intent": "sales", "confidence": 0.6, "source": "basic_keywords"}
+        elif any(word in user_lower for word in ['how', 'what', 'can', 'does', 'features', 'about']):
+            return {"intent": "enquiry", "confidence": 0.6, "source": "basic_keywords"}
+        elif any(word in user_lower for word in ['hours', 'contact', 'location', 'when', 'where']):
+            return {"intent": "faq", "confidence": 0.6, "source": "basic_keywords"}
+        else:
+            return {"intent": "general", "confidence": 0.5, "source": "basic_fallback"}
+
+
     
     def _check_context_relevance(self, user_message: str, intent_result: Dict, tenant: Tenant) -> Dict[str, Any]:
         """Context check - Is this about our product/service?"""
@@ -838,6 +849,8 @@ Intent:"""
             }
         else:
             return self._llm_context_check(user_message, tenant)
+
+
     
     def _llm_context_check(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
         """LLM-based context check for ambiguous cases"""
@@ -882,32 +895,9 @@ Answer:"""
             logger.error(f"Context check error: {e}")
             return {"is_product_related": True, "context_type": "fallback"}
     
-    # def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict) -> Dict[str, Any]:
-    #     """Handle product-related queries with 3-tier KB search"""
-    #     # Quick FAQ check first
-    #     faq_result = self._quick_faq_check(user_message, tenant.id)
-    #     if faq_result['found']:
-    #         return {
-    #             "content": faq_result['answer'],
-    #             "source": "FAQ",
-    #             "confidence": 0.9
-    #         }
-        
-    #     # Check if company info request
-    #     if context_result.get('context_type') == 'company_info':
-    #         return self._handle_company_info(user_message, tenant)
-        
-    #     # Deep KB search for complex queries
-    #     kb_result = self._search_knowledge_base(user_message, tenant.id)
-    #     if kb_result['found']:
-    #         return {
-    #             "content": kb_result['answer'],
-    #             "source": "Knowledge_Base",
-    #             "confidence": 0.8
-    #         }
-        
-    #     # Fallback to enhanced prompt with tenant customization
-    #     return self._generate_custom_response(user_message, tenant, "product_related")
+    
+
+
     
     def _handle_general_knowledge(self, user_message: str, tenant: Tenant, intent_result: Dict) -> Dict:
         """Handles general knowledge, casual chat, and greetings with a secure, non-leaking prompt."""
@@ -1229,6 +1219,7 @@ Enhanced response:"""
         except Exception as e:
             logger.error(f"Error checking active troubleshooting: {e}")
             return None
+        
 
     def _handle_troubleshooting_query(self, user_message: str, tenant: Tenant) -> Optional[Dict[str, Any]]:
         """
@@ -1334,8 +1325,6 @@ Enhanced response:"""
             return None
 
 
-
-
     def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
         """Enhanced troubleshooting with state management"""
         try:
@@ -1368,43 +1357,48 @@ Enhanced response:"""
         ).all()
 
         if not troubleshooting_guides:
+            logger.info("❌ No troubleshooting guides found")
             return {"found": False}
 
-        # Find matching guide
-        for guide in troubleshooting_guides:
-            flow = guide.troubleshooting_flow
-            if not flow:
-                continue
-
-            keywords = flow.get('keywords', [])
-            user_msg_lower = user_message.lower()
+        # Since enhanced classifier already identified this as troubleshooting,
+        # just use the first available troubleshooting guide
+        guide = troubleshooting_guides[0]
+        flow = guide.troubleshooting_flow
+        
+        if not flow:
+            logger.warning(f"❌ Guide {guide.id} has no troubleshooting flow data")
+            return {"found": False}
+        
+        logger.info(f"✅ Starting troubleshooting flow for guide {guide.id}: {flow.get('title', 'Unknown')}")
+        
+        # Store initial state
+        if session_id:
+            memory.store_troubleshooting_state(session_id, guide.id, "step1", flow)
+            logger.info(f"💾 Stored troubleshooting state for session {session_id}")
+        
+        # Return first step
+        steps = flow.get('steps', [])
+        if steps:
+            initial_message = flow.get("initial_message", "I can help you with that issue.")
+            first_question = steps[0].get("message", "Let's start troubleshooting.")
             
-            matched_keywords = 0
-            for keyword in keywords:
-                if keyword.lower() in user_msg_lower:
-                    matched_keywords += 1
+            response = f"{initial_message}\n\n{first_question}"
             
-            if matched_keywords >= 2:
-                # Store initial state
-                if session_id:
-                    memory.store_troubleshooting_state(session_id, guide.id, "step1", flow)
-                
-                # Return first step
-                steps = flow.get('steps', [])
-                if steps:
-                    initial_message = flow.get("initial_message", "I can help you with that.")
-                    first_question = steps[0].get("message", "")
-                    
-                    response = f"{initial_message}\n\n{first_question}"
-                    
-                    return {
-                        "found": True,
-                        "content": response,
-                        "source": "TROUBLESHOOTING_GUIDE",
-                        "confidence": 0.9
-                    }
+            logger.info(f"🚀 Started troubleshooting flow with {len(steps)} steps")
+            
+            return {
+                "found": True,
+                "content": response,
+                "source": "TROUBLESHOOTING_GUIDE",
+                "confidence": 0.9,
+                "guide_id": guide.id,
+                "flow_title": flow.get('title', 'Troubleshooting Guide')
+            }
+        else:
+            logger.warning(f"❌ Troubleshooting guide {guide.id} has no steps")
+            return {"found": False}
 
-        return {"found": False}
+        
 
     def _process_troubleshooting_response(self, user_message: str, current_state: Dict, memory: Any, session_id: str) -> Dict[str, Any]:
         """Process user response in active troubleshooting flow"""
@@ -1501,25 +1495,36 @@ Enhanced response:"""
 
 
 
-
-
-
-    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None) -> Dict[str, Any]:
-        """Handle product-related queries with 4-tier logic (CORRECTED ORDER)"""
+    def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None, intent_result: Dict = None) -> Dict[str, Any]:
+        """Enhanced product handling using passed intent classification"""
         
-        logger.info(f"🔍 Starting product-related routing for: {user_message[:50]}...")
+        logger.info(f"🔍 Enhanced product routing for: {user_message[:50]}...")
         
-        # --- STEP 1: Check for troubleshooting flow first ---
-        logger.info("🔧 Checking troubleshooting flows...")
-        troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id, session_id)
-        if troubleshooting_result['found']:
-            logger.info("✅ Found troubleshooting match!")
-            return troubleshooting_result
+        # Check for troubleshooting flow first
+        if intent_result and intent_result.get('intent') == 'troubleshooting':
+            logger.info("🔧 Checking troubleshooting flows...")
+            troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id, session_id)
+            if troubleshooting_result.get('found'):
+                logger.info("✅ Found troubleshooting match!")
+                return troubleshooting_result
         
-        # --- STEP 2: Check for FAQ match ---
+        # Check for sales conversation flow
+        if intent_result and intent_result.get('intent') == 'sales':
+            logger.info("💼 Checking sales conversation flows...")
+            sales_result = self._check_for_sales_conversation_flow(user_message, tenant.id, session_id)
+            if sales_result.get('found'):
+                logger.info("✅ Found sales conversation match!")
+                return sales_result
+        
+        # Route based on semantic classification and document_id
+        if (intent_result and intent_result.get('source') == 'tenant_specific_semantic' and 
+            intent_result.get('document_id')):
+            logger.info(f"🎯 Routing to specific document {intent_result['document_id']}")
+            return self._handle_specific_document(user_message, intent_result['document_id'], tenant)
+        
+        # Check for FAQ match
         logger.info("📚 Checking FAQ database...")
         faq_result = self._quick_faq_check(user_message, tenant.id)
-        logger.info(f"📚 FAQ check result: {faq_result['found']}")
         if faq_result['found']:
             logger.info("✅ Found FAQ match!")
             return {
@@ -1528,16 +1533,14 @@ Enhanced response:"""
                 "confidence": 0.9
             }
         
-        # --- STEP 3: Check company info ---
-        logger.info("🏢 Checking if company info request...")
+        # Check company info
         if context_result.get('context_type') == 'company_info':
             logger.info("✅ Company info request detected!")
             return self._handle_company_info(user_message, tenant)
         
-        # --- STEP 4: Search knowledge base ---
+        # Search knowledge base
         logger.info("📖 Searching knowledge base...")
         kb_result = self._search_knowledge_base(user_message, tenant.id)
-        logger.info(f"📖 KB search result: {kb_result['found']}")
         if kb_result['found']:
             logger.info("✅ Found KB match!")
             return {
@@ -1546,10 +1549,104 @@ Enhanced response:"""
                 "confidence": 0.8
             }
         
-        # --- STEP 5: Fallback ---
+        # Fallback to custom response
         logger.info("🤖 Using fallback response...")
         return self._generate_custom_response(user_message, tenant, "product_related")
 
+
+
+    def _handle_specific_document(self, user_message: str, document_id: int, tenant: Tenant) -> Dict[str, Any]:
+        """Handle query routed to specific document"""
+        try:
+            from app.knowledge_base.processor import DocumentProcessor
+            processor = DocumentProcessor(tenant.id)
+            
+            kb = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
+            if not kb:
+                return self._generate_custom_response(user_message, tenant, "product_related")
+            
+            # Handle sales documents with extracted sales content
+            if kb.document_type == DocumentType.SALES and kb.is_sales and kb.sales_content:
+                return self._handle_sales_query(user_message, kb.sales_content, tenant)
+            
+            # Handle all other documents (existing logic)
+            vector_store = processor.get_vector_store(kb.vector_store_id)
+            docs = vector_store.similarity_search(user_message, k=3)
+            
+            if docs and docs[0].page_content:
+                context = "\n".join([doc.page_content for doc in docs[:2]])
+                response = self._generate_kb_response(user_message, context)
+                return {
+                    "content": response,
+                    "source": f"Specific_Document_{kb.document_type.value}",
+                    "confidence": 0.9,
+                    "document_id": document_id
+                }
+            
+            return self._generate_custom_response(user_message, tenant, "product_related")
+            
+        except Exception as e:
+            logger.error(f"Specific document handling error: {e}")
+            return self._generate_custom_response(user_message, tenant, "product_related")
+            
+
+    def _handle_troubleshooting_general(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
+        """Handle troubleshooting when no specific document matched"""
+        # Try KB search with troubleshooting focus
+        kb_result = self._search_knowledge_base(user_message, tenant.id)
+        if kb_result['found']:
+            return {
+                "content": kb_result['answer'],
+                "source": "Troubleshooting_KB",
+                "confidence": 0.8
+            }
+        
+        # Fallback to custom response with troubleshooting context
+        return self._generate_custom_response(user_message, tenant, "troubleshooting_support")
+
+
+    def _handle_sales_query(self, user_message: str, sales_content: Dict, tenant: Tenant) -> Dict[str, Any]:
+        """Generate sales-focused response using extracted sales content"""
+        if not self.llm_available:
+            return {"content": "I'd be happy to help with product information!", "source": "sales_fallback"}
+        
+        try:
+            prompt = PromptTemplate(
+                input_variables=["query", "sales_data", "company"],
+                template="""You are a helpful sales consultant for {company}. Use the sales information to provide a consultative response.
+
+    SALES CONTENT:
+    {sales_data}
+
+    USER QUERY: {query}
+
+    RESPONSE GUIDELINES:
+    1. Be helpful and consultative, not pushy
+    2. Focus on understanding their needs
+    3. Provide relevant value propositions
+    4. Include pricing with value context
+    5. Handle objections professionally
+    6. Ask qualifying questions when appropriate
+    7. Suggest next steps naturally
+
+    Generate a helpful, consultative response:"""
+            )
+            
+            result = self.llm.invoke(prompt.format(
+                query=user_message,
+                sales_data=json.dumps(sales_content, indent=2),
+                company=tenant.business_name or tenant.name
+            ))
+            
+            return {
+                "content": result.content.strip(),
+                "source": "SALES_DOCUMENT",
+                "confidence": 0.9
+            }
+            
+        except Exception as e:
+            logger.error(f"Sales query handling error: {e}")
+            return {"content": "I'd be happy to help with product information!", "source": "sales_error"}
 
    
     def _filter_internal_leakage(self, response: str) -> str:
@@ -1568,6 +1665,262 @@ Enhanced response:"""
         filtered = re.sub(r'does not directly address this specific problem.*?\.', '', filtered, flags=re.IGNORECASE)
         
         return filtered.strip()
+
+
+
+    def _check_for_sales_conversation_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
+        """Handle sales conversation flows with state management"""
+        try:
+            from app.chatbot.simple_memory import SimpleChatbotMemory
+            memory = SimpleChatbotMemory(self.db, tenant_id)
+            
+            # Check if user is already in a sales conversation
+            if session_id:
+                current_state = memory.get_sales_conversation_state(session_id)
+                
+                if current_state:
+                    # Process user's response and move to next step
+                    return self._process_sales_conversation_response(user_message, current_state, memory, session_id)
+            
+            # Start new sales conversation flow if no active state
+            return self._start_sales_conversation_flow(user_message, tenant_id, memory, session_id)
+            
+        except Exception as e:
+            logger.error(f"Error in sales conversation flow: {e}")
+            return {"found": False}
+
+    def _start_sales_conversation_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
+        """Start a new sales conversation flow"""
+        try:
+            # Get sales documents
+            sales_documents = self.db.query(KnowledgeBase).filter(
+                KnowledgeBase.tenant_id == tenant_id,
+                KnowledgeBase.is_sales == True,
+                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+                KnowledgeBase.sales_content.isnot(None)
+            ).all()
+
+            if not sales_documents:
+                logger.info("❌ No sales documents found")
+                return {"found": False}
+
+            # Find best matching sales document and flow type
+            best_match = self._find_best_sales_flow_match(user_message, sales_documents)
+            
+            if not best_match:
+                return {"found": False}
+            
+            sales_doc = best_match["document"]
+            flow_type = best_match["flow_type"]
+            sales_content = sales_doc.sales_content
+            
+            conversation_flows = sales_content.get("conversation_flows", {})
+            selected_flow = conversation_flows.get(flow_type)
+            
+            if not selected_flow:
+                return {"found": False}
+            
+            logger.info(f"💼 Starting sales conversation: {flow_type}")
+            
+            # Store initial state
+            if session_id:
+                memory.store_sales_conversation_state(
+                    session_id, sales_doc.id, flow_type, 
+                    selected_flow["steps"][0]["id"], sales_content
+                )
+            
+            # Return first step
+            first_step = selected_flow["steps"][0]
+            response = self._generate_sales_step_response(first_step, sales_content, user_message)
+            
+            return {
+                "found": True,
+                "content": response,
+                "source": "SALES_CONVERSATION",
+                "confidence": 0.9,
+                "flow_type": flow_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Error starting sales conversation: {e}")
+            return {"found": False}
+
+    def _find_best_sales_flow_match(self, user_message: str, sales_documents: List) -> Optional[Dict]:
+        """Find the best matching sales flow for user message"""
+        user_lower = user_message.lower()
+        
+        # Simple keyword matching for flow types
+        flow_patterns = {
+            "pricing_inquiry": ["price", "cost", "how much", "pricing", "plan", "expensive"],
+            "feature_inquiry": ["features", "what does", "how does", "capabilities", "functions"],
+            "comparison_inquiry": ["vs", "compare", "better than", "alternative", "competitor"],
+            "demo_inquiry": ["demo", "trial", "show me", "can I try", "see it"]
+        }
+        
+        best_score = 0
+        best_match = None
+        
+        for doc in sales_documents:
+            if not doc.sales_content or "conversation_flows" not in doc.sales_content:
+                continue
+                
+            flows = doc.sales_content["conversation_flows"]
+            
+            for flow_type, flow_data in flows.items():
+                trigger_keywords = flow_data.get("trigger_keywords", [])
+                
+                # Score based on keyword matches
+                score = 0
+                for keyword in trigger_keywords:
+                    if keyword.lower() in user_lower:
+                        score += 1
+                
+                # Also check predefined patterns
+                if flow_type in flow_patterns:
+                    for pattern in flow_patterns[flow_type]:
+                        if pattern in user_lower:
+                            score += 2  # Higher weight for pattern matches
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = {
+                        "document": doc,
+                        "flow_type": flow_type,
+                        "score": score
+                    }
+        
+        return best_match if best_score > 0 else None
+
+    def _process_sales_conversation_response(self, user_message: str, current_state: Dict, memory: Any, session_id: str) -> Dict[str, Any]:
+        """Process user response in active sales conversation"""
+        try:
+            flow_data = current_state.get("flow_data", {})
+            flow_type = current_state.get("flow_type")
+            current_step_id = current_state.get("current_step")
+            
+            conversation_flows = flow_data.get("conversation_flows", {})
+            current_flow = conversation_flows.get(flow_type, {})
+            steps = current_flow.get("steps", [])
+            
+            # Find current step
+            current_step = None
+            for step in steps:
+                if step.get("id") == current_step_id:
+                    current_step = step
+                    break
+            
+            if not current_step:
+                # Flow completed
+                memory.clear_sales_conversation_state(session_id)
+                return {
+                    "found": True,
+                    "content": "Thank you for your interest! Is there anything else I can help you with today?",
+                    "source": "SALES_CONVERSATION"
+                }
+            
+            # Process user response against branches
+            branches = current_step.get("branches", {})
+            user_response_lower = user_message.lower()
+            
+            next_step_info = None
+            
+            # Check each branch
+            for branch_key, branch_value in branches.items():
+                if branch_key == "default":
+                    continue
+                    
+                branch_keywords = branch_key.split("|")
+                for keyword in branch_keywords:
+                    if keyword.strip().lower() in user_response_lower:
+                        next_step_info = branch_value
+                        break
+                
+                if next_step_info:
+                    break
+            
+            # Use default if no match
+            if not next_step_info:
+                next_step_info = branches.get("default", {})
+            
+            next_step_id = next_step_info.get("next")
+            
+            if next_step_id:
+                # Find next step
+                next_step = None
+                for step in steps:
+                    if step.get("id") == next_step_id:
+                        next_step = step
+                        break
+                
+                if next_step:
+                    memory.update_sales_conversation_step(session_id, next_step_id)
+                    response = self._generate_sales_step_response(next_step, flow_data, user_message)
+                else:
+                    # End of flow
+                    memory.clear_sales_conversation_state(session_id)
+                    response = "Great! I'm here if you have any other questions about our products."
+            else:
+                # End of flow
+                memory.clear_sales_conversation_state(session_id)
+                response = "Perfect! Let me know if you'd like to explore any other aspects of our solution."
+            
+            return {
+                "found": True,
+                "content": response,
+                "source": "SALES_CONVERSATION",
+                "confidence": 0.9
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing sales conversation response: {e}")
+            memory.clear_sales_conversation_state(session_id)
+            return {
+                "found": True,
+                "content": "I'm having trouble with the conversation flow. How else can I help you today?",
+                "source": "SALES_CONVERSATION_ERROR"
+            }
+
+    def _generate_sales_step_response(self, step: Dict, sales_content: Dict, user_message: str = "") -> str:
+        """Generate personalized response for sales conversation step"""
+        
+        message_template = step.get("message", "")
+        
+        # Replace placeholders with actual sales content
+        replacements = {
+            "[PRICE]": self._extract_pricing_info(sales_content),
+            "[FEATURES]": self._extract_key_features(sales_content),
+            "[VALUE_PROP]": self._extract_value_proposition(sales_content),
+            "[COMPANY]": sales_content.get("company_name", "our company")
+        }
+        
+        response = message_template
+        for placeholder, value in replacements.items():
+            response = response.replace(placeholder, value)
+        
+        return response
+
+    def _extract_pricing_info(self, sales_content: Dict) -> str:
+        """Extract pricing from sales content"""
+        pricing = sales_content.get("pricing_structure", {})
+        main_pricing = pricing.get("main_pricing", "competitive pricing")
+        return main_pricing
+
+    def _extract_key_features(self, sales_content: Dict) -> str:
+        """Extract key features from sales content"""
+        products = sales_content.get("products", [])
+        if products and products[0].get("features"):
+            features = products[0]["features"][:3]  # Top 3 features
+            return ", ".join(features)
+        return "powerful features"
+
+    def _extract_value_proposition(self, sales_content: Dict) -> str:
+        """Extract value proposition from sales content"""
+        value_props = sales_content.get("value_propositions", [])
+        if value_props:
+            return value_props[0].get("statement", "significant value")
+        return "great value for your investment"
+
+
 
 
 # Factory function

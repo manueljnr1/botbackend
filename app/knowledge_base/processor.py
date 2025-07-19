@@ -42,7 +42,7 @@ class DocumentProcessor:
             self.llm_available = bool(settings.OPENAI_API_KEY)
             if self.llm_available:
                 self.llm = ChatOpenAI(
-                    model_name="gpt-4",
+                    model_name="gpt-3.5-turbo",
                     temperature=0.1,
                     openai_api_key=settings.OPENAI_API_KEY
                 )
@@ -485,7 +485,7 @@ class DocumentProcessor:
 
 
     
-
+#--------- Troubleshooting Document Processing ---------#
 
     def process_troubleshooting_document(self, file_path: str, doc_type: DocumentType, vector_store_id: str) -> Dict[str, Any]:
         """
@@ -807,6 +807,410 @@ JSON Response:"""
             "escalation_message": "Let me connect you with our specialized support team for further assistance.",
             "confidence": 0.3,
             "extraction_method": "fallback_creation"
+        }
+
+
+
+
+
+#--------- Sales Document Processing ---------#
+
+    
+    def process_sales_document(self, file_path: str, doc_type: DocumentType, vector_store_id: str) -> Dict[str, Any]:
+        """Process sales document with content extraction"""
+        logger.info(f"Processing sales document: {file_path}")
+        
+        try:
+            # First, process as regular document for vector storage
+            self.process_document_with_id(file_path, doc_type, vector_store_id)
+            
+            # Now extract sales content using LLM
+            sales_data = self._extract_sales_content(file_path, doc_type)
+            
+            return {
+                "vector_store_id": vector_store_id,
+                "sales_extracted": sales_data is not None,
+                "sales_data": sales_data,
+                "extraction_confidence": sales_data.get("confidence", 0) if sales_data else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing sales document: {e}")
+            raise
+
+
+
+
+    def _extract_sales_content(self, file_path: str, doc_type: DocumentType) -> Optional[Dict]:
+        """Extract sales information AND conversation flows from any sales document format"""
+        if not self.llm_available:
+            logger.warning("LLM not available for sales extraction")
+            return None
+        
+        try:
+            # Download and load document content
+            temp_file_path = None
+            
+            try:
+                if file_path.startswith('tenant_'):
+                    temp_file_path = self.storage.download_to_temp("knowledge-base-files", file_path)
+                    file_to_process = temp_file_path
+                else:
+                    file_to_process = file_path
+                
+                loader = self._get_loader(file_to_process, doc_type)
+                documents = loader.load()
+                
+                if not documents:
+                    return None
+                
+                # Combine all document content
+                full_content = "\n".join([doc.page_content for doc in documents])
+                
+                # Enhanced sales extraction prompt with conversation flows
+                from langchain.prompts import PromptTemplate
+                
+                prompt = PromptTemplate(
+                    input_variables=["document_content"],
+                    template="""You are a sales expert. Extract sales information AND create conversation flows from this document.
+
+    Document Content:
+    {document_content}
+
+    Extract EVERYTHING sales-related AND design conversation flows for different sales scenarios.
+
+    EXTRACTION REQUIREMENTS:
+    1. Extract all sales data (products, pricing, benefits, etc.)
+    2. Create conversation flows that guide prospects through sales scenarios
+    3. Make flows consultative, not pushy
+    4. Include objection handling and value-based responses
+
+    OUTPUT FORMAT (JSON):
+    {{
+        "products": [
+            {{
+                "name": "Product name",
+                "description": "What it does",
+                "price": "Any pricing info found",
+                "features": ["feature1", "feature2"],
+                "benefits": ["benefit1", "benefit2"],
+                "target_audience": "Who it's for"
+            }}
+        ],
+        "value_propositions": [
+            {{
+                "statement": "Main value proposition",
+                "proof_point": "Supporting evidence",
+                "target_pain": "Problem it solves"
+            }}
+        ],
+        "pricing_structure": {{
+            "main_pricing": "Primary pricing model",
+            "additional_options": ["Other pricing mentioned"],
+            "value_justification": "Why the price makes sense"
+        }},
+        "competitive_advantages": [
+            "Any advantage mentioned",
+            "Differentiator found"
+        ],
+        "objection_responses": [
+            {{
+                "likely_objection": "Inferred customer concern",
+                "response_direction": "How to address it"
+            }}
+        ],
+        "social_proof": [
+            "Testimonials or success stories",
+            "Metrics mentioned"
+        ],
+        "sales_keywords": ["words", "prospects", "use", "when", "asking"],
+        "conversation_starters": [
+            "Questions to engage prospects",
+            "Conversation openers"
+        ],
+        
+        "conversation_flows": {{
+            "pricing_inquiry": {{
+                "trigger_keywords": ["price", "cost", "how much", "pricing", "plan", "expensive"],
+                "steps": [
+                    {{
+                        "id": "pricing_context",
+                        "message": "I'd be happy to discuss pricing. To give you the most relevant information, what's your main use case?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "small|startup|individual|personal": {{"next": "starter_pricing"}},
+                            "enterprise|large|corporate|business": {{"next": "enterprise_pricing"}},
+                            "default": {{"next": "general_pricing"}}
+                        }}
+                    }},
+                    {{
+                        "id": "starter_pricing",
+                        "message": "Perfect! Based on your needs, I'd recommend our starter option at [PRICE]. This includes [FEATURES] and typically saves businesses like yours [VALUE_PROP]. Would you like to see how this works?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "yes|sure|demo|show|trial": {{"next": "demo_offer"}},
+                            "expensive|too much|budget|cost": {{"next": "roi_justification"}},
+                            "features|what|how|more": {{"next": "feature_details"}},
+                            "default": {{"next": "next_steps"}}
+                        }}
+                    }},
+                    {{
+                        "id": "enterprise_pricing",
+                        "message": "For enterprise needs, we have custom solutions starting at [ENTERPRISE_PRICE]. This includes [ENTERPRISE_FEATURES] plus dedicated support. What's your biggest operational challenge right now?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "scale|scaling|growth|users": {{"next": "scalability_benefits"}},
+                            "integration|systems|existing": {{"next": "integration_benefits"}},
+                            "security|compliance|privacy": {{"next": "security_benefits"}},
+                            "default": {{"next": "custom_solution"}}
+                        }}
+                    }},
+                    {{
+                        "id": "roi_justification",
+                        "message": "I understand budget is important. Let me put this in perspective: [VALUE_JUSTIFICATION]. Most clients see ROI within [TIMEFRAME]. What would saving [SPECIFIC_BENEFIT] be worth to your business?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "interested|valuable|worth|good": {{"next": "demo_offer"}},
+                            "still|expensive|much": {{"next": "alternative_options"}},
+                            "default": {{"next": "follow_up"}}
+                        }}
+                    }}
+                ]
+            }},
+            
+            "feature_inquiry": {{
+                "trigger_keywords": ["features", "what does", "how does", "capabilities", "functions"],
+                "steps": [
+                    {{
+                        "id": "feature_discovery",
+                        "message": "Great question! We have several powerful capabilities. What's your biggest challenge that you're hoping to solve?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "time|efficiency|speed|fast|slow": {{"next": "automation_features"}},
+                            "cost|money|budget|expense": {{"next": "cost_saving_features"}},
+                            "quality|accuracy|error|mistake": {{"next": "quality_features"}},
+                            "default": {{"next": "general_features"}}
+                        }}
+                    }},
+                    {{
+                        "id": "automation_features",
+                        "message": "Perfect! Our automation features can save you significant time. [AUTOMATION_BENEFITS]. For example, [SPECIFIC_EXAMPLE]. How much time does your team currently spend on these tasks?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "hours|lot|much|daily": {{"next": "time_savings_calculation"}},
+                            "interested|more|demo": {{"next": "demo_offer"}},
+                            "default": {{"next": "other_features"}}
+                        }}
+                    }}
+                ]
+            }},
+            
+            "comparison_inquiry": {{
+                "trigger_keywords": ["vs", "compare", "better than", "alternative", "competitor"],
+                "steps": [
+                    {{
+                        "id": "competitive_discovery",
+                        "message": "I'd be happy to help you compare options. What other solutions are you considering, or what's most important to you in a solution?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "price|cost|budget|cheap": {{"next": "price_comparison"}},
+                            "features|functionality|capabilities": {{"next": "feature_comparison"}},
+                            "support|service|help": {{"next": "support_comparison"}},
+                            "default": {{"next": "general_comparison"}}
+                        }}
+                    }},
+                    {{
+                        "id": "feature_comparison",
+                        "message": "Great point! Here's what sets us apart: [COMPETITIVE_ADVANTAGES]. Unlike other solutions, we offer [UNIQUE_FEATURES]. What specific functionality is most critical for your success?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "integration|connect|api": {{"next": "integration_advantages"}},
+                            "support|help|service": {{"next": "support_advantages"}},
+                            "default": {{"next": "custom_comparison"}}
+                        }}
+                    }}
+                ]
+            }},
+            
+            "demo_inquiry": {{
+                "trigger_keywords": ["demo", "trial", "show me", "can I try", "see it", "test"],
+                "steps": [
+                    {{
+                        "id": "demo_qualification",
+                        "message": "Absolutely! I'd love to show you how this works. To make the demo most valuable, what specific use case or challenge should we focus on?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "workflow|process|current": {{"next": "workflow_demo"}},
+                            "integration|systems|data": {{"next": "integration_demo"}},
+                            "team|users|multiple": {{"next": "collaboration_demo"}},
+                            "default": {{"next": "general_demo"}}
+                        }}
+                    }},
+                    {{
+                        "id": "workflow_demo",
+                        "message": "Perfect! I'll show you exactly how we can streamline your workflow. The demo takes about 15 minutes and I'll customize it to your specific process. When would work best for you?",
+                        "wait_for_response": true,
+                        "branches": {{
+                            "now|today|right now": {{"next": "immediate_demo"}},
+                            "tomorrow|later|schedule": {{"next": "schedule_demo"}},
+                            "default": {{"next": "demo_scheduling"}}
+                        }}
+                    }}
+                ]
+            }}
+        }},
+        
+        "confidence": 0.85
+    }}
+
+    IMPORTANT: Extract actual content from the document. Replace placeholders like [PRICE], [FEATURES] with real information from the document. If pricing isn't mentioned, use "Contact for pricing" or similar.
+
+    JSON Response:"""
+                )
+                
+                # Get LLM response
+                result = self.llm.invoke(prompt.format(document_content=full_content[:12000]))
+                response_text = result.content if hasattr(result, 'content') else str(result)
+                
+                # Parse JSON response
+                import json
+                import re
+                
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        sales_data = json.loads(json_match.group())
+                        
+                        # Validate the extracted data (enhanced validation)
+                        if self._validate_sales_data_with_flows(sales_data):
+                            sales_data["confidence"] = 0.85
+                            sales_data["extraction_method"] = "llm_sales_extraction_with_flows"
+                            logger.info(f"✅ Successfully extracted sales content with conversation flows")
+                            return sales_data
+                        else:
+                            logger.warning("⚠️ Extracted sales data failed validation")
+                            return self._create_fallback_sales_data_with_flows(full_content)
+                            
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ JSON parsing failed: {e}")
+                        return self._create_fallback_sales_data_with_flows(full_content)
+                else:
+                    logger.warning("⚠️ No JSON found in LLM response")
+                    return self._create_fallback_sales_data_with_flows(full_content)
+                    
+            finally:
+                # Clean up temp file
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"Error in sales content extraction: {e}")
+            return None
+
+
+
+
+
+
+    def _validate_sales_data_with_flows(self, sales_data: Dict) -> bool:
+        """Validate extracted sales data including conversation flows"""
+        try:
+            # Original validation
+            required_fields = ['products', 'value_propositions', 'sales_keywords']
+            
+            for field in required_fields:
+                if field not in sales_data:
+                    logger.error(f"Missing required field: {field}")
+                    return False
+            
+            # Check if we have meaningful content
+            if (len(sales_data.get('products', [])) == 0 and 
+                len(sales_data.get('value_propositions', [])) == 0):
+                logger.error("No meaningful sales content found")
+                return False
+            
+            # Validate conversation flows
+            conversation_flows = sales_data.get('conversation_flows', {})
+            if conversation_flows:
+                for flow_name, flow_data in conversation_flows.items():
+                    if not self._validate_conversation_flow_structure(flow_data):
+                        logger.warning(f"Invalid conversation flow structure: {flow_name}")
+                        # Don't fail validation, just log warning
+            
+            logger.info("✅ Sales data validation passed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Sales data validation error: {e}")
+            return False
+
+    def _validate_conversation_flow_structure(self, flow_data: Dict) -> bool:
+        """Validate conversation flow structure"""
+        try:
+            required_flow_fields = ['trigger_keywords', 'steps']
+            
+            for field in required_flow_fields:
+                if field not in flow_data:
+                    return False
+            
+            steps = flow_data.get('steps', [])
+            if not isinstance(steps, list) or len(steps) == 0:
+                return False
+            
+            # Validate each step
+            for step in steps:
+                if not isinstance(step, dict):
+                    return False
+                
+                required_step_fields = ['id', 'message']
+                for field in required_step_fields:
+                    if field not in step:
+                        return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Flow structure validation error: {e}")
+            return False
+
+    def _create_fallback_sales_data_with_flows(self, content: str) -> Dict:
+        """Create basic sales data with simple conversation flows when extraction fails"""
+        # Extract basic keywords
+        keywords = []
+        common_sales_words = ['price', 'cost', 'buy', 'purchase', 'product', 'service', 'plan', 'pricing']
+        content_lower = content.lower()
+        
+        for word in common_sales_words:
+            if word in content_lower:
+                keywords.append(word)
+        
+        if not keywords:
+            keywords = ['product', 'service', 'pricing']
+        
+        return {
+            "products": [{"name": "Main Product", "description": "Product information", "price": "Contact for pricing"}],
+            "value_propositions": [{"statement": "Quality solution", "proof_point": "Customer satisfaction"}],
+            "sales_keywords": keywords[:10],
+            "conversation_flows": {
+                "pricing_inquiry": {
+                    "trigger_keywords": ["price", "cost", "pricing"],
+                    "steps": [
+                        {
+                            "id": "basic_pricing",
+                            "message": "I'd be happy to discuss pricing with you. What specific information would you like to know?",
+                            "wait_for_response": True,
+                            "branches": {
+                                "default": {"next": "contact_sales"}
+                            }
+                        }
+                    ]
+                }
+            },
+            "confidence": 0.3,
+            "extraction_method": "fallback_creation_with_flows"
         }
 
 

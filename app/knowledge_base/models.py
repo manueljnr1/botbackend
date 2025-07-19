@@ -21,6 +21,7 @@ class DocumentType(enum.Enum):
     XLSX = "xlsx"
     WEBSITE = "website"  
     TROUBLESHOOTING = "troubleshooting"
+    SALES = "sales"
 
 
 class CrawlStatus(enum.Enum):
@@ -66,6 +67,13 @@ class KnowledgeBase(Base):
     flow_extraction_status = Column(String, nullable=True)  # 'pending', 'completed', 'failed'
 
 
+    # Sales-specific fields (NEW)
+    is_sales = Column(Boolean, default=False)
+    sales_content = Column(JSON, nullable=True)  # Extracted sales data
+    sales_extraction_confidence = Column(Float, nullable=True)
+    sales_extraction_status = Column(String, nullable=True)  # 'pending', 'completed', 'failed'
+
+
 class FAQ(Base):
     __tablename__ = "faqs"
     
@@ -78,3 +86,32 @@ class FAQ(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="faqs")
+
+
+
+class TenantIntentPattern(Base):
+    __tablename__ = "tenant_intent_patterns"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    document_id = Column(Integer, ForeignKey("knowledge_bases.id"))
+    intent_type = Column(String)  # "troubleshooting", "sales", "enquiry", "faq"
+    pattern_data = Column(JSON)  # {"keywords": [], "questions": [], "problems": []}
+    confidence = Column(Float, default=0.0)
+    extracted_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    document = relationship("KnowledgeBase")
+
+class CentralIntentModel(Base):
+    __tablename__ = "central_intent_models"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    model_version = Column(String, unique=True)
+    training_data = Column(JSON)  # Compiled patterns from all tenants
+    trained_at = Column(DateTime(timezone=True), server_default=func.now())
+    trained_by_admin_id = Column(Integer, nullable=True)
+    is_active = Column(Boolean, default=True)
+    performance_metrics = Column(JSON, nullable=True)
