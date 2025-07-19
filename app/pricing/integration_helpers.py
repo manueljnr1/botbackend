@@ -483,86 +483,182 @@ def check_feature_access_dependency(tenant_id: int, feature: str, db: Session = 
 # CONVERSATION TRACKING FUNCTIONS
 # ============================================================================
 
-def track_conversation_started(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
-    """
-    Track when a new conversation starts - PRIMARY CONVERSATION TRACKING FUNCTION
-    This implements the 24-hour conversation window logic
-    """
-    try:
-        logger.info(f"📊 Tracking conversation start for tenant {tenant_id}, user: {user_identifier}, platform: {platform}")
+# def track_conversation_started(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+#     """
+#     Track when a new conversation starts - PRIMARY CONVERSATION TRACKING FUNCTION
+#     This implements the 24-hour conversation window logic
+#     """
+#     try:
+#         logger.info(f"📊 Tracking conversation start for tenant {tenant_id}, user: {user_identifier}, platform: {platform}")
         
-        # Check if ConversationSession model exists, if not use fallback
-        try:
-            from app.pricing.models import ConversationSession
-            model_available = True
-        except ImportError:
-            logger.warning("ConversationSession model not available, using fallback tracking")
-            model_available = False
+#         # Check if ConversationSession model exists, if not use fallback
+#         try:
+#             from app.pricing.models import ConversationSession
+#             model_available = True
+#         except ImportError:
+#             logger.warning("ConversationSession model not available, using fallback tracking")
+#             model_available = False
         
-        if model_available:
-            # Use full conversation tracking with ConversationSession model
-            last_24_hours = datetime.utcnow() - timedelta(hours=24)
-            existing_conversation = db.query(ConversationSession).filter(
-                ConversationSession.tenant_id == tenant_id,
-                ConversationSession.user_identifier == user_identifier,
-                ConversationSession.platform == platform,
-                ConversationSession.last_activity > last_24_hours,
-                ConversationSession.is_active == True
-            ).first()
+#         if model_available:
+#             # Use full conversation tracking with ConversationSession model
+#             last_24_hours = datetime.utcnow() - timedelta(hours=24)
+#             existing_conversation = db.query(ConversationSession).filter(
+#                 ConversationSession.tenant_id == tenant_id,
+#                 ConversationSession.user_identifier == user_identifier,
+#                 ConversationSession.platform == platform,
+#                 ConversationSession.last_activity > last_24_hours,
+#                 ConversationSession.is_active == True
+#             ).first()
             
-            if existing_conversation:
-                # Update existing conversation activity
-                existing_conversation.last_activity = datetime.utcnow()
-                existing_conversation.message_count += 1
+#             if existing_conversation:
+#                 # Update existing conversation activity
+#                 existing_conversation.last_activity = datetime.utcnow()
+#                 existing_conversation.message_count += 1
                 
-                # Update duration
-                duration = (existing_conversation.last_activity - existing_conversation.started_at).total_seconds() / 60
-                existing_conversation.duration_minutes = int(duration)
+#                 # Update duration
+#                 duration = (existing_conversation.last_activity - existing_conversation.started_at).total_seconds() / 60
+#                 existing_conversation.duration_minutes = int(duration)
                 
-                db.commit()
-                logger.info(f"✅ Updated existing conversation for tenant {tenant_id}")
-                return True
-            else:
-                # Start new conversation and log usage
-                pricing_service = PricingService(db)
-                success = pricing_service.log_message_usage(tenant_id, 1)
+#                 db.commit()
+#                 logger.info(f"✅ Updated existing conversation for tenant {tenant_id}")
+#                 return True
+#             else:
+#                 # Start new conversation and log usage
+#                 pricing_service = PricingService(db)
+#                 success = pricing_service.log_message_usage(tenant_id, 1)
                 
-                if success:
-                    # Create conversation session record
-                    new_conversation = ConversationSession(
-                        tenant_id=tenant_id,
-                        user_identifier=user_identifier,
-                        platform=platform,
-                        started_at=datetime.utcnow(),
-                        last_activity=datetime.utcnow(),
-                        message_count=1,
-                        counted_for_billing=True
-                    )
-                    db.add(new_conversation)
-                    db.commit()
+#                 if success:
+#                     # Create conversation session record
+#                     new_conversation = ConversationSession(
+#                         tenant_id=tenant_id,
+#                         user_identifier=user_identifier,
+#                         platform=platform,
+#                         started_at=datetime.utcnow(),
+#                         last_activity=datetime.utcnow(),
+#                         message_count=1,
+#                         counted_for_billing=True
+#                     )
+#                     db.add(new_conversation)
+#                     db.commit()
                     
-                    logger.info(f"✅ Started new conversation and logged usage for tenant {tenant_id}")
-                    return True
-                else:
-                    logger.warning(f"⚠️ Failed to start conversation - limit exceeded for tenant {tenant_id}")
-                    return False
-        else:
-            # Fallback to simple usage tracking without conversation sessions
-            pricing_service = PricingService(db)
-            success = pricing_service.log_message_usage(tenant_id, 1)
+#                     logger.info(f"✅ Started new conversation and logged usage for tenant {tenant_id}")
+#                     return True
+#                 else:
+#                     logger.warning(f"⚠️ Failed to start conversation - limit exceeded for tenant {tenant_id}")
+#                     return False
+#         else:
+#             # Fallback to simple usage tracking without conversation sessions
+#             pricing_service = PricingService(db)
+#             success = pricing_service.log_message_usage(tenant_id, 1)
             
-            if success:
-                logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
-            else:
-                logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+#             if success:
+#                 logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+#             else:
+#                 logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
             
-            return success
+#             return success
         
-    except Exception as e:
-        logger.error(f"💥 Error tracking conversation for tenant {tenant_id}: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False
+#     except Exception as e:
+#         logger.error(f"💥 Error tracking conversation for tenant {tenant_id}: {e}")
+#         import traceback
+#         logger.error(traceback.format_exc())
+#         return False
+
+
+
+
+def track_conversation_started(tenant_id: int, user_identifier: str, platform: str, db: Session) -> bool:
+   """
+   Track when a new conversation starts - PRIMARY CONVERSATION TRACKING FUNCTION
+   This implements the 24-hour conversation window logic
+   """
+   try:
+       logger.info(f"📊 Tracking conversation start for tenant {tenant_id}, user: {user_identifier}, platform: {platform}")
+       
+       # Check if ConversationSession model exists, if not use fallback
+       try:
+           from app.pricing.models import ConversationSession
+           model_available = True
+       except ImportError:
+           logger.warning("ConversationSession model not available, using fallback tracking")
+           model_available = False
+       
+       if model_available:
+           # Use full conversation tracking with ConversationSession model
+           last_24_hours = datetime.utcnow() - timedelta(hours=24)
+           existing_conversation = db.query(ConversationSession).filter(
+               ConversationSession.tenant_id == tenant_id,
+               ConversationSession.user_identifier == user_identifier,
+               ConversationSession.platform == platform,
+               ConversationSession.last_activity > last_24_hours,
+               ConversationSession.is_active == True
+           ).first()
+           
+           if existing_conversation:
+               # Update existing conversation activity
+               existing_conversation.last_activity = datetime.utcnow()
+               existing_conversation.message_count += 1
+               
+               # Update duration - Fix timezone issue
+               from datetime import timezone
+               last_activity = existing_conversation.last_activity
+               if last_activity.tzinfo is None:
+                   last_activity = last_activity.replace(tzinfo=timezone.utc)
+               started_at = existing_conversation.started_at  
+               if started_at.tzinfo is None:
+                   started_at = started_at.replace(tzinfo=timezone.utc)
+               duration = (last_activity - started_at).total_seconds() / 60
+               existing_conversation.duration_minutes = int(duration)
+               
+               db.commit()
+               logger.info(f"✅ Updated existing conversation for tenant {tenant_id}")
+               return True
+           else:
+               # Start new conversation and log usage
+               pricing_service = PricingService(db)
+               success = pricing_service.log_message_usage(tenant_id, 1)
+               
+               if success:
+                   # Create conversation session record
+                   new_conversation = ConversationSession(
+                       tenant_id=tenant_id,
+                       user_identifier=user_identifier,
+                       platform=platform,
+                       started_at=datetime.utcnow(),
+                       last_activity=datetime.utcnow(),
+                       message_count=1,
+                       counted_for_billing=True
+                   )
+                   db.add(new_conversation)
+                   db.commit()
+                   
+                   logger.info(f"✅ Started new conversation and logged usage for tenant {tenant_id}")
+                   return True
+               else:
+                   logger.warning(f"⚠️ Failed to start conversation - limit exceeded for tenant {tenant_id}")
+                   return False
+       else:
+           # Fallback to simple usage tracking without conversation sessions
+           pricing_service = PricingService(db)
+           success = pricing_service.log_message_usage(tenant_id, 1)
+           
+           if success:
+               logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+           else:
+               logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+           
+           return success
+       
+   except Exception as e:
+       logger.error(f"💥 Error tracking conversation for tenant {tenant_id}: {e}")
+       import traceback
+       logger.error(traceback.format_exc())
+       return False
+
+
+
+
+
 
 
 def track_message_sent(tenant_id: int, db: Session, count: int = 1, user_identifier: str = None, platform: str = "web") -> bool:

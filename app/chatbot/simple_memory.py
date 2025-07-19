@@ -11,7 +11,7 @@ from sqlalchemy import and_
 import logging
 import uuid
 from app.chatbot.models import ChatSession, ChatMessage
-
+import traceback
 
 
 logger = logging.getLogger(__name__)
@@ -148,6 +148,11 @@ class SimpleChatbotMemory:
         Enhanced conversation history with 3-hour context window
         Returns messages in chronological order (oldest first)
         """
+
+        print("🔍 CALL STACK for get_conversation_history:")
+        for line in traceback.format_stack():
+            print(line.strip())
+        print("=" * 50)
         # Get the user's active session
         session = self.db.query(ChatSession).filter(
             ChatSession.tenant_id == self.tenant_id,
