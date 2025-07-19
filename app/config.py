@@ -225,6 +225,47 @@ class Settings(BaseSettings):
                 origins.extend([f"https://{domain}", f"https://www.{domain}"])
         
         return list(set(origins))
+    
+
+
+
+        
+    @property
+    def get_database_engine_config(self) -> dict:
+        """Get database engine configuration based on environment"""
+        base_config = {
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,  # 1 hour
+            "pool_timeout": 30,
+            "connect_args": {
+                "options": "-c statement_timeout=30000",
+                "keepalives_idle": "600",
+                "keepalives_interval": "30", 
+                "keepalives_count": "3",
+            }
+        }
+        
+        if self.is_production():
+            return {
+                **base_config,
+                "pool_size": 5,
+                "max_overflow": 10,
+                "echo": False,
+            }
+        elif self.is_staging():
+            return {
+                **base_config,
+                "pool_size": 3,
+                "max_overflow": 7,
+                "echo": False,
+            }
+        else:  # development
+            return {
+                **base_config,
+                "pool_size": 2,
+                "max_overflow": 5,
+                "echo": True,  # Log SQL in development
+            }
 
 
 settings = Settings()
