@@ -50,8 +50,9 @@ class UnifiedIntelligentEngine:
     - Session lifecycle management
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, tenant_id: int = None):
         self.db = db
+        self.tenant_id = tenant_id
         self.enhancement_counter = {}  # Track enhancement frequency per session
         
         # Initialize LLM
@@ -96,6 +97,8 @@ class UnifiedIntelligentEngine:
             tenant = self._get_tenant_by_api_key(api_key)
             if not tenant:
                 return {"error": "Invalid API key", "success": False}
+
+            self.tenant_id = tenant.id
 
             # Initialize memory and get session FIRST
             memory = SimpleChatbotMemory(self.db, tenant.id)
@@ -360,7 +363,13 @@ class UnifiedIntelligentEngine:
 
 
 
-
+    def _get_tenant_by_api_key(self, api_key: str):
+        """Get tenant by API key"""
+        from app.tenants.models import Tenant
+        return self.db.query(Tenant).filter(
+            Tenant.api_key == api_key,
+            Tenant.is_active == True
+        ).first()
 
 
 
@@ -2102,6 +2111,6 @@ Enhanced response:"""
 
 
 # Factory function
-def get_unified_intelligent_engine(db: Session) -> UnifiedIntelligentEngine:
+def get_unified_intelligent_engine(db: Session, tenant_id: int = None) -> UnifiedIntelligentEngine:
     """Factory function to create the enhanced unified engine"""
-    return UnifiedIntelligentEngine(db)
+    return UnifiedIntelligentEngine(db, tenant_id)

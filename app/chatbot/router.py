@@ -3207,7 +3207,7 @@ async def smart_chat_with_followup_streaming(
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
             # ⭐ NEW: Initialize unified intelligent engine
-            engine = get_unified_intelligent_engine(db)
+            engine = get_unified_intelligent_engine(db, tenant.id)
             
             # 🔔 NEW: Initialize smart feedback manager
             from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
