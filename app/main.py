@@ -83,6 +83,7 @@ from app.database import create_tables_safely
 
 try:
     create_tables_safely()
+    logger.info("✅ Database tables created successfully")
 except Exception as e:
     logger.error(f"❌ Failed to create database tables: {e}")
     if settings.is_production():
@@ -231,19 +232,17 @@ def health_check():
         
         # Check environment variables
         env_vars = {
-            "TWILIO_ACCOUNT_SID": bool(os.getenv("TWILIO_ACCOUNT_SID")),
-            "TWILIO_AUTH_TOKEN": bool(os.getenv("TWILIO_AUTH_TOKEN")),
-            "Database URL": "✅ Configured" if os.getenv("DATABASE_URL") else "❌ Missing",
-            "OpenAI API Key": bool(os.getenv("OPENAI_API_KEY")),
-            "Frontend URL": settings.FRONTEND_URL or "Using default localhost:3000",
-            "Environment": settings.ENVIRONMENT
+            "Environment": settings.ENVIRONMENT,
+            "Database": "✅ Connected" if db_health["status"] == "healthy" else "❌ Issues",
+            "OpenAI API": "✅ Configured" if os.getenv("OPENAI_API_KEY") else "❌ Missing",
+            "Frontend URL": settings.FRONTEND_URL or "Using default",
         }
         
         return {
             "status": "healthy" if db_health["status"] == "healthy" else "degraded",
+            "timestamp": datetime.utcnow().isoformat(),
             "environment": env_vars,
-            "database": db_health,
-            "timestamp": datetime.utcnow().isoformat()
+            "database": db_health
         }
         
     except Exception as e:

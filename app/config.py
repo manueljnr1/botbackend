@@ -243,13 +243,11 @@ class Settings(BaseSettings):
         """Get database engine configuration based on environment"""
         base_config = {
             "pool_pre_ping": True,
-            "pool_recycle": 3600,  # 1 hour
+            "pool_recycle": 3600,
             "pool_timeout": 30,
             "connect_args": {
-                "options": "-c statement_timeout=30000",
-                "keepalives_idle": "600",
-                "keepalives_interval": "30", 
-                "keepalives_count": "3",
+                "application_name": "lyra",
+                "connect_timeout": 10,
             }
         }
         
@@ -272,7 +270,7 @@ class Settings(BaseSettings):
                 **base_config,
                 "pool_size": 2,
                 "max_overflow": 5,
-                "echo": True,  # Log SQL in development
+                "echo": True,  # SQL logging in development
             }
 
 
