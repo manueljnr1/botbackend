@@ -3306,17 +3306,17 @@ async def smart_chat_with_followup_streaming(
             memory.store_message(session_id, request.message, True)
             
             # 🧠 Build context-aware prompt using conversation history
-            if conversation_history:
-                # Create enhanced prompt with conversation context
-                context_enhanced_message = memory.build_context_prompt(
-                    user_message=request.message,
-                    conversation_history=conversation_history,
-                    system_prompt=getattr(tenant, 'system_prompt', None)
-                )
-                logger.info(f"🧠 Enhanced message with {len(conversation_history)} messages of context")
-            else:
-                context_enhanced_message = request.message
-                logger.info(f"🧠 No conversation history available, using original message")
+            # if conversation_history:
+            #     # Create enhanced prompt with conversation context
+            #     context_enhanced_message = memory.build_context_prompt(
+            #         user_message=request.message,
+            #         conversation_history=conversation_history,
+            #         system_prompt=getattr(tenant, 'system_prompt', None)
+            #     )
+            #     logger.info(f"🧠 Enhanced message with {len(conversation_history)} messages of context")
+            # else:
+            #     context_enhanced_message = request.message
+            #     logger.info(f"🧠 No conversation history available, using original message")
             
             # ⭐ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
