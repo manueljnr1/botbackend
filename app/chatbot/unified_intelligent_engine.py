@@ -2228,6 +2228,10 @@ Enhanced response:"""
             flow_type = current_state.get("flow_type")
             current_step_id = current_state.get("current_step")
             
+            # 🆕 DEBUG: Log current state
+            logger.info(f"💼 Processing sales response: flow_type={flow_type}, current_step={current_step_id}")
+            logger.info(f"💼 User message: '{user_message}'")
+            
             conversation_flows = flow_data.get("conversation_flows", {})
             current_flow = conversation_flows.get(flow_type, {})
             steps = current_flow.get("steps", [])
@@ -2240,7 +2244,7 @@ Enhanced response:"""
                     break
             
             if not current_step:
-                # Try to continue with a general response instead of ending
+                logger.warning(f"💼 Current step '{current_step_id}' not found in steps: {[s.get('id') for s in steps]}")
                 response = "I'd be happy to continue helping you. What specific information would you like to know?"
                 return {
                     "found": True,
@@ -2252,6 +2256,10 @@ Enhanced response:"""
             branches = current_step.get("branches", {})
             user_response_lower = user_message.lower()
             
+            # 🆕 DEBUG: Log branch analysis
+            logger.info(f"💼 Available branches: {list(branches.keys())}")
+            logger.info(f"💼 User response (lower): '{user_response_lower}'")
+            
             next_step_info = None
             
             # Check each branch
@@ -2260,9 +2268,13 @@ Enhanced response:"""
                     continue
                     
                 branch_keywords = branch_key.split("|")
+                logger.info(f"💼 Checking branch '{branch_key}' with keywords: {branch_keywords}")
+                
                 for keyword in branch_keywords:
-                    if keyword.strip().lower() in user_response_lower:
+                    keyword_clean = keyword.strip().lower()
+                    if keyword_clean in user_response_lower:
                         next_step_info = branch_value
+                        logger.info(f"💼 ✅ MATCHED keyword: '{keyword_clean}' → next: {branch_value.get('next')}")
                         break
                 
                 if next_step_info:
@@ -2271,8 +2283,10 @@ Enhanced response:"""
             # Use default if no match
             if not next_step_info:
                 next_step_info = branches.get("default", {})
+                logger.info(f"💼 No keyword match, using default: {next_step_info}")
             
             next_step_id = next_step_info.get("next")
+            logger.info(f"💼 Next step ID: {next_step_id}")
             
             if next_step_id:
                 # Find next step
@@ -2283,14 +2297,17 @@ Enhanced response:"""
                         break
                 
                 if next_step:
+                    logger.info(f"💼 Found next step: {next_step_id}, updating conversation state")
                     memory.update_sales_conversation_step(session_id, next_step_id)
                     response = self._generate_sales_step_response(next_step, flow_data, user_message)
                 else:
-                    # Continue conversation instead of ending
+                    logger.warning(f"💼 Next step '{next_step_id}' not found in steps")
                     response = "Is there anything else about our products you'd like to discuss?"
             else:
-                # Continue conversation instead of ending
+                logger.info(f"💼 No next step defined, continuing conversation")
                 response = "What other questions can I help you with today?"
+            
+            logger.info(f"💼 Final response: '{response[:100]}...'")
             
             return {
                 "found": True,
