@@ -1813,95 +1813,68 @@ Enhanced response:"""
 
         
 
-    def _process_troubleshooting_response(self, user_message: str, current_state: Dict, memory: Any, session_id: str) -> Dict[str, Any]:
-        """Process user response in active troubleshooting flow"""
+    def _generate_troubleshooting_response(self, step: Dict, flow_data: Dict, user_message: str = "") -> str:
+        """Generate intelligent, context-aware response for troubleshooting step"""
+        
+        if not self.llm_available:
+            # Fallback to template-based response
+            return step.get("message", "Let me help you with that issue.")
+        
         try:
-            flow_data = current_state.get("flow_data", {})
-            current_step_id = current_state.get("current_step", "step1")
+            from langchain.prompts import PromptTemplate
             
-            # Find current step in flow
-            steps = flow_data.get("steps", [])
-            current_step = None
+            # Build troubleshooting context
+            flow_title = flow_data.get("title", "Technical Support")
+            available_solutions = json.dumps(flow_data.get("steps", []), indent=2)
+            success_examples = flow_data.get("success_message", "")
             
-            for step in steps:
-                if step.get("id") == current_step_id:
-                    current_step = step
-                    break
+            prompt = PromptTemplate(
+                input_variables=["user_message", "step_message", "flow_title", "available_solutions", "success_examples"],
+                template="""You are a technical support specialist helping a user troubleshoot: {flow_title}
+
+    USER'S LATEST MESSAGE: "{user_message}"
+    CURRENT STEP CONTEXT: "{step_message}"
+
+    AVAILABLE TROUBLESHOOTING SOLUTIONS:
+    {available_solutions}
+
+    SUCCESS EXAMPLES: {success_examples}
+
+    INSTRUCTIONS:
+    1. Analyze what the user is specifically describing or reporting
+    2. If they describe symptoms, provide the most relevant solution steps
+    3. If they say something worked, congratulate and offer next steps
+    4. If they say something didn't work, provide alternative solutions
+    5. Be empathetic and understanding about their frustration
+    6. Give clear, step-by-step instructions
+    7. Use the step context as guidance but prioritize addressing their actual situation
+    8. Be helpful and solution-focused
+
+    CRITICAL: If the user describes a specific problem, provide actual troubleshooting steps, not just more questions.
+
+    Generate a helpful troubleshooting response:"""
+            )
             
-            if not current_step:
-                # Try to continue instead of ending
-                return {
-                    "found": True,
-                    "content": "Let me try to help you differently. Can you describe what's happening?",
-                    "source": "TROUBLESHOOTING_GUIDE"
-                }
+            result = self.llm.invoke(prompt.format(
+                user_message=user_message,
+                step_message=step.get("message", ""),
+                flow_title=flow_title,
+                available_solutions=available_solutions,
+                success_examples=success_examples
+            ))
             
-            # Process user response against branches
-            branches = current_step.get("branches", {})
-            user_response_lower = user_message.lower()
+            response = result.content.strip()
             
-            next_step_info = None
-            
-            # Check each branch
-            for branch_key, branch_value in branches.items():
-                if branch_key == "default":
-                    continue
-                    
-                # Check if user response matches this branch
-                branch_keywords = branch_key.split("|")
-                for keyword in branch_keywords:
-                    if keyword.strip().lower() in user_response_lower:
-                        next_step_info = branch_value
-                        break
-                
-                if next_step_info:
-                    break
-            
-            # Use default if no match
-            if not next_step_info:
-                next_step_info = branches.get("default", {})
-            
-            next_step_id = next_step_info.get("next")
-            response_message = next_step_info.get("message", "")
-            
-            # Update state
-            if next_step_id:
-                memory.update_troubleshooting_step(session_id, next_step_id)
-                
-                # Find next step content
-                next_step = None
-                for step in steps:
-                    if step.get("id") == next_step_id:
-                        next_step = step
-                        break
-                
-                if next_step:
-                    if response_message:
-                        full_response = f"{response_message}\n\n{next_step.get('message', '')}"
-                    else:
-                        full_response = next_step.get('message', '')
-                else:
-                    # Continue instead of ending
-                    full_response = response_message or "Is there anything else I can help you troubleshoot?"
+            # Validate response quality
+            if len(response) > 20 and len(response) < 600:
+                return response
             else:
-                # Continue instead of ending
-                full_response = response_message or "What else can I help you with?"
-            
-            return {
-                "found": True,
-                "content": full_response,
-                "source": "TROUBLESHOOTING_GUIDE",
-                "confidence": 0.9
-            }
-            
+                # Fallback
+                return step.get("message", "Let me help you resolve this issue.")
+                
         except Exception as e:
-            logger.error(f"Error processing troubleshooting response: {e}")
-            memory.clear_troubleshooting_state(session_id)
-            return {
-                "found": True,
-                "content": "I'm having trouble with the troubleshooting flow. Let me connect you with our support team.",
-                "source": "TROUBLESHOOTING_ERROR"
-            }
+            logger.error(f"Error generating intelligent troubleshooting response: {e}")
+            return step.get("message", "Let me help you with that issue.")
 
 
     def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None, intent_result: Dict = None) -> Dict[str, Any]:
