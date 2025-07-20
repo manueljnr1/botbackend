@@ -1158,6 +1158,23 @@ Enhancement:"""
     def _classify_intent(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
         """Enhanced intent classification using two-tier system"""
         try:
+            # 🆕 DETECT CONVERSATION ENDINGS FIRST
+            ending_phrases = [
+                "thank you. bye", "thanks. bye", "bye", "goodbye", 
+                "that's all", "end conversation", "thanks, goodbye",
+                "thank you, bye", "thanks bye", "thank you bye"
+            ]
+            
+            user_lower = user_message.lower().strip()
+            if any(phrase in user_lower for phrase in ending_phrases):
+                logger.info(f"🏁 Conversation ending detected: '{user_message}'")
+                return {
+                    "intent": "conversation_ending", 
+                    "confidence": 0.95, 
+                    "source": "conversation_ending_detection"
+                }
+            
+            # Continue with normal enhanced classification
             from app.chatbot.enhanced_intent_classifier import get_enhanced_intent_classifier
             
             classifier = get_enhanced_intent_classifier(self.db)
@@ -1170,6 +1187,7 @@ Enhancement:"""
             logger.error(f"Enhanced intent classification failed: {e}")
             # Fallback to basic classification
             return self._basic_intent_classification(user_message)
+        
 
     def _basic_intent_classification(self, user_message: str) -> Dict[str, Any]:
         """Fallback basic classification when enhanced fails"""
@@ -1864,6 +1882,14 @@ Enhanced response:"""
         """Enhanced product handling using passed intent classification"""
         
         logger.info(f"🔍 Enhanced product routing for: {user_message[:50]}...")
+        
+        # Handle conversation endings
+        if intent_result and intent_result.get('intent') == 'conversation_ending':
+            return {
+                "content": "Thank you for chatting with us today! Feel free to reach out anytime if you need further assistance. Have a great day!",
+                "source": "CONVERSATION_ENDING",
+                "confidence": 0.95
+            }
         
         # Check for troubleshooting flow first
         if intent_result and intent_result.get('intent') == 'troubleshooting':
