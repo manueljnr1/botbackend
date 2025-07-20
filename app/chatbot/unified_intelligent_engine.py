@@ -2283,7 +2283,7 @@ Enhanced response:"""
             
         except Exception as e:
             logger.error(f"Error processing sales conversation response: {e}")
-            memory.clear_sales_conversation_state(session_id)
+            memory.update_sales_conversation_step(session_id, next_step_id)
             return {
                 "found": True,
                 "content": "I'm having trouble with the conversation flow. How else can I help you today?",
