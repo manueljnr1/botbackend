@@ -3323,7 +3323,7 @@ async def smart_chat_with_followup_streaming(
             
             result = engine.process_message(
                 api_key=api_key,
-                user_message=context_enhanced_message,  # 🧠 Use context-enhanced message
+                user_message=request.message,  # 🧠 Use context-enhanced message
                 user_identifier=user_id,
                 platform="web"
             )
