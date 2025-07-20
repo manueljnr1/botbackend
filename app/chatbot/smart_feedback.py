@@ -244,7 +244,13 @@ class AdvancedSmartFeedbackManager:
             if session and hasattr(session, 'user_email') and session.user_email:
                 # Check if email has expired (30 days)
                 if hasattr(session, 'email_captured_at') and session.email_captured_at:
-                    email_age = datetime.utcnow() - session.email_captured_at
+                    # 🔥 FIX: Handle timezone properly
+                    email_captured = session.email_captured_at
+                    if email_captured.tzinfo is None:
+                        email_captured = email_captured.replace(tzinfo=timezone.utc)
+                    
+                    current_time = datetime.now(timezone.utc)
+                    email_age = current_time - email_captured
                     
                     if email_age > self.EMAIL_MEMORY_DURATION:
                         logger.info(f"📅 Email expired for session {session_id} (age: {email_age.days} days), requesting fresh email")

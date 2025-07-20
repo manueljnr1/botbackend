@@ -166,7 +166,7 @@ class UnifiedIntelligentEngine:
            logger.error(f"Error in intelligent router: {e}")
            return {"error": str(e), "success": False}
 
-           
+
 
 
     def _manage_session_lifecycle(self, memory: SimpleChatbotMemory, session_id: str, user_identifier: str):
@@ -330,7 +330,7 @@ class UnifiedIntelligentEngine:
 
 
     def _get_improved_conversation_context(self, conversation_history: List[Dict], session_id: str) -> str:
-        """Build better context for greeting analysis"""
+        """Build better context for greeting analysis - Multi-tenant compatible"""
         
         if not conversation_history or len(conversation_history) < 2:
             return "NEW_CONVERSATION - No previous context"
@@ -365,23 +365,66 @@ class UnifiedIntelligentEngine:
         if sales_state and sales_state.get("active"):
             context_parts.append(f"ACTIVE_SALES_FLOW - Type: {sales_state.get('flow_type')}")
         
-        # Get conversation topics
-        topics = []
-        for msg in conversation_history[-6:]:
-            content = msg.get('content', '').lower()
-            if any(word in content for word in ['pricing', 'login', 'support', 'help', 'problem', 'account', 'password', 'reset']):
-                topics.extend([word for word in ['pricing', 'login', 'support', 'help', 'problem', 'account', 'password', 'reset'] if word in content])
-        
-        if topics:
-            context_parts.append(f"ACTIVE_TOPICS: {', '.join(set(topics))}")
+        # 🆕 DYNAMIC TOPIC EXTRACTION using LLM
+        extracted_topics = self._extract_conversation_topics_llm(conversation_history)
+        if extracted_topics:
+            context_parts.append(f"ACTIVE_TOPICS: {extracted_topics}")
         
         return " | ".join(context_parts) if context_parts else "GENERAL_CONVERSATION"
+
+    def _extract_conversation_topics_llm(self, conversation_history: List[Dict]) -> str:
+        """Extract conversation topics dynamically using LLM - works for any tenant"""
+        
+        if not self.llm_available or len(conversation_history) < 2:
+            return ""
+        
+        try:
+            # Get recent conversation
+            recent_messages = conversation_history[-6:]
+            conversation_text = ""
+            for msg in recent_messages:
+                role = "User" if msg.get('role') == 'user' else "Assistant"
+                content = msg.get('content', '')[:150]  # Limit length
+                conversation_text += f"{role}: {content}\n"
+            
+            topic_prompt = f"""Extract the main topics being discussed in this conversation.
+
+    CONVERSATION:
+    {conversation_text}
+
+    TASK: Identify 1-3 main topics/subjects that the user is asking about or discussing.
+
+    EXAMPLES:
+    - If discussing product features → "product features"
+    - If asking about billing → "billing"
+    - If troubleshooting login → "login issues" 
+    - If comparing plans → "pricing plans"
+    - If asking about integration → "integrations"
+
+    RESPONSE: List 1-3 topics separated by commas, or "general" if no specific topics.
+
+    Topics:"""
+            
+            result = self.llm.invoke(topic_prompt)
+            topics_text = result.content.strip()
+            
+            # Clean and validate
+            if topics_text and topics_text.lower() != "general" and len(topics_text) < 100:
+                # Remove any extra formatting
+                topics_text = topics_text.replace("Topics:", "").replace("- ", "").strip()
+                return topics_text
+            
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Topic extraction failed: {e}")
+            return ""
 
 
 
 
     def handle_improved_greeting(self, user_message: str, session_id: str, conversation_history: List[Dict]) -> Optional[str]:
-        """Improved greeting handler that preserves conversation context"""
+        """Improved greeting handler that preserves conversation context - Multi-tenant"""
         
         greeting_analysis = self.analyze_greeting_with_llm(user_message, conversation_history, session_id)
         
@@ -398,7 +441,7 @@ class UnifiedIntelligentEngine:
             logger.info(f"🎭 New session greeting")
             return "Hello! How can I assist you today?"
         
-        # Continuing conversation - acknowledge but don't reset
+        # 🆕 DYNAMIC CONTEXT RESPONSES
         if "ACTIVE_TOPICS" in conversation_context:
             topics = conversation_context.split("ACTIVE_TOPICS: ")[1].split(" |")[0]
             logger.info(f"🎭 Greeting with active topics: {topics}")
@@ -414,11 +457,15 @@ class UnifiedIntelligentEngine:
         
         if "BOT_ASKED_QUESTION" in conversation_context:
             logger.info(f"🎭 Greeting after bot asked question")
-            return "Hi! I was waiting for your response to my question. What would you like to do?"
+            return "Hi! I was waiting for your response. What would you like to do?"
+        
+        if "BOT_PROVIDED_INFO" in conversation_context:
+            logger.info(f"🎭 Greeting after bot provided info")
+            return "Hello! How else can I help you?"
         
         # General continuation
         logger.info(f"🎭 General greeting continuation")
-        return "Hi! How else can I help you?"
+        return "Hi! What can I help you with?"
 
 
 
