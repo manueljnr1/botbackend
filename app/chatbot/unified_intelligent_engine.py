@@ -231,36 +231,53 @@ class UnifiedIntelligentEngine:
             input_variables=["user_message", "conversation_context", "timing_context"],
             template="""Analyze if this message should be treated as a conversation-resetting greeting.
 
-    USER MESSAGE: "{user_message}"
-    CONVERSATION CONTEXT: {conversation_context}
-    TIMING: {timing_context}
+        USER MESSAGE: "{user_message}"
+        CONVERSATION CONTEXT: {conversation_context}
+        TIMING: {timing_context}
 
-    CRITICAL RULES:
-    1. ONLY treat as greeting if message is PURELY social (just "hello", "hi", "good morning")
-    2. If greeting + question/request = NOT A GREETING, process the question
-    3. If user is answering a previous question = NOT A GREETING, process the answer
-    4. If continuing existing topic = NOT A GREETING
+        CRITICAL RULES - BE EXTREMELY STRICT:
+        1. ONLY treat as greeting if message is PURELY social (just "hello", "hi", "good morning")
+        2. If greeting + question/request = NOT A GREETING, process the question
+        3. If user is answering a previous question = NOT A GREETING, process the answer
+        4. If continuing existing topic = NOT A GREETING
+        5. If message contains "tell me", "about", "can you", "what", "how", "why", "when", "where" = NOT A GREETING
+        6. If message mentions ANY topic, subject, or request = NOT A GREETING     
+        7. If message asks for information = NOT A GREETING
 
-    EXAMPLES:
-    ❌ "Good morning, I need help" → NOT A GREETING (has request)
-    ❌ "Hi, yes I tried that" → NOT A GREETING (answering question)  
-    ❌ "Hello, about that pricing" → NOT A GREETING (continuing topic)
-    ❌ "yes, i have tried reseting... how can i reach out to support please?" → NOT A GREETING (answering + requesting)
-    ✅ "Hello" → IS A GREETING (pure social)
-    ✅ "Good morning" → IS A GREETING (pure social)
-    ✅ "Hi" → IS A GREETING (pure social)
 
-    RESPONSE FORMAT (JSON):
-    {{
+
+        EXAMPLES:
+        ❌ "can you tell me about pricing now?" → NOT A GREETING (has request + topic)
+        ❌ "what about the features?" → NOT A GREETING (has question)
+        ❌ "tell me more about X" → NOT A GREETING (has request)
+        ❌ "hello, can you help with Y?" → NOT A GREETING (greeting + request)
+        ❌ "Good morning, I need help" → NOT A GREETING (has request)
+        ❌ "Hi, yes I tried that" → NOT A GREETING (answering question)  
+        ❌ "Hello, about that pricing" → NOT A GREETING (continuing topic)
+        ❌ "good morning, how are you?" → NOT A GREETING (has question)
+        ✅ "Hello" → IS A GREETING (pure social)
+        ✅ "Good morning" → IS A GREETING (pure social)
+        ✅ "Hi" → IS A GREETING (pure social)
+        ✅ "Hey" → IS A GREETING (pure social)
+        ✅ "Hello, how are you?" → IS A GREETING (pure social + question)
+        ✅ "Hi, just wanted to say hello" → IS A GREETING (pure social + no request)
+        ✅ "Wagwan" → IS A GREETING
+        ✅ "Greetings" → IS A GREETING (pure social)
+        ✅ "Hello, just checking in" → IS A GREETING (pure social + no request) 
+
+        BE EXTREMELY STRICT: If there's ANY additional content beyond pure social greeting, return NOT A GREETING.
+
+        RESPONSE FORMAT (JSON):
+        {{
         "is_pure_greeting": true/false,
         "has_additional_content": true/false,
         "is_answer_to_question": true/false,
         "is_topic_continuation": true/false,
         "suggested_action": "treat_as_greeting|process_normally",
         "reasoning": "explanation"
-    }}
+        }}
 
-    Analysis:"""
+        Analysis:"""
         )
         
         try:
@@ -445,15 +462,15 @@ class UnifiedIntelligentEngine:
         if "ACTIVE_TOPICS" in conversation_context:
             topics = conversation_context.split("ACTIVE_TOPICS: ")[1].split(" |")[0]
             logger.info(f"🎭 Greeting with active topics: {topics}")
-            return f"Hello! I was helping you with {topics}. What would you like to know next?"
+            return f"Hello! We were discussing {topics}. What specific information would be most helpful, or would you like to continue where we left off?"
         
         if "ACTIVE_TROUBLESHOOTING" in conversation_context:
             logger.info(f"🎭 Greeting during troubleshooting")
-            return "Hi! I'm still helping you troubleshoot your issue. Shall we continue where we left off?"
+            return "Hi.... I'm still helping you troubleshoot your issue. Shall we continue where we left off?"
         
         if "ACTIVE_SALES_FLOW" in conversation_context:
             logger.info(f"🎭 Greeting during sales conversation")
-            return "Hello! Let's continue with your inquiry. What else would you like to know?"
+            return "Hello, Let's continue with your inquiry. What else would you like to know?"
         
         if "BOT_ASKED_QUESTION" in conversation_context:
             logger.info(f"🎭 Greeting after bot asked question")
@@ -461,11 +478,11 @@ class UnifiedIntelligentEngine:
         
         if "BOT_PROVIDED_INFO" in conversation_context:
             logger.info(f"🎭 Greeting after bot provided info")
-            return "Hello! How else can I help you?"
+            return "Hello, How else can I help you?"
         
         # General continuation
         logger.info(f"🎭 General greeting continuation")
-        return "Hi! What can I help you with?"
+        return "Hi, What can I help you with?"
 
 
 
@@ -1158,7 +1175,7 @@ Enhancement:"""
     def _classify_intent(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
         """Enhanced intent classification using two-tier system"""
         try:
-            # 🆕 DETECT CONVERSATION ENDINGS FIRST
+            # Pre-check for conversation endings
             ending_phrases = [
                 "thank you. bye", "thanks. bye", "bye", "goodbye", 
                 "that's all", "end conversation", "thanks, goodbye",
@@ -1174,20 +1191,30 @@ Enhancement:"""
                     "source": "conversation_ending_detection"
                 }
             
-            # Continue with normal enhanced classification
+            # Use enhanced classification
             from app.chatbot.enhanced_intent_classifier import get_enhanced_intent_classifier
             
             classifier = get_enhanced_intent_classifier(self.db)
             result = classifier.classify_intent(user_message, tenant.id)
+            
+            # Boost confidence for explicit requests
+            explicit_request_patterns = [
+                "tell me about", "can you tell", "what about", "how about",
+                "explain", "show me", "help with", "need to know"
+            ]
+            
+            if any(pattern in user_lower for pattern in explicit_request_patterns):
+                if result.get('confidence', 0) < 0.9:
+                    result['confidence'] = min(0.9, result.get('confidence', 0) + 0.2)
+                    result['boosted'] = True
+                    logger.info(f"🚀 Boosted confidence for explicit request: {result['confidence']}")
             
             logger.info(f"🧠 Intent: {result['intent']} (confidence: {result['confidence']}, source: {result['source']})")
             return result
             
         except Exception as e:
             logger.error(f"Enhanced intent classification failed: {e}")
-            # Fallback to basic classification
             return self._basic_intent_classification(user_message)
-        
 
     def _basic_intent_classification(self, user_message: str) -> Dict[str, Any]:
         """Fallback basic classification when enhanced fails"""
@@ -1210,29 +1237,26 @@ Enhancement:"""
     def _check_context_relevance(self, user_message: str, intent_result: Dict, tenant: Tenant) -> Dict[str, Any]:
         """Context check - Is this about our product/service?"""
         intent = intent_result.get('intent', 'general')
+        confidence = intent_result.get('confidence', 0.0)
         
-        # Fast context routing based on intent
-        if intent in ['functional', 'support']:
+        # If we have high confidence intent classification, trust it
+        if confidence >= 0.8:
             return {
                 "is_product_related": True,
-                "context_type": "product_functional",
-                "reasoning": f"Intent '{intent}' indicates product interaction"
+                "context_type": "high_confidence_intent",
+                "reasoning": f"High confidence intent '{intent}' indicates product interaction"
             }
-        elif intent == 'casual':
-            return {
-                "is_product_related": False,
-                "context_type": "general_casual",
-                "reasoning": "Casual conversation detected"
-            }
-        elif intent == 'company':
-            return {
-                "is_product_related": True,
-                "context_type": "company_info",
-                "reasoning": "Company information request"
-            }
-        else:
+        
+        # For low confidence, use LLM to verify
+        if confidence < 0.8:
             return self._llm_context_check(user_message, tenant)
-
+        
+        # Default to product-related for safety
+        return {
+            "is_product_related": True,
+            "context_type": "default_product",
+            "reasoning": "Default to product-related for tenant queries"
+        }
 
     
     def _llm_context_check(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
