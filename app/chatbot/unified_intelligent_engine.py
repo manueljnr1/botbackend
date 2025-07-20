@@ -1805,11 +1805,10 @@ Enhanced response:"""
                     break
             
             if not current_step:
-                # Flow completed or error
-                memory.clear_troubleshooting_state(session_id)
+                # Try to continue instead of ending
                 return {
                     "found": True,
-                    "content": flow_data.get("escalation_message", "Let me connect you with our support team."),
+                    "content": "Let me try to help you differently. Can you describe what's happening?",
                     "source": "TROUBLESHOOTING_GUIDE"
                 }
             
@@ -1858,13 +1857,11 @@ Enhanced response:"""
                     else:
                         full_response = next_step.get('message', '')
                 else:
-                    # End of flow
-                    memory.clear_troubleshooting_state(session_id)
-                    full_response = response_message or flow_data.get("success_message", "Great! I'm glad I could help.")
+                    # Continue instead of ending
+                    full_response = response_message or "Is there anything else I can help you troubleshoot?"
             else:
-                # End of flow
-                memory.clear_troubleshooting_state(session_id)
-                full_response = response_message or flow_data.get("success_message", "Thank you for the information.")
+                # Continue instead of ending
+                full_response = response_message or "What else can I help you with?"
             
             return {
                 "found": True,
@@ -1881,7 +1878,6 @@ Enhanced response:"""
                 "content": "I'm having trouble with the troubleshooting flow. Let me connect you with our support team.",
                 "source": "TROUBLESHOOTING_ERROR"
             }
-
 
 
     def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None, intent_result: Dict = None) -> Dict[str, Any]:
@@ -2220,11 +2216,11 @@ Enhanced response:"""
                     break
             
             if not current_step:
-                # Flow completed
-                memory.clear_sales_conversation_state(session_id)
+                # Try to continue with a general response instead of ending
+                response = "I'd be happy to continue helping you. What specific information would you like to know?"
                 return {
                     "found": True,
-                    "content": "Thank you for your interest! Is there anything else I can help you with today?",
+                    "content": response,
                     "source": "SALES_CONVERSATION"
                 }
             
@@ -2266,13 +2262,11 @@ Enhanced response:"""
                     memory.update_sales_conversation_step(session_id, next_step_id)
                     response = self._generate_sales_step_response(next_step, flow_data, user_message)
                 else:
-                    # End of flow
-                    memory.clear_sales_conversation_state(session_id)
-                    response = "Great! I'm here if you have any other questions about our products."
+                    # Continue conversation instead of ending
+                    response = "Is there anything else about our products you'd like to discuss?"
             else:
-                # End of flow
-                memory.clear_sales_conversation_state(session_id)
-                response = "Perfect! Let me know if you'd like to explore any other aspects of our solution."
+                # Continue conversation instead of ending
+                response = "What other questions can I help you with today?"
             
             return {
                 "found": True,
@@ -2283,7 +2277,7 @@ Enhanced response:"""
             
         except Exception as e:
             logger.error(f"Error processing sales conversation response: {e}")
-            memory.update_sales_conversation_step(session_id, next_step_id)
+            memory.clear_sales_conversation_state(session_id)
             return {
                 "found": True,
                 "content": "I'm having trouble with the conversation flow. How else can I help you today?",
