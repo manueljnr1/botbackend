@@ -1715,6 +1715,12 @@ Enhanced response:"""
             from app.chatbot.simple_memory import SimpleChatbotMemory
             memory = SimpleChatbotMemory(self.db, tenant_id)
             
+            # 🚫 PREVENT MULTIPLE ACTIVE STATES
+            sales_state = memory.get_sales_conversation_state(session_id)
+            if sales_state and sales_state.get("active"):
+                logger.info("🚫 Sales conversation active - skipping troubleshooting")
+                return {"found": False}
+            
             # Check if user is already in a troubleshooting flow
             if session_id:
                 current_state = memory.get_troubleshooting_state(session_id)
@@ -2071,6 +2077,12 @@ Enhanced response:"""
         try:
             from app.chatbot.simple_memory import SimpleChatbotMemory
             memory = SimpleChatbotMemory(self.db, tenant_id)
+            
+            # 🚫 PREVENT MULTIPLE ACTIVE STATES
+            troubleshooting_state = memory.get_troubleshooting_state(session_id)
+            if troubleshooting_state and troubleshooting_state.get("active"):
+                logger.info("🚫 Troubleshooting conversation active - skipping sales")
+                return {"found": False}
             
             # Check if user is already in a sales conversation
             if session_id:
