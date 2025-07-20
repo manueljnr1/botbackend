@@ -12,6 +12,7 @@ import logging
 import uuid
 from app.chatbot.models import ChatSession, ChatMessage
 import traceback
+from sqlalchemy.orm.attributes import flag_modified
 
 
 logger = logging.getLogger(__name__)
@@ -132,16 +133,54 @@ class SimpleChatbotMemory:
             # No messages yet - consider active
             return "active"
         
-        time_since_last = safe_datetime_subtract(datetime.utcnow(), last_message.created_at)
+        time_since_last = safe_datetime_subtract(datetime.now(timezone.utc), last_message.created_at)
         
         if time_since_last >= self.EXPIRED_THRESHOLD:
             return "expired"
         elif time_since_last >= self.DORMANT_THRESHOLD:
+            # 🆕 CLEAR CONVERSATION STATES WHEN BECOMING DORMANT (3+ hours)
+            self._clear_dormant_session_states(session.session_id)
             return "dormant"
         elif time_since_last >= self.IDLE_THRESHOLD:
             return "idle"
         else:
             return "active"
+
+    def _clear_dormant_session_states(self, session_id: str):
+        """Clear conversation states when session becomes dormant (3+ hours inactive)"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata:
+                states_cleared = []
+                
+                # Clear troubleshooting state
+                if session.session_metadata.get("troubleshooting_state", {}).get("active"):
+                    session.session_metadata["troubleshooting_state"]["active"] = False
+                    session.session_metadata["troubleshooting_state"]["cleared_reason"] = "dormant_timeout"
+                    session.session_metadata["troubleshooting_state"]["cleared_at"] = datetime.now(timezone.utc).isoformat()
+                    states_cleared.append("troubleshooting")
+                
+                # Clear sales conversation state
+                if session.session_metadata.get("sales_conversation_state", {}).get("active"):
+                    session.session_metadata["sales_conversation_state"]["active"] = False
+                    session.session_metadata["sales_conversation_state"]["cleared_reason"] = "dormant_timeout"
+                    session.session_metadata["sales_conversation_state"]["cleared_at"] = datetime.now(timezone.utc).isoformat()
+                    states_cleared.append("sales")
+                
+                if states_cleared:
+                    flag_modified(session, "session_metadata")
+                    self.db.commit()
+                    logger.info(f"🧹 Auto-cleared dormant conversation states: {states_cleared} for session {session_id}")
+                    
+        except Exception as e:
+            logger.error(f"Error clearing dormant session states: {e}")
+            
+
+
+
     
     def get_conversation_history(self, user_identifier: str, max_messages: int = 30) -> List[Dict]:
         """
@@ -781,3 +820,25 @@ class SimpleChatbotMemory:
                 
         except Exception as e:
             logger.error(f"❌ Error clearing sales conversation state: {e}")
+
+
+
+    def clear_all_conversation_states(self, session_id: str):
+        """Clear all active conversation states"""
+        try:
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and session.session_metadata:
+                # Clear both troubleshooting and sales states
+                if "troubleshooting_state" in session.session_metadata:
+                    session.session_metadata["troubleshooting_state"]["active"] = False
+                if "sales_conversation_state" in session.session_metadata:
+                    session.session_metadata["sales_conversation_state"]["active"] = False
+                    
+                flag_modified(session, "session_metadata")
+                self.db.commit()
+                
+        except Exception as e:
+            logger.error(f"Error clearing conversation states: {e}")

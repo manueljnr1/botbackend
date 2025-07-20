@@ -1885,6 +1885,13 @@ Enhanced response:"""
         
         # Handle conversation endings
         if intent_result and intent_result.get('intent') == 'conversation_ending':
+            # Clear all active states when conversation ends
+            if session_id:
+                from app.chatbot.simple_memory import SimpleChatbotMemory
+                memory = SimpleChatbotMemory(self.db, self.tenant_id)
+                memory.clear_all_conversation_states(session_id)
+                logger.info(f"🧹 Cleared all conversation states for session {session_id}")
+            
             return {
                 "content": "Thank you for chatting with us today! Feel free to reach out anytime if you need further assistance. Have a great day!",
                 "source": "CONVERSATION_ENDING",
