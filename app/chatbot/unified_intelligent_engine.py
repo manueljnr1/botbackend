@@ -83,91 +83,90 @@ class UnifiedIntelligentEngine:
 
 
     def process_message(
-        self,
-        api_key: str,
-        user_message: str,
-        user_identifier: str,
-        platform: str = "web"
-        ) -> Dict[str, Any]:
-        """
-        This is the new "Intelligent Router". It orchestrates the entire response process.
-        """
-        try:
-            # --- 1. PRE-PROCESSING & SECURITY ---
-            tenant = self._get_tenant_by_api_key(api_key)
-            if not tenant:
-                return {"error": "Invalid API key", "success": False}
+       self,
+       api_key: str,
+       user_message: str,
+       user_identifier: str,
+       platform: str = "web"
+       ) -> Dict[str, Any]:
+       """
+       This is the new "Intelligent Router". It orchestrates the entire response process.
+       """
+       try:
+           # --- 1. PRE-PROCESSING & SECURITY ---
+           tenant = self._get_tenant_by_api_key(api_key)
+           if not tenant:
+               return {"error": "Invalid API key", "success": False}
 
-            self.tenant_id = tenant.id
+           self.tenant_id = tenant.id
 
-            # Initialize memory and get session FIRST
-            memory = SimpleChatbotMemory(self.db, tenant.id)
-            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+           # Initialize memory and get session FIRST
+           memory = SimpleChatbotMemory(self.db, tenant.id)
+           session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
 
-            # Security check
-            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
-            if not is_safe:
-                return {
-                    "success": True, 
-                    "response": security_response, 
-                    "answered_by": "security_system",
-                    "session_id": session_id
-                }
+           # Security check
+           is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+           if not is_safe:
+               return {
+                   "success": True, 
+                   "response": security_response, 
+                   "answered_by": "security_system",
+                   "session_id": session_id
+               }
 
-            # Get conversation history for greeting analysis
-            conversation_history = memory.get_conversation_history(user_identifier, 6)
+           # Get conversation history for greeting analysis
+           conversation_history = memory.get_conversation_history(user_identifier, 6)
 
-            # --- 2. LLM GREETING ANALYSIS (before intent classification) ---
-            greeting_analysis = self.analyze_greeting_with_llm(user_message, conversation_history, session_id)
-            
-            if greeting_analysis.get("is_greeting") and greeting_analysis.get("suggested_response"):
-                # Store the greeting exchange
-                memory.store_message(session_id, user_message, True)
-                memory.store_message(session_id, greeting_analysis["suggested_response"], False)
-                
-                return {
-                    "success": True,
-                    "response": greeting_analysis["suggested_response"],
-                    "session_id": session_id,
-                    "is_new_session": is_new_session,
-                    "answered_by": "LLM_SMART_GREETING",
-                    "greeting_type": greeting_analysis.get("greeting_type"),
-                    "continue_previous": greeting_analysis.get("continue_previous"),
-                    "intent": "greeting",
-                    "architecture": "hybrid_intelligent_router"
-                }
+           # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
+           smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
+           
+           if smart_greeting_response:
+               # Store the greeting exchange
+               memory.store_message(session_id, user_message, True)
+               memory.store_message(session_id, smart_greeting_response, False)
+               
+               return {
+                   "success": True,
+                   "response": smart_greeting_response,
+                   "session_id": session_id,
+                   "is_new_session": is_new_session,
+                   "answered_by": "IMPROVED_SMART_GREETING",
+                   "intent": "greeting",
+                   "architecture": "hybrid_intelligent_router"
+               }
 
-            # --- 3. INTENT & CONTEXT ANALYSIS ---
-            intent_result = self._classify_intent(user_message, tenant)
-            context_result = self._check_context_relevance(user_message, intent_result, tenant)
+           # --- 3. INTENT & CONTEXT ANALYSIS ---
+           intent_result = self._classify_intent(user_message, tenant)
+           context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
-            # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
-            if context_result['is_product_related']:
-                response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
-            else:
-                response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
+           # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
+           if context_result['is_product_related']:
+               response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
+           else:
+               response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
-            # --- 5. POST-PROCESSING & MEMORY ---
-            final_content = fix_response_formatting(response_data['content'])
-            
-            # Store messages
-            memory.store_message(session_id, user_message, True)
-            memory.store_message(session_id, final_content, False)
+           # --- 5. POST-PROCESSING & MEMORY ---
+           final_content = fix_response_formatting(response_data['content'])
+           
+           # Store messages
+           memory.store_message(session_id, user_message, True)
+           memory.store_message(session_id, final_content, False)
 
-            return {
-                "success": True,
-                "response": final_content,
-                "session_id": session_id,
-                "is_new_session": is_new_session,
-                "answered_by": response_data.get('source', 'unknown'),
-                "intent": intent_result.get('intent', 'unknown'),
-                "architecture": "hybrid_intelligent_router"
-            }
+           return {
+               "success": True,
+               "response": final_content,
+               "session_id": session_id,
+               "is_new_session": is_new_session,
+               "answered_by": response_data.get('source', 'unknown'),
+               "intent": intent_result.get('intent', 'unknown'),
+               "architecture": "hybrid_intelligent_router"
+           }
 
-        except Exception as e:
-            logger.error(f"Error in intelligent router: {e}")
-            return {"error": str(e), "success": False}
+       except Exception as e:
+           logger.error(f"Error in intelligent router: {e}")
+           return {"error": str(e), "success": False}
 
+           
 
 
     def _manage_session_lifecycle(self, memory: SimpleChatbotMemory, session_id: str, user_identifier: str):
@@ -219,50 +218,46 @@ class UnifiedIntelligentEngine:
 
     def analyze_greeting_with_llm(self, user_message: str, conversation_history: List[Dict], session_id: str) -> Dict[str, Any]:
         """
-        LLM-powered greeting analysis with conversation continuity logic
+        Improved LLM-powered greeting analysis with better logic
         """
         if not self.llm_available:
-            return {"is_greeting": False}
+            return {"is_pure_greeting": False}
         
-        # Get timing context
-        timing_context = self._get_timing_context(conversation_history)
-        
-        # Get conversation state context
-        conversation_state = self._get_conversation_state_context(session_id, conversation_history)
+        # Get improved context
+        timing_context = self._get_improved_timing_context(conversation_history)
+        conversation_context = self._get_improved_conversation_context(conversation_history, session_id)
         
         prompt = PromptTemplate(
-            input_variables=["user_message", "timing_context", "conversation_context"],
-            template="""You are analyzing if a user message is a greeting and how to respond appropriately.
+            input_variables=["user_message", "conversation_context", "timing_context"],
+            template="""Analyze if this message should be treated as a conversation-resetting greeting.
 
     USER MESSAGE: "{user_message}"
-
-    TIMING CONTEXT: {timing_context}
-
     CONVERSATION CONTEXT: {conversation_context}
+    TIMING: {timing_context}
 
-    GREETING ANALYSIS RULES:
-    1. Identify if this is a greeting (hello, hi, hey, good morning, etc.)
-    2. Consider timing - recent activity vs new session
-    3. Consider conversation state - was user in middle of something?
-
-    RESPONSE LOGIC:
-    - NEW SESSION + GREETING → Standard greeting + offer help
-    - RECENT ACTIVITY (1 sec - 10 min) + GREETING → Acknowledge + offer to continue previous topic OR new help
-    - ACTIVE FLOW + GREETING → Acknowledge + suggest continuing current conversation
-    - NOT A GREETING → Process normally
+    CRITICAL RULES:
+    1. ONLY treat as greeting if message is PURELY social (just "hello", "hi", "good morning")
+    2. If greeting + question/request = NOT A GREETING, process the question
+    3. If user is answering a previous question = NOT A GREETING, process the answer
+    4. If continuing existing topic = NOT A GREETING
 
     EXAMPLES:
-    User: "Hello" (new session) → Standard greeting
-    User: "Hi" (2 minutes after pricing discussion) → "Hi! Would you like to continue discussing pricing, or can I help with something else?"
-    User: "Hey" (mid troubleshooting flow) → "Hi! Shall we continue troubleshooting your issue, or do you need help with something new?"
+    ❌ "Good morning, I need help" → NOT A GREETING (has request)
+    ❌ "Hi, yes I tried that" → NOT A GREETING (answering question)  
+    ❌ "Hello, about that pricing" → NOT A GREETING (continuing topic)
+    ❌ "yes, i have tried reseting... how can i reach out to support please?" → NOT A GREETING (answering + requesting)
+    ✅ "Hello" → IS A GREETING (pure social)
+    ✅ "Good morning" → IS A GREETING (pure social)
+    ✅ "Hi" → IS A GREETING (pure social)
 
     RESPONSE FORMAT (JSON):
     {{
-        "is_greeting": true/false,
-        "greeting_type": "new_session|recent_return|mid_conversation|not_greeting",
-        "suggested_response": "The exact response to send",
-        "continue_previous": true/false,
-        "previous_topic": "brief description of what they were discussing"
+        "is_pure_greeting": true/false,
+        "has_additional_content": true/false,
+        "is_answer_to_question": true/false,
+        "is_topic_continuation": true/false,
+        "suggested_action": "treat_as_greeting|process_normally",
+        "reasoning": "explanation"
     }}
 
     Analysis:"""
@@ -271,8 +266,8 @@ class UnifiedIntelligentEngine:
         try:
             result = self.llm.invoke(prompt.format(
                 user_message=user_message,
-                timing_context=timing_context,
-                conversation_context=conversation_state
+                conversation_context=conversation_context,
+                timing_context=timing_context
             ))
             
             response_text = result.content.strip()
@@ -284,14 +279,150 @@ class UnifiedIntelligentEngine:
             if json_match:
                 analysis = json.loads(json_match.group())
                 
-                logger.info(f"🎭 LLM Greeting Analysis: {analysis.get('greeting_type')} - Continue: {analysis.get('continue_previous')}")
+                logger.info(f"🎭 Improved Greeting Analysis: Pure greeting: {analysis.get('is_pure_greeting')}, Action: {analysis.get('suggested_action')}")
+                logger.info(f"💡 Reasoning: {analysis.get('reasoning', 'N/A')}")
                 return analysis
             
         except Exception as e:
-            logger.error(f"LLM greeting analysis failed: {e}")
+            logger.error(f"Improved greeting analysis failed: {e}")
         
-        # Fallback
-        return {"is_greeting": False}
+        # Fallback - conservative approach
+        return {"is_pure_greeting": False, "suggested_action": "process_normally"}
+
+
+
+
+
+    def _get_improved_timing_context(self, conversation_history: List[Dict]) -> str:
+        """Better timing analysis for greeting detection"""
+        
+        if not conversation_history:
+            return "NEW_SESSION"
+        
+        last_message = conversation_history[-1]
+        last_timestamp = last_message.get('timestamp')
+        
+        if last_timestamp:
+            try:
+                if isinstance(last_timestamp, str):
+                    last_time = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
+                else:
+                    last_time = last_timestamp
+                
+                time_diff = datetime.now(timezone.utc) - last_time.replace(tzinfo=timezone.utc)
+                
+                # More nuanced timing
+                if time_diff < timedelta(seconds=30):
+                    return "IMMEDIATE_CONTINUATION - Likely answering or following up"
+                elif time_diff < timedelta(minutes=5):
+                    return "SHORT_PAUSE - Still in same conversation"
+                elif time_diff < timedelta(hours=1):
+                    return "MEDIUM_BREAK - May be returning to topic"
+                else:
+                    return "LONG_BREAK - Likely new conversation"
+                    
+            except Exception as e:
+                logger.error(f"Timing calculation error: {e}")
+        
+        return f"CONTINUING_SESSION - {len(conversation_history)} messages"
+    
+
+
+
+    def _get_improved_conversation_context(self, conversation_history: List[Dict], session_id: str) -> str:
+        """Build better context for greeting analysis"""
+        
+        if not conversation_history or len(conversation_history) < 2:
+            return "NEW_CONVERSATION - No previous context"
+        
+        context_parts = []
+        
+        # Get last bot question/statement
+        last_bot_message = None
+        for msg in reversed(conversation_history):
+            if msg.get('role') == 'assistant':
+                last_bot_message = msg.get('content', '')
+                break
+        
+        # Check if bot asked a question
+        if last_bot_message:
+            if '?' in last_bot_message:
+                context_parts.append(f"BOT_ASKED_QUESTION: '{last_bot_message[-100:]}'")
+            else:
+                context_parts.append(f"BOT_PROVIDED_INFO: '{last_bot_message[-100:]}'")
+        
+        # Check for active conversation flows
+        from app.chatbot.simple_memory import SimpleChatbotMemory
+        memory = SimpleChatbotMemory(self.db, self.tenant_id)
+        
+        # Check troubleshooting state
+        troubleshooting_state = memory.get_troubleshooting_state(session_id)
+        if troubleshooting_state and troubleshooting_state.get("active"):
+            context_parts.append(f"ACTIVE_TROUBLESHOOTING - Step: {troubleshooting_state.get('current_step')}")
+        
+        # Check sales conversation state
+        sales_state = memory.get_sales_conversation_state(session_id)
+        if sales_state and sales_state.get("active"):
+            context_parts.append(f"ACTIVE_SALES_FLOW - Type: {sales_state.get('flow_type')}")
+        
+        # Get conversation topics
+        topics = []
+        for msg in conversation_history[-6:]:
+            content = msg.get('content', '').lower()
+            if any(word in content for word in ['pricing', 'login', 'support', 'help', 'problem', 'account', 'password', 'reset']):
+                topics.extend([word for word in ['pricing', 'login', 'support', 'help', 'problem', 'account', 'password', 'reset'] if word in content])
+        
+        if topics:
+            context_parts.append(f"ACTIVE_TOPICS: {', '.join(set(topics))}")
+        
+        return " | ".join(context_parts) if context_parts else "GENERAL_CONVERSATION"
+
+
+
+
+    def handle_improved_greeting(self, user_message: str, session_id: str, conversation_history: List[Dict]) -> Optional[str]:
+        """Improved greeting handler that preserves conversation context"""
+        
+        greeting_analysis = self.analyze_greeting_with_llm(user_message, conversation_history, session_id)
+        
+        # Only treat as greeting if it's PURELY social
+        if not greeting_analysis.get("is_pure_greeting") or greeting_analysis.get("suggested_action") == "process_normally":
+            logger.info(f"🎭 Not treating as pure greeting - letting normal processing handle it")
+            return None  # Let normal processing handle it
+        
+        timing_context = self._get_improved_timing_context(conversation_history)
+        conversation_context = self._get_improved_conversation_context(conversation_history, session_id)
+        
+        # New conversation
+        if "NEW_SESSION" in timing_context or len(conversation_history) < 2:
+            logger.info(f"🎭 New session greeting")
+            return "Hello! How can I assist you today?"
+        
+        # Continuing conversation - acknowledge but don't reset
+        if "ACTIVE_TOPICS" in conversation_context:
+            topics = conversation_context.split("ACTIVE_TOPICS: ")[1].split(" |")[0]
+            logger.info(f"🎭 Greeting with active topics: {topics}")
+            return f"Hello! I was helping you with {topics}. What would you like to know next?"
+        
+        if "ACTIVE_TROUBLESHOOTING" in conversation_context:
+            logger.info(f"🎭 Greeting during troubleshooting")
+            return "Hi! I'm still helping you troubleshoot your issue. Shall we continue where we left off?"
+        
+        if "ACTIVE_SALES_FLOW" in conversation_context:
+            logger.info(f"🎭 Greeting during sales conversation")
+            return "Hello! Let's continue with your inquiry. What else would you like to know?"
+        
+        if "BOT_ASKED_QUESTION" in conversation_context:
+            logger.info(f"🎭 Greeting after bot asked question")
+            return "Hi! I was waiting for your response to my question. What would you like to do?"
+        
+        # General continuation
+        logger.info(f"🎭 General greeting continuation")
+        return "Hi! How else can I help you?"
+
+
+
+
 
     def _get_timing_context(self, conversation_history: List[Dict]) -> str:
         """Build timing context for LLM analysis"""
