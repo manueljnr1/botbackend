@@ -1571,6 +1571,26 @@ Enhanced response:"""
 
 
 
+    # def _mediate_document_interaction(self, user_message: str, document_content: Dict, doc_type: str) -> str:
+    #     """LLM mediator for any document type - handles gracefully"""
+        
+    #     if not self.llm_available:
+    #         return self._extract_direct_answer(user_message, document_content)
+        
+    #     try:
+    #         # Build context-aware prompt
+    #         prompt = self._build_mediator_prompt(user_message, document_content, doc_type)
+    #         result = self.llm.invoke(prompt)
+    #         return result.content.strip()
+            
+    #     except Exception as e:
+    #         logger.error(f"LLM mediation failed: {e}")
+    #         return self._extract_direct_answer(user_message, document_content)
+
+
+
+
+
     def _mediate_document_interaction(self, user_message: str, document_content: Dict, doc_type: str) -> str:
         """LLM mediator for any document type - handles gracefully"""
         
@@ -1578,15 +1598,19 @@ Enhanced response:"""
             return self._extract_direct_answer(user_message, document_content)
         
         try:
-            # Build context-aware prompt
+            # Build context-aware prompt (keep existing logic)
             prompt = self._build_mediator_prompt(user_message, document_content, doc_type)
             result = self.llm.invoke(prompt)
-            return result.content.strip()
+            raw_response = result.content.strip()
+            
+            # NEW: Apply dedicated formatting
+            formatted_response = self._format_with_dedicated_llm(raw_response)
+            
+            return formatted_response
             
         except Exception as e:
             logger.error(f"LLM mediation failed: {e}")
             return self._extract_direct_answer(user_message, document_content)
-
 
 
 
@@ -1693,6 +1717,41 @@ Enhanced response:"""
 
         return base_instructions + context
 
+
+
+    def _format_with_dedicated_llm(self, content: str) -> str:
+        """Use a dedicated LLM call specifically for formatting"""
+        if not self.llm_available or len(content) < 50:
+            return content
+        
+        try:
+            format_prompt = f"""Reformat this response to be more readable in a chat interface. Make it scannable and easy to read.
+
+    ORIGINAL RESPONSE:
+    {content}
+
+    FORMATTING INSTRUCTIONS:
+    - Convert any lists to bullet points (•)
+    - Keep paragraphs short (2-3 sentences max)
+    - Add line breaks between different topics
+    - Use bullet points for features, benefits, steps, options, etc.
+    - Keep the exact same information and tone
+    - Don't add new information
+
+    REFORMATTED RESPONSE:"""
+
+            result = self.llm.invoke(format_prompt)
+            formatted_content = result.content.strip()
+            
+            # Basic validation - if formatting made it much longer or shorter, use original
+            if 0.7 <= len(formatted_content) / len(content) <= 1.5:
+                return formatted_content
+            else:
+                return content
+                
+        except Exception as e:
+            logger.error(f"Formatting LLM failed: {e}")
+            return content
 
     def _extract_direct_answer(self, user_message: str, content: Dict) -> str:
         """Fallback when LLM not available"""
