@@ -141,7 +141,7 @@ class UnifiedIntelligentEngine:
 
           # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
           if context_result['is_product_related']:
-              response_data = self._handle_product_related_with_llm_mediation(user_message, tenant, context_result, session_id, intent_result)
+              response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
           else:
               response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
