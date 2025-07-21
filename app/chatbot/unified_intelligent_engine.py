@@ -83,88 +83,88 @@ class UnifiedIntelligentEngine:
 
 
     def process_message(
-       self,
-       api_key: str,
-       user_message: str,
-       user_identifier: str,
-       platform: str = "web"
-       ) -> Dict[str, Any]:
-       """
-       This is the new "Intelligent Router". It orchestrates the entire response process.
-       """
-       try:
-           # --- 1. PRE-PROCESSING & SECURITY ---
-           tenant = self._get_tenant_by_api_key(api_key)
-           if not tenant:
-               return {"error": "Invalid API key", "success": False}
+      self,
+      api_key: str,
+      user_message: str,
+      user_identifier: str,
+      platform: str = "web"
+      ) -> Dict[str, Any]:
+      """
+      This is the new "Intelligent Router". It orchestrates the entire response process.
+      """
+      try:
+          # --- 1. PRE-PROCESSING & SECURITY ---
+          tenant = self._get_tenant_by_api_key(api_key)
+          if not tenant:
+              return {"error": "Invalid API key", "success": False}
 
-           self.tenant_id = tenant.id
+          self.tenant_id = tenant.id
 
-           # Initialize memory and get session FIRST
-           memory = SimpleChatbotMemory(self.db, tenant.id)
-           session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+          # Initialize memory and get session FIRST
+          memory = SimpleChatbotMemory(self.db, tenant.id)
+          session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
 
-           # Security check
-           is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
-           if not is_safe:
-               return {
-                   "success": True, 
-                   "response": security_response, 
-                   "answered_by": "security_system",
-                   "session_id": session_id
-               }
+          # Security check
+          is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+          if not is_safe:
+              return {
+                  "success": True, 
+                  "response": security_response, 
+                  "answered_by": "security_system",
+                  "session_id": session_id
+              }
 
-           # Get conversation history for greeting analysis
-           conversation_history = memory.get_conversation_history(user_identifier, 6)
+          # Get conversation history for greeting analysis
+          conversation_history = memory.get_conversation_history(user_identifier, 6)
 
-           # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
-           smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
-           
-           if smart_greeting_response:
-               # Store the greeting exchange
-               memory.store_message(session_id, user_message, True)
-               memory.store_message(session_id, smart_greeting_response, False)
-               
-               return {
-                   "success": True,
-                   "response": smart_greeting_response,
-                   "session_id": session_id,
-                   "is_new_session": is_new_session,
-                   "answered_by": "IMPROVED_SMART_GREETING",
-                   "intent": "greeting",
-                   "architecture": "hybrid_intelligent_router"
-               }
+          # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
+          smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
+          
+          if smart_greeting_response:
+              # Store the greeting exchange
+              memory.store_message(session_id, user_message, True)
+              memory.store_message(session_id, smart_greeting_response, False)
+              
+              return {
+                  "success": True,
+                  "response": smart_greeting_response,
+                  "session_id": session_id,
+                  "is_new_session": is_new_session,
+                  "answered_by": "IMPROVED_SMART_GREETING",
+                  "intent": "greeting",
+                  "architecture": "hybrid_intelligent_router"
+              }
 
-           # --- 3. INTENT & CONTEXT ANALYSIS ---
-           intent_result = self._classify_intent(user_message, tenant)
-           context_result = self._check_context_relevance(user_message, intent_result, tenant)
+          # --- 3. INTENT & CONTEXT ANALYSIS ---
+          intent_result = self._classify_intent(user_message, tenant)
+          context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
-           # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
-           if context_result['is_product_related']:
-               response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
-           else:
-               response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
+          # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
+          if context_result['is_product_related']:
+              response_data = self._handle_product_related_with_llm_mediation(user_message, tenant, context_result, session_id, intent_result)
+          else:
+              response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
-           # --- 5. POST-PROCESSING & MEMORY ---
-           final_content = fix_response_formatting(response_data['content'])
-           
-           # Store messages
-           memory.store_message(session_id, user_message, True)
-           memory.store_message(session_id, final_content, False)
+          # --- 5. POST-PROCESSING & MEMORY ---
+          final_content = fix_response_formatting(response_data['content'])
+          
+          # Store messages
+          memory.store_message(session_id, user_message, True)
+          memory.store_message(session_id, final_content, False)
 
-           return {
-               "success": True,
-               "response": final_content,
-               "session_id": session_id,
-               "is_new_session": is_new_session,
-               "answered_by": response_data.get('source', 'unknown'),
-               "intent": intent_result.get('intent', 'unknown'),
-               "architecture": "hybrid_intelligent_router"
-           }
+          return {
+              "success": True,
+              "response": final_content,
+              "session_id": session_id,
+              "is_new_session": is_new_session,
+              "answered_by": response_data.get('source', 'unknown'),
+              "intent": intent_result.get('intent', 'unknown'),
+              "architecture": "hybrid_intelligent_router"
+          }
 
-       except Exception as e:
-           logger.error(f"Error in intelligent router: {e}")
-           return {"error": str(e), "success": False}
+      except Exception as e:
+          logger.error(f"Error in intelligent router: {e}")
+          return {"error": str(e), "success": False}
 
 
 
@@ -571,223 +571,6 @@ class UnifiedIntelligentEngine:
 
 
 
-#     def _enhanced_context_analysis(
-#         self,
-#         *,
-#         current_message: str,
-#         conversation_history: List[Dict[str, Any]],
-#         tenant: Tenant,
-#         llm_instance: Any = None
-#     ) -> Dict[str, Any]:
-#         """
-#         Enhanced context analysis with 3-hour time window and LLM manual override detection
-#         """
-        
-#         if not conversation_history or len(conversation_history) < 2 or not llm_instance:
-#             return {
-#                 "is_contextual": False,
-#                 "relevant_context": "",
-#                 "context_type": "standalone",
-#                 "enhanced_message": current_message,
-#                 "confidence": 0.0
-#             }
-        
-#         try:
-#             time_filtered_history = []
-#             # 🆕 TIME-BASED FILTERING (3-hour window)
-#             current_time = utc_now()
-#             # Replace 'some_db_datetime' with a valid datetime object from the conversation history
-#             if conversation_history and 'timestamp' in conversation_history[-1]:
-#                 last_message_time = datetime.fromisoformat(conversation_history[-1]['timestamp'].replace('Z', '+00:00'))
-#                 time_diff = safe_datetime_subtract(current_time, last_message_time)
-#             else:
-#                 time_diff = timedelta(0)  # Default to zero if no valid timestamp is found
-            
-#             for msg in conversation_history:
-#                 if 'timestamp' in msg:
-#                     if isinstance(msg['timestamp'], str):
-#                         msg_time = datetime.fromisoformat(msg['timestamp'].replace('Z', '+00:00'))
-#                     else:
-#                         msg_time = msg['timestamp']
-                    
-#                     # Check if message is within 3-hour window
-#                     time_diff = safe_datetime_subtract(current_time, msg_time)
-#                     if time_diff <= timedelta(hours=3):
-#                         time_filtered_history.append(msg)
-#                 else:
-#                     # Fallback: include recent messages if no timestamp
-#                     time_filtered_history.append(msg)
-            
-#             # If no recent messages in 3-hour window, check for manual override
-#             if not time_filtered_history:
-#                 manual_override = self._check_manual_context_override(current_message, llm_instance)
-#                 if not manual_override['is_override']:
-#                     return {
-#                         "is_contextual": False,
-#                         "relevant_context": "",
-#                         "context_type": "time_expired",
-#                         "enhanced_message": current_message,
-#                         "confidence": 0.0
-#                     }
-#                 else:
-#                     # Use full history for manual override
-#                     time_filtered_history = conversation_history[-6:]
-            
-#             # Build conversation history string
-#             history_text = ""
-#             for i, msg in enumerate(time_filtered_history):
-#                 role = "User" if msg.get("role") == "user" or msg.get("is_user", True) else "Bot"
-#                 history_text += f"{role}: {msg.get('content', '')}\n"
-            
-#             # Enhanced context analysis prompt
-#             analysis_prompt = PromptTemplate(
-#                 input_variables=["current_message", "history", "company"],
-#                 template="""Analyze if the current user message relates to the recent conversation context.
-
-# Company: {company}
-
-# Recent Conversation (within 3-hour window):
-# {history}
-
-# Current User Message: "{current_message}"
-
-# ANALYSIS TASK:
-# Determine if the current message is a follow-up question that relates to something previously discussed.
-
-# Look for these patterns:
-# 1. PRONOUN REFERENCES: "Who goes there?", "What is that?", "How does it work?"
-# 2. IMPLICIT CONNECTIONS: "What about pricing?" after discussing features
-# 3. CLARIFYING QUESTIONS: "How long does it take?" after mentioning a process
-# 4. CONTINUATION: Building on a previous topic without re-stating context
-
-# STRICT RULES:
-# - Only consider messages within the provided conversation window
-# - If current message seems unrelated to recent context, mark as NOT CONTEXTUAL
-# - Focus on clear, obvious connections only
-
-# RESPONSE FORMAT:
-# CONTEXTUAL: YES|NO
-# CONTEXT_TYPE: pronoun_reference|implicit_continuation|clarifying_question|topic_continuation|standalone
-# RELEVANT_CONTEXT: [Quote the specific previous context that's relevant]
-# ENHANCED_MESSAGE: [Rewrite current message to include the missing context]
-# CONFIDENCE: [0.1-1.0]
-
-# Analysis:"""
-#             )
-            
-#             # Get LLM analysis
-#             result = llm_instance.invoke(analysis_prompt.format(
-#                 current_message=current_message,
-#                 history=history_text,
-#                 company=tenant.business_name or tenant.name
-#             ))
-            
-#             response_text = result.content.strip()
-            
-#             # Parse the structured response
-#             analysis_result = {
-#                 "is_contextual": False,
-#                 "relevant_context": "",
-#                 "context_type": "standalone", 
-#                 "enhanced_message": current_message,
-#                 "confidence": 0.0
-#             }
-            
-#             # Extract structured data from response
-#             lines = response_text.split('\n')
-#             for line in lines:
-#                 line = line.strip()
-                
-#                 if line.startswith('CONTEXTUAL:'):
-#                     is_contextual = 'YES' in line.upper()
-#                     analysis_result["is_contextual"] = is_contextual
-                    
-#                 elif line.startswith('CONTEXT_TYPE:'):
-#                     context_type = line.split(':', 1)[1].strip()
-#                     analysis_result["context_type"] = context_type
-                    
-#                 elif line.startswith('RELEVANT_CONTEXT:'):
-#                     relevant_context = line.split(':', 1)[1].strip()
-#                     analysis_result["relevant_context"] = relevant_context
-                    
-#                 elif line.startswith('ENHANCED_MESSAGE:'):
-#                     enhanced_message = line.split(':', 1)[1].strip()
-#                     analysis_result["enhanced_message"] = enhanced_message
-                    
-#                 elif line.startswith('CONFIDENCE:'):
-#                     try:
-#                         confidence = float(line.split(':', 1)[1].strip())
-#                         analysis_result["confidence"] = max(0.0, min(1.0, confidence))
-#                     except:
-#                         analysis_result["confidence"] = 0.5
-            
-#             # Validation and cleanup
-#             if analysis_result["is_contextual"]:
-#                 if not analysis_result["relevant_context"] or len(analysis_result["relevant_context"]) < 10:
-#                     analysis_result["is_contextual"] = False
-#                     analysis_result["context_type"] = "standalone"
-#                     analysis_result["confidence"] = 0.1
-                
-#                 if analysis_result["enhanced_message"] == current_message:
-#                     if analysis_result["relevant_context"]:
-#                         analysis_result["enhanced_message"] = f"Regarding {analysis_result['relevant_context']}: {current_message}"
-            
-#             logger.info(f"Enhanced Context Analysis - Contextual: {analysis_result['is_contextual']}, "
-#                        f"Type: {analysis_result['context_type']}, "
-#                        f"Time Window: 3 hours, "
-#                        f"Confidence: {analysis_result['confidence']}")
-            
-#             return analysis_result
-            
-#         except Exception as e:
-#             logger.error(f"Enhanced conversation context analysis failed: {e}")
-#             return {
-#                 "is_contextual": False,
-#                 "relevant_context": "",
-#                 "context_type": "error_fallback",
-#                 "enhanced_message": current_message,
-#                 "confidence": 0.0
-#             }
-
-
-
-#     def _check_manual_context_override(self, current_message: str, llm_instance: Any) -> Dict[str, Any]:
-#         """
-#         Check if user is manually trying to reference older conversation
-#         """
-#         try:
-#             override_prompt = PromptTemplate(
-#                 input_variables=["message"],
-#                 template="""Determine if the user is trying to reference something from an earlier conversation.
-
-# User Message: "{message}"
-
-# Look for phrases that indicate the user wants to reference previous conversation:
-# - "you mentioned earlier"
-# - "what you said before"
-# - "that thing we talked about"
-# - "go back to"
-# - "remember when"
-# - "earlier you said"
-# - "previously"
-
-# RESPONSE: YES|NO
-
-# Answer:"""
-#             )
-            
-#             result = llm_instance.invoke(override_prompt.format(message=current_message))
-#             is_override = 'YES' in result.content.strip().upper()
-            
-#             return {
-#                 "is_override": is_override,
-#                 "reasoning": "Manual context override detected" if is_override else "No manual reference detected"
-#             }
-            
-#         except Exception as e:
-#             logger.error(f"Manual context override check failed: {e}")
-#             return {"is_override": False, "reasoning": "Error in override detection"}
-        
 
 
 
@@ -1592,289 +1375,289 @@ Enhanced response:"""
 
     
 
-    def _check_active_troubleshooting(self, session_id: str, user_message: str) -> Optional[Dict]:
-        """
-        Check if there's an active troubleshooting session and process it
-        """
-        try:
-            # Get session state from memory
-            from app.chatbot.models import ChatSession
-            session = self.db.query(ChatSession).filter(
-                ChatSession.session_id == session_id
-            ).first()
+    # def _check_active_troubleshooting(self, session_id: str, user_message: str) -> Optional[Dict]:
+    #     """
+    #     Check if there's an active troubleshooting session and process it
+    #     """
+    #     try:
+    #         # Get session state from memory
+    #         from app.chatbot.models import ChatSession
+    #         session = self.db.query(ChatSession).filter(
+    #             ChatSession.session_id == session_id
+    #         ).first()
             
-            if not session:
-                return None
+    #         if not session:
+    #             return None
             
-            # Check if there's troubleshooting state in session
-            # You might want to add a JSON field to ChatSession for this
-            # For now, we'll check the last messages for troubleshooting context
+    #         # Check if there's troubleshooting state in session
+    #         # You might want to add a JSON field to ChatSession for this
+    #         # For now, we'll check the last messages for troubleshooting context
             
-            from app.chatbot.simple_memory import SimpleChatbotMemory
-            memory = SimpleChatbotMemory(self.db, session.tenant_id)
-            recent_messages = memory.get_recent_messages(session_id, limit=4)
+    #         from app.chatbot.simple_memory import SimpleChatbotMemory
+    #         memory = SimpleChatbotMemory(self.db, session.tenant_id)
+    #         recent_messages = memory.get_recent_messages(session_id, limit=4)
             
-            # Look for troubleshooting markers in recent messages
-            for msg in recent_messages:
-                if not msg.get("is_user") and "TROUBLESHOOTING:" in msg.get("content", ""):
-                    # Extract state from message
-                    # This is a simplified approach - you might want to store state properly
-                    return self._parse_troubleshooting_state(msg["content"])
+    #         # Look for troubleshooting markers in recent messages
+    #         for msg in recent_messages:
+    #             if not msg.get("is_user") and "TROUBLESHOOTING:" in msg.get("content", ""):
+    #                 # Extract state from message
+    #                 # This is a simplified approach - you might want to store state properly
+    #                 return self._parse_troubleshooting_state(msg["content"])
             
-            return None
+    #         return None
             
-        except Exception as e:
-            logger.error(f"Error checking active troubleshooting: {e}")
-            return None
+    #     except Exception as e:
+    #         logger.error(f"Error checking active troubleshooting: {e}")
+    #         return None
         
 
-    def _handle_troubleshooting_query(self, user_message: str, tenant: Tenant) -> Optional[Dict[str, Any]]:
-        """
-        Handle troubleshooting guide matching and execution
-        """
-        try:
-            # Get troubleshooting guides with enhanced privacy check
-            troubleshooting_kbs = self.db.query(KnowledgeBase).filter(
-                KnowledgeBase.tenant_id == tenant.id,
-                KnowledgeBase.is_troubleshooting == True,
-                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
-                KnowledgeBase.troubleshooting_flow.isnot(None)
-            ).all()
+    # def _handle_troubleshooting_query(self, user_message: str, tenant: Tenant) -> Optional[Dict[str, Any]]:
+    #     """
+    #     Handle troubleshooting guide matching and execution
+    #     """
+    #     try:
+    #         # Get troubleshooting guides with enhanced privacy check
+    #         troubleshooting_kbs = self.db.query(KnowledgeBase).filter(
+    #             KnowledgeBase.tenant_id == tenant.id,
+    #             KnowledgeBase.is_troubleshooting == True,
+    #             KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+    #             KnowledgeBase.troubleshooting_flow.isnot(None)
+    #         ).all()
             
-            if not troubleshooting_kbs:
-                return None
+    #         if not troubleshooting_kbs:
+    #             return None
             
-            # Use LLM for intelligent matching
-            best_match = self._find_best_troubleshooting_match(user_message, troubleshooting_kbs)
+    #         # Use LLM for intelligent matching
+    #         best_match = self._find_best_troubleshooting_match(user_message, troubleshooting_kbs)
             
-            if best_match and best_match["confidence"] > 0.7:
-                flow = best_match["flow"]
+    #         if best_match and best_match["confidence"] > 0.7:
+    #             flow = best_match["flow"]
                 
-                # Generate initial response
-                initial_response = self._generate_troubleshooting_response(
-                    flow.get("initial_message", "I can help you with that issue."),
-                    flow.get("steps", [{}])[0].get("message", ""),
-                    tenant.business_name or tenant.name
-                )
+    #             # Generate initial response
+    #             initial_response = self._generate_troubleshooting_response(
+    #                 flow.get("initial_message", "I can help you with that issue."),
+    #                 flow.get("steps", [{}])[0].get("message", ""),
+    #                 tenant.business_name or tenant.name
+    #             )
                 
-                return {
-                    "content": initial_response,
-                    "source": "TROUBLESHOOTING_GUIDE",
-                    "confidence": best_match["confidence"],
-                    "troubleshooting_active": True,
-                    "kb_id": best_match["kb_id"]
-                }
+    #             return {
+    #                 "content": initial_response,
+    #                 "source": "TROUBLESHOOTING_GUIDE",
+    #                 "confidence": best_match["confidence"],
+    #                 "troubleshooting_active": True,
+    #                 "kb_id": best_match["kb_id"]
+    #             }
             
-            return None
+    #         return None
             
-        except Exception as e:
-            logger.error(f"Error handling troubleshooting query: {e}")
-            return None
+    #     except Exception as e:
+    #         logger.error(f"Error handling troubleshooting query: {e}")
+    #         return None
 
-    def _find_best_troubleshooting_match(self, user_message: str, troubleshooting_kbs: List[KnowledgeBase]) -> Optional[Dict]:
-        """
-        Use LLM to find the best matching troubleshooting guide
-        """
-        if not self.llm_available or not troubleshooting_kbs:
-            return None
+    # def _find_best_troubleshooting_match(self, user_message: str, troubleshooting_kbs: List[KnowledgeBase]) -> Optional[Dict]:
+    #     """
+    #     Use LLM to find the best matching troubleshooting guide
+    #     """
+    #     if not self.llm_available or not troubleshooting_kbs:
+    #         return None
         
-        try:
-            # Build guide summaries
-            guide_summaries = []
-            for i, kb in enumerate(troubleshooting_kbs):
-                flow = kb.troubleshooting_flow
-                if flow:
-                    guide_summaries.append(f"{i+1}. {flow.get('title', 'Unknown')}: {flow.get('description', '')}")
+    #     try:
+    #         # Build guide summaries
+    #         guide_summaries = []
+    #         for i, kb in enumerate(troubleshooting_kbs):
+    #             flow = kb.troubleshooting_flow
+    #             if flow:
+    #                 guide_summaries.append(f"{i+1}. {flow.get('title', 'Unknown')}: {flow.get('description', '')}")
             
-            prompt = PromptTemplate(
-                input_variables=["user_message", "guides"],
-                template="""Match the user's problem to the most appropriate troubleshooting guide.
+    #         prompt = PromptTemplate(
+    #             input_variables=["user_message", "guides"],
+    #             template="""Match the user's problem to the most appropriate troubleshooting guide.
 
-    User's Problem: "{user_message}"
+    # User's Problem: "{user_message}"
 
-    Available Guides:
-    {guides}
+    # Available Guides:
+    # {guides}
 
-    Respond with:
-    MATCH: [guide_number] (confidence: 0.0-1.0)
-    or
-    NO_MATCH
+    # Respond with:
+    # MATCH: [guide_number] (confidence: 0.0-1.0)
+    # or
+    # NO_MATCH
 
-    Response:"""
-            )
+    # Response:"""
+    #         )
             
-            result = self.llm.invoke(prompt.format(
-                user_message=user_message,
-                guides="\n".join(guide_summaries)
-            ))
+    #         result = self.llm.invoke(prompt.format(
+    #             user_message=user_message,
+    #             guides="\n".join(guide_summaries)
+    #         ))
             
-            response_text = result.content.strip()
+    #         response_text = result.content.strip()
             
-            # Parse response
-            import re
-            match = re.search(r'MATCH:\s*(\d+).*confidence:\s*([\d.]+)', response_text)
-            if match:
-                guide_index = int(match.group(1)) - 1
-                confidence = float(match.group(2))
+    #         # Parse response
+    #         import re
+    #         match = re.search(r'MATCH:\s*(\d+).*confidence:\s*([\d.]+)', response_text)
+    #         if match:
+    #             guide_index = int(match.group(1)) - 1
+    #             confidence = float(match.group(2))
                 
-                if 0 <= guide_index < len(troubleshooting_kbs):
-                    kb = troubleshooting_kbs[guide_index]
-                    return {
-                        "kb_id": kb.id,
-                        "flow": kb.troubleshooting_flow,
-                        "confidence": confidence
-                    }
+    #             if 0 <= guide_index < len(troubleshooting_kbs):
+    #                 kb = troubleshooting_kbs[guide_index]
+    #                 return {
+    #                     "kb_id": kb.id,
+    #                     "flow": kb.troubleshooting_flow,
+    #                     "confidence": confidence
+    #                 }
             
-            return None
+    #         return None
             
-        except Exception as e:
-            logger.error(f"Error in LLM troubleshooting match: {e}")
-            return None
+    #     except Exception as e:
+    #         logger.error(f"Error in LLM troubleshooting match: {e}")
+    #         return None
 
 
-    def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
-        """Enhanced troubleshooting with state management"""
-        try:
-            # Initialize memory to check for existing state
-            from app.chatbot.simple_memory import SimpleChatbotMemory
-            memory = SimpleChatbotMemory(self.db, tenant_id)
+    # def _check_for_troubleshooting_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
+    #     """Enhanced troubleshooting with state management"""
+    #     try:
+    #         # Initialize memory to check for existing state
+    #         from app.chatbot.simple_memory import SimpleChatbotMemory
+    #         memory = SimpleChatbotMemory(self.db, tenant_id)
             
-            # 🚫 PREVENT MULTIPLE ACTIVE STATES
-            sales_state = memory.get_sales_conversation_state(session_id)
-            if sales_state and sales_state.get("active"):
-                logger.info("🚫 Sales conversation active - skipping troubleshooting")
-                return {"found": False}
+    #         # 🚫 PREVENT MULTIPLE ACTIVE STATES
+    #         sales_state = memory.get_sales_conversation_state(session_id)
+    #         if sales_state and sales_state.get("active"):
+    #             logger.info("🚫 Sales conversation active - skipping troubleshooting")
+    #             return {"found": False}
             
-            # Check if user is already in a troubleshooting flow
-            if session_id:
-                current_state = memory.get_troubleshooting_state(session_id)
+    #         # Check if user is already in a troubleshooting flow
+    #         if session_id:
+    #             current_state = memory.get_troubleshooting_state(session_id)
                 
-                if current_state:
-                    # Process user's response and move to next step
-                    return self._process_troubleshooting_response(user_message, current_state, memory, session_id)
+    #             if current_state:
+    #                 # Process user's response and move to next step
+    #                 return self._process_troubleshooting_response(user_message, current_state, memory, session_id)
             
-            # Start new troubleshooting flow if no active state
-            return self._start_troubleshooting_flow(user_message, tenant_id, memory, session_id)
+    #         # Start new troubleshooting flow if no active state
+    #         return self._start_troubleshooting_flow(user_message, tenant_id, memory, session_id)
             
-        except Exception as e:
-            logger.error(f"Error in troubleshooting flow: {e}")
-            return {"found": False}
+    #     except Exception as e:
+    #         logger.error(f"Error in troubleshooting flow: {e}")
+    #         return {"found": False}
 
-    def _start_troubleshooting_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
-        """Start a new troubleshooting flow"""
-        troubleshooting_guides = self.db.query(KnowledgeBase).filter(
-            KnowledgeBase.tenant_id == tenant_id,
-            KnowledgeBase.is_troubleshooting == True,
-            KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
-            KnowledgeBase.troubleshooting_flow.isnot(None)
-        ).all()
+    # def _start_troubleshooting_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
+    #     """Start a new troubleshooting flow"""
+    #     troubleshooting_guides = self.db.query(KnowledgeBase).filter(
+    #         KnowledgeBase.tenant_id == tenant_id,
+    #         KnowledgeBase.is_troubleshooting == True,
+    #         KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+    #         KnowledgeBase.troubleshooting_flow.isnot(None)
+    #     ).all()
 
-        if not troubleshooting_guides:
-            logger.info("❌ No troubleshooting guides found")
-            return {"found": False}
+    #     if not troubleshooting_guides:
+    #         logger.info("❌ No troubleshooting guides found")
+    #         return {"found": False}
 
-        # Since enhanced classifier already identified this as troubleshooting,
-        # just use the first available troubleshooting guide
-        guide = troubleshooting_guides[0]
-        flow = guide.troubleshooting_flow
+    #     # Since enhanced classifier already identified this as troubleshooting,
+    #     # just use the first available troubleshooting guide
+    #     guide = troubleshooting_guides[0]
+    #     flow = guide.troubleshooting_flow
         
-        if not flow:
-            logger.warning(f"❌ Guide {guide.id} has no troubleshooting flow data")
-            return {"found": False}
+    #     if not flow:
+    #         logger.warning(f"❌ Guide {guide.id} has no troubleshooting flow data")
+    #         return {"found": False}
         
-        logger.info(f"✅ Starting troubleshooting flow for guide {guide.id}: {flow.get('title', 'Unknown')}")
+    #     logger.info(f"✅ Starting troubleshooting flow for guide {guide.id}: {flow.get('title', 'Unknown')}")
         
-        # Store initial state
-        if session_id:
-            memory.store_troubleshooting_state(session_id, guide.id, "step1", flow)
-            logger.info(f"💾 Stored troubleshooting state for session {session_id}")
+    #     # Store initial state
+    #     if session_id:
+    #         memory.store_troubleshooting_state(session_id, guide.id, "step1", flow)
+    #         logger.info(f"💾 Stored troubleshooting state for session {session_id}")
         
-        # Return first step
-        steps = flow.get('steps', [])
-        if steps:
-            initial_message = flow.get("initial_message", "I can help you with that issue.")
-            first_question = steps[0].get("message", "Let's start troubleshooting.")
+    #     # Return first step
+    #     steps = flow.get('steps', [])
+    #     if steps:
+    #         initial_message = flow.get("initial_message", "I can help you with that issue.")
+    #         first_question = steps[0].get("message", "Let's start troubleshooting.")
             
-            response = f"{initial_message}\n\n{first_question}"
+    #         response = f"{initial_message}\n\n{first_question}"
             
-            logger.info(f"🚀 Started troubleshooting flow with {len(steps)} steps")
+    #         logger.info(f"🚀 Started troubleshooting flow with {len(steps)} steps")
             
-            return {
-                "found": True,
-                "content": response,
-                "source": "TROUBLESHOOTING_GUIDE",
-                "confidence": 0.9,
-                "guide_id": guide.id,
-                "flow_title": flow.get('title', 'Troubleshooting Guide')
-            }
-        else:
-            logger.warning(f"❌ Troubleshooting guide {guide.id} has no steps")
-            return {"found": False}
+    #         return {
+    #             "found": True,
+    #             "content": response,
+    #             "source": "TROUBLESHOOTING_GUIDE",
+    #             "confidence": 0.9,
+    #             "guide_id": guide.id,
+    #             "flow_title": flow.get('title', 'Troubleshooting Guide')
+    #         }
+    #     else:
+    #         logger.warning(f"❌ Troubleshooting guide {guide.id} has no steps")
+    #         return {"found": False}
 
         
 
-    def _generate_troubleshooting_response(self, step: Dict, flow_data: Dict, user_message: str = "") -> str:
-        """Generate intelligent, context-aware response for troubleshooting step"""
+    # def _generate_troubleshooting_response(self, step: Dict, flow_data: Dict, user_message: str = "") -> str:
+    #     """Generate intelligent, context-aware response for troubleshooting step"""
         
-        if not self.llm_available:
-            # Fallback to template-based response
-            return step.get("message", "Let me help you with that issue.")
+    #     if not self.llm_available:
+    #         # Fallback to template-based response
+    #         return step.get("message", "Let me help you with that issue.")
         
-        try:
-            from langchain.prompts import PromptTemplate
+    #     try:
+    #         from langchain.prompts import PromptTemplate
             
-            # Build troubleshooting context
-            flow_title = flow_data.get("title", "Technical Support")
-            available_solutions = json.dumps(flow_data.get("steps", []), indent=2)
-            success_examples = flow_data.get("success_message", "")
+    #         # Build troubleshooting context
+    #         flow_title = flow_data.get("title", "Technical Support")
+    #         available_solutions = json.dumps(flow_data.get("steps", []), indent=2)
+    #         success_examples = flow_data.get("success_message", "")
             
-            prompt = PromptTemplate(
-                input_variables=["user_message", "step_message", "flow_title", "available_solutions", "success_examples"],
-                template="""You are a technical support specialist helping a user troubleshoot: {flow_title}
+    #         prompt = PromptTemplate(
+    #             input_variables=["user_message", "step_message", "flow_title", "available_solutions", "success_examples"],
+    #             template="""You are a technical support specialist helping a user troubleshoot: {flow_title}
 
-    USER'S LATEST MESSAGE: "{user_message}"
-    CURRENT STEP CONTEXT: "{step_message}"
+    # USER'S LATEST MESSAGE: "{user_message}"
+    # CURRENT STEP CONTEXT: "{step_message}"
 
-    AVAILABLE TROUBLESHOOTING SOLUTIONS:
-    {available_solutions}
+    # AVAILABLE TROUBLESHOOTING SOLUTIONS:
+    # {available_solutions}
 
-    SUCCESS EXAMPLES: {success_examples}
+    # SUCCESS EXAMPLES: {success_examples}
 
-    INSTRUCTIONS:
-    1. Analyze what the user is specifically describing or reporting
-    2. If they describe symptoms, provide the most relevant solution steps
-    3. If they say something worked, congratulate and offer next steps
-    4. If they say something didn't work, provide alternative solutions
-    5. Be empathetic and understanding about their frustration
-    6. Give clear, step-by-step instructions
-    7. Use the step context as guidance but prioritize addressing their actual situation
-    8. Be helpful and solution-focused
+    # INSTRUCTIONS:
+    # 1. Analyze what the user is specifically describing or reporting
+    # 2. If they describe symptoms, provide the most relevant solution steps
+    # 3. If they say something worked, congratulate and offer next steps
+    # 4. If they say something didn't work, provide alternative solutions
+    # 5. Be empathetic and understanding about their frustration
+    # 6. Give clear, step-by-step instructions
+    # 7. Use the step context as guidance but prioritize addressing their actual situation
+    # 8. Be helpful and solution-focused
 
-    CRITICAL: If the user describes a specific problem, provide actual troubleshooting steps, not just more questions.
+    # CRITICAL: If the user describes a specific problem, provide actual troubleshooting steps, not just more questions.
 
-    Generate a helpful troubleshooting response:"""
-            )
+    # Generate a helpful troubleshooting response:"""
+    #         )
             
-            result = self.llm.invoke(prompt.format(
-                user_message=user_message,
-                step_message=step.get("message", ""),
-                flow_title=flow_title,
-                available_solutions=available_solutions,
-                success_examples=success_examples
-            ))
+    #         result = self.llm.invoke(prompt.format(
+    #             user_message=user_message,
+    #             step_message=step.get("message", ""),
+    #             flow_title=flow_title,
+    #             available_solutions=available_solutions,
+    #             success_examples=success_examples
+    #         ))
             
-            response = result.content.strip()
+    #         response = result.content.strip()
             
-            # Validate response quality
-            if len(response) > 20 and len(response) < 600:
-                return response
-            else:
-                # Fallback
-                return step.get("message", "Let me help you resolve this issue.")
+    #         # Validate response quality
+    #         if len(response) > 20 and len(response) < 600:
+    #             return response
+    #         else:
+    #             # Fallback
+    #             return step.get("message", "Let me help you resolve this issue.")
                 
-        except Exception as e:
-            logger.error(f"Error generating intelligent troubleshooting response: {e}")
-            return step.get("message", "Let me help you with that issue.")
+    #     except Exception as e:
+    #         logger.error(f"Error generating intelligent troubleshooting response: {e}")
+    #         return step.get("message", "Let me help you with that issue.")
 
 
     def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None, intent_result: Dict = None) -> Dict[str, Any]:
@@ -1898,20 +1681,20 @@ Enhanced response:"""
             }
         
         # Check for troubleshooting flow first
-        if intent_result and intent_result.get('intent') == 'troubleshooting':
-            logger.info("🔧 Checking troubleshooting flows...")
-            troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id, session_id)
-            if troubleshooting_result.get('found'):
-                logger.info("✅ Found troubleshooting match!")
-                return troubleshooting_result
+        # if intent_result and intent_result.get('intent') == 'troubleshooting':
+        #     logger.info("🔧 Checking troubleshooting flows...")
+        #     troubleshooting_result = self._check_for_troubleshooting_flow(user_message, tenant.id, session_id)
+        #     if troubleshooting_result.get('found'):
+        #         logger.info("✅ Found troubleshooting match!")
+        #         return troubleshooting_result
         
-        # Check for sales conversation flow
-        if intent_result and intent_result.get('intent') == 'sales':
-            logger.info("💼 Checking sales conversation flows...")
-            sales_result = self._check_for_sales_conversation_flow(user_message, tenant.id, session_id)
-            if sales_result.get('found'):
-                logger.info("✅ Found sales conversation match!")
-                return sales_result
+        # # Check for sales conversation flow
+        # if intent_result and intent_result.get('intent') == 'sales':
+        #     logger.info("💼 Checking sales conversation flows...")
+        #     sales_result = self._check_for_sales_conversation_flow(user_message, tenant.id, session_id)
+        #     if sales_result.get('found'):
+        #         logger.info("✅ Found sales conversation match!")
+        #         return sales_result
         
         # Route based on semantic classification and document_id
         if (intent_result and intent_result.get('source') == 'tenant_specific_semantic' and 
@@ -1953,53 +1736,62 @@ Enhanced response:"""
 
 
     def _handle_specific_document(self, user_message: str, document_id: int, tenant: Tenant) -> Dict[str, Any]:
-        """Handle query routed to specific document"""
+        """Handle query routed to specific document - NOW WITH LLM MEDIATOR"""
         try:
-            from app.knowledge_base.processor import DocumentProcessor
-            processor = DocumentProcessor(tenant.id)
-            
             kb = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
             if not kb:
                 return self._generate_custom_response(user_message, tenant, "product_related")
             
-            # Handle sales documents with extracted sales content
-            if kb.document_type == DocumentType.SALES and kb.is_sales and kb.sales_content:
-                return self._handle_sales_query(user_message, kb.sales_content, tenant)
+            # Get document content
+            document_content = {}
             
-            # Handle all other documents (existing logic)
-            vector_store = processor.get_vector_store(kb.vector_store_id)
-            docs = vector_store.similarity_search(user_message, k=3)
+            # Extract structured content based on type
+            if kb.document_type == DocumentType.SALES and kb.sales_content:
+                document_content = kb.sales_content
+            elif kb.document_type == DocumentType.TROUBLESHOOTING and kb.troubleshooting_flow:
+                document_content = kb.troubleshooting_flow
             
-            if docs and docs[0].page_content:
-                context = "\n".join([doc.page_content for doc in docs[:2]])
-                response = self._generate_kb_response(user_message, context)
-                return {
-                    "content": response,
-                    "source": f"Specific_Document_{kb.document_type.value}",
-                    "confidence": 0.9,
-                    "document_id": document_id
-                }
+            # Add vector content as fallback
+            try:
+                from app.knowledge_base.processor import DocumentProcessor
+                processor = DocumentProcessor(tenant.id)
+                vector_store = processor.get_vector_store(kb.vector_store_id)
+                docs = vector_store.similarity_search(user_message, k=2)
+                document_content['vector_content'] = [doc.page_content[:500] for doc in docs]
+            except:
+                pass
             
-            return self._generate_custom_response(user_message, tenant, "product_related")
+            # USE LLM MEDIATOR instead of rigid flows
+            response = self._mediate_document_interaction(
+                user_message, document_content, kb.document_type.value
+            )
+            
+            return {
+                "content": response,
+                "source": f"LLM_Mediated_{kb.document_type.value}",
+                "confidence": 0.9,
+                "document_id": document_id
+            }
             
         except Exception as e:
-            logger.error(f"Specific document handling error: {e}")
+            logger.error(f"Document mediation error: {e}")
             return self._generate_custom_response(user_message, tenant, "product_related")
+
             
 
-    def _handle_troubleshooting_general(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
-        """Handle troubleshooting when no specific document matched"""
-        # Try KB search with troubleshooting focus
-        kb_result = self._search_knowledge_base(user_message, tenant.id)
-        if kb_result['found']:
-            return {
-                "content": kb_result['answer'],
-                "source": "Troubleshooting_KB",
-                "confidence": 0.8
-            }
+    # def _handle_troubleshooting_general(self, user_message: str, tenant: Tenant) -> Dict[str, Any]:
+    #     """Handle troubleshooting when no specific document matched"""
+    #     # Try KB search with troubleshooting focus
+    #     kb_result = self._search_knowledge_base(user_message, tenant.id)
+    #     if kb_result['found']:
+    #         return {
+    #             "content": kb_result['answer'],
+    #             "source": "Troubleshooting_KB",
+    #             "confidence": 0.8
+    #         }
         
-        # Fallback to custom response with troubleshooting context
-        return self._generate_custom_response(user_message, tenant, "troubleshooting_support")
+    #     # Fallback to custom response with troubleshooting context
+    #     return self._generate_custom_response(user_message, tenant, "troubleshooting_support")
 
 
     def _handle_sales_query(self, user_message: str, sales_content: Dict, tenant: Tenant) -> Dict[str, Any]:
@@ -2065,279 +1857,362 @@ Enhanced response:"""
 
 
 
-    def _check_for_sales_conversation_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
-        """Handle sales conversation flows with state management"""
-        try:
-            from app.chatbot.simple_memory import SimpleChatbotMemory
-            memory = SimpleChatbotMemory(self.db, tenant_id)
+    # def _check_for_sales_conversation_flow(self, user_message: str, tenant_id: int, session_id: str = None) -> Dict[str, Any]:
+    #     """Handle sales conversation flows with state management"""
+    #     try:
+    #         from app.chatbot.simple_memory import SimpleChatbotMemory
+    #         memory = SimpleChatbotMemory(self.db, tenant_id)
             
-            # 🚫 PREVENT MULTIPLE ACTIVE STATES
-            troubleshooting_state = memory.get_troubleshooting_state(session_id)
-            if troubleshooting_state and troubleshooting_state.get("active"):
-                logger.info("🚫 Troubleshooting conversation active - skipping sales")
-                return {"found": False}
+    #         # 🚫 PREVENT MULTIPLE ACTIVE STATES
+    #         troubleshooting_state = memory.get_troubleshooting_state(session_id)
+    #         if troubleshooting_state and troubleshooting_state.get("active"):
+    #             logger.info("🚫 Troubleshooting conversation active - skipping sales")
+    #             return {"found": False}
             
-            # Check if user is already in a sales conversation
-            if session_id:
-                current_state = memory.get_sales_conversation_state(session_id)
+    #         # Check if user is already in a sales conversation
+    #         if session_id:
+    #             current_state = memory.get_sales_conversation_state(session_id)
                 
-                if current_state:
-                    # Process user's response and move to next step
-                    return self._process_sales_conversation_response(user_message, current_state, memory, session_id)
+    #             if current_state:
+    #                 # Process user's response and move to next step
+    #                 return self._process_sales_conversation_response(user_message, current_state, memory, session_id)
             
-            # Start new sales conversation flow if no active state
-            return self._start_sales_conversation_flow(user_message, tenant_id, memory, session_id)
+    #         # Start new sales conversation flow if no active state
+    #         return self._start_sales_conversation_flow(user_message, tenant_id, memory, session_id)
             
-        except Exception as e:
-            logger.error(f"Error in sales conversation flow: {e}")
-            return {"found": False}
+    #     except Exception as e:
+    #         logger.error(f"Error in sales conversation flow: {e}")
+    #         return {"found": False}
 
-    def _start_sales_conversation_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
-        """Start a new sales conversation flow"""
+    # def _start_sales_conversation_flow(self, user_message: str, tenant_id: int, memory: Any, session_id: str) -> Dict[str, Any]:
+    #     """Start a new sales conversation flow"""
+    #     try:
+    #         # Get sales documents
+    #         sales_documents = self.db.query(KnowledgeBase).filter(
+    #             KnowledgeBase.tenant_id == tenant_id,
+    #             KnowledgeBase.is_sales == True,
+    #             KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
+    #             KnowledgeBase.sales_content.isnot(None)
+    #         ).all()
+
+    #         if not sales_documents:
+    #             logger.info("❌ No sales documents found")
+    #             return {"found": False}
+
+    #         # Find best matching sales document and flow type
+    #         best_match = self._find_best_sales_flow_match(user_message, sales_documents)
+            
+    #         if not best_match:
+    #             return {"found": False}
+            
+    #         sales_doc = best_match["document"]
+    #         flow_type = best_match["flow_type"]
+    #         sales_content = sales_doc.sales_content
+            
+    #         conversation_flows = sales_content.get("conversation_flows", {})
+    #         selected_flow = conversation_flows.get(flow_type)
+            
+    #         if not selected_flow:
+    #             return {"found": False}
+            
+    #         logger.info(f"💼 Starting sales conversation: {flow_type}")
+            
+    #         # Store initial state
+    #         if session_id:
+    #             memory.store_sales_conversation_state(
+    #                 session_id, sales_doc.id, flow_type, 
+    #                 selected_flow["steps"][0]["id"], sales_content
+    #             )
+            
+    #         # Return first step
+    #         first_step = selected_flow["steps"][0]
+    #         response = self._generate_sales_step_response(first_step, sales_content, user_message)
+            
+    #         return {
+    #             "found": True,
+    #             "content": response,
+    #             "source": "SALES_CONVERSATION",
+    #             "confidence": 0.9,
+    #             "flow_type": flow_type
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error starting sales conversation: {e}")
+    #         return {"found": False}
+
+    # def _find_best_sales_flow_match(self, user_message: str, sales_documents: List) -> Optional[Dict]:
+    #     """Find the best matching sales flow for user message"""
+    #     user_lower = user_message.lower()
+        
+    #     # Simple keyword matching for flow types
+    #     flow_patterns = {
+    #         "pricing_inquiry": ["price", "cost", "how much", "pricing", "plan", "expensive"],
+    #         "feature_inquiry": ["features", "what does", "how does", "capabilities", "functions"],
+    #         "comparison_inquiry": ["vs", "compare", "better than", "alternative", "competitor"],
+    #         "demo_inquiry": ["demo", "trial", "show me", "can I try", "see it"]
+    #     }
+        
+    #     best_score = 0
+    #     best_match = None
+        
+    #     for doc in sales_documents:
+    #         if not doc.sales_content or "conversation_flows" not in doc.sales_content:
+    #             continue
+                
+    #         flows = doc.sales_content["conversation_flows"]
+            
+    #         for flow_type, flow_data in flows.items():
+    #             trigger_keywords = flow_data.get("trigger_keywords", [])
+                
+    #             # Score based on keyword matches
+    #             score = 0
+    #             for keyword in trigger_keywords:
+    #                 if keyword.lower() in user_lower:
+    #                     score += 1
+                
+    #             # Also check predefined patterns
+    #             if flow_type in flow_patterns:
+    #                 for pattern in flow_patterns[flow_type]:
+    #                     if pattern in user_lower:
+    #                         score += 2  # Higher weight for pattern matches
+                
+    #             if score > best_score:
+    #                 best_score = score
+    #                 best_match = {
+    #                     "document": doc,
+    #                     "flow_type": flow_type,
+    #                     "score": score
+    #                 }
+        
+    #     return best_match if best_score > 0 else None
+
+    # def _generate_sales_step_response(self, step: Dict, sales_content: Dict, user_message: str = "") -> str:
+    #     """Generate intelligent, context-aware response for sales conversation step"""
+        
+    #     if not self.llm_available:
+    #         # Fallback to template-based response
+    #         message_template = step.get("message", "How can I help you with our products?")
+    #         return self._replace_sales_placeholders(message_template, sales_content)
+        
+    #     try:
+    #         from langchain.prompts import PromptTemplate
+            
+    #         # Build comprehensive sales context
+    #         products_info = json.dumps(sales_content.get("products", []), indent=2)
+    #         pricing_info = json.dumps(sales_content.get("pricing_structure", {}), indent=2)
+    #         value_props = json.dumps(sales_content.get("value_propositions", []), indent=2)
+            
+    #         prompt = PromptTemplate(
+    #             input_variables=["user_message", "step_message", "products_info", "pricing_info", "value_props"],
+    #             template="""You are a knowledgeable sales consultant. The user is in a sales conversation and you need to respond appropriately.
+
+    #     USER'S LATEST MESSAGE: "{user_message}"
+    #     CONVERSATION STEP CONTEXT: "{step_message}"
+
+    #     AVAILABLE PRODUCT INFORMATION:
+    #     {products_info}
+
+    #     PRICING INFORMATION:
+    #     {pricing_info}
+
+    #     VALUE PROPOSITIONS:
+    #     {value_props}
+
+    #     INSTRUCTIONS:
+    #     1. Analyze what the user is specifically asking for or expressing
+    #     2. If they ask for pricing, provide actual pricing details from the information above
+    #     3. If they mention use cases, connect to relevant features and benefits
+    #     4. If they express interest, move the conversation forward naturally
+    #     5. Always be helpful and consultative, not pushy
+    #     6. Use the step context as guidance but prioritize addressing the user's actual request
+    #     7. Be conversational and human-like
+    #     8. If pricing isn't available in the data, say "Let me get you custom pricing information"
+
+    #     CRITICAL: If the user asks for pricing, provide the actual pricing details available. Don't just ask more questions.
+
+    #     Generate a helpful, relevant response:"""
+    #         )
+            
+    #         result = self.llm.invoke(prompt.format(
+    #             user_message=user_message,
+    #             step_message=step.get("message", ""),
+    #             products_info=products_info,
+    #             pricing_info=pricing_info,
+    #             value_props=value_props
+    #         ))
+            
+    #         response = result.content.strip()
+            
+    #         # Validate response quality
+    #         if len(response) > 20 and len(response) < 500:
+    #             return response
+    #         else:
+    #             # Fallback if response is too short/long
+    #             return self._replace_sales_placeholders(step.get("message", "How can I help you?"), sales_content)
+                
+    #     except Exception as e:
+    #         logger.error(f"Error generating intelligent sales response: {e}")
+    #         # Fallback to template-based response
+    #         return self._replace_sales_placeholders(step.get("message", "How can I help you?"), sales_content)
+
+    def _replace_sales_placeholders(self, message_template: str, sales_content: Dict) -> str:
+        """Fallback method to replace basic placeholders"""
         try:
-            # Get sales documents
-            sales_documents = self.db.query(KnowledgeBase).filter(
-                KnowledgeBase.tenant_id == tenant_id,
-                KnowledgeBase.is_sales == True,
-                KnowledgeBase.processing_status == ProcessingStatus.COMPLETED,
-                KnowledgeBase.sales_content.isnot(None)
-            ).all()
-
-            if not sales_documents:
-                logger.info("❌ No sales documents found")
-                return {"found": False}
-
-            # Find best matching sales document and flow type
-            best_match = self._find_best_sales_flow_match(user_message, sales_documents)
-            
-            if not best_match:
-                return {"found": False}
-            
-            sales_doc = best_match["document"]
-            flow_type = best_match["flow_type"]
-            sales_content = sales_doc.sales_content
-            
-            conversation_flows = sales_content.get("conversation_flows", {})
-            selected_flow = conversation_flows.get(flow_type)
-            
-            if not selected_flow:
-                return {"found": False}
-            
-            logger.info(f"💼 Starting sales conversation: {flow_type}")
-            
-            # Store initial state
-            if session_id:
-                memory.store_sales_conversation_state(
-                    session_id, sales_doc.id, flow_type, 
-                    selected_flow["steps"][0]["id"], sales_content
-                )
-            
-            # Return first step
-            first_step = selected_flow["steps"][0]
-            response = self._generate_sales_step_response(first_step, sales_content, user_message)
-            
-            return {
-                "found": True,
-                "content": response,
-                "source": "SALES_CONVERSATION",
-                "confidence": 0.9,
-                "flow_type": flow_type
+            # Basic placeholder replacement for fallback
+            replacements = {
+                "[PRICE]": self._extract_pricing_info(sales_content),
+                "[FEATURES]": self._extract_key_features(sales_content),
+                "[VALUE_PROP]": self._extract_value_proposition(sales_content),
             }
             
-        except Exception as e:
-            logger.error(f"Error starting sales conversation: {e}")
-            return {"found": False}
-
-    def _find_best_sales_flow_match(self, user_message: str, sales_documents: List) -> Optional[Dict]:
-        """Find the best matching sales flow for user message"""
-        user_lower = user_message.lower()
-        
-        # Simple keyword matching for flow types
-        flow_patterns = {
-            "pricing_inquiry": ["price", "cost", "how much", "pricing", "plan", "expensive"],
-            "feature_inquiry": ["features", "what does", "how does", "capabilities", "functions"],
-            "comparison_inquiry": ["vs", "compare", "better than", "alternative", "competitor"],
-            "demo_inquiry": ["demo", "trial", "show me", "can I try", "see it"]
-        }
-        
-        best_score = 0
-        best_match = None
-        
-        for doc in sales_documents:
-            if not doc.sales_content or "conversation_flows" not in doc.sales_content:
-                continue
-                
-            flows = doc.sales_content["conversation_flows"]
+            response = message_template
+            for placeholder, value in replacements.items():
+                response = response.replace(placeholder, value)
             
-            for flow_type, flow_data in flows.items():
-                trigger_keywords = flow_data.get("trigger_keywords", [])
-                
-                # Score based on keyword matches
-                score = 0
-                for keyword in trigger_keywords:
-                    if keyword.lower() in user_lower:
-                        score += 1
-                
-                # Also check predefined patterns
-                if flow_type in flow_patterns:
-                    for pattern in flow_patterns[flow_type]:
-                        if pattern in user_lower:
-                            score += 2  # Higher weight for pattern matches
-                
-                if score > best_score:
-                    best_score = score
-                    best_match = {
-                        "document": doc,
-                        "flow_type": flow_type,
-                        "score": score
-                    }
-        
-        return best_match if best_score > 0 else None
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in placeholder replacement: {e}")
+            return "I'd be happy to help you with information about our products."
 
-    def _process_sales_conversation_response(self, user_message: str, current_state: Dict, memory: Any, session_id: str) -> Dict[str, Any]:
-        """Process user response in active sales conversation"""
+
+    # def _extract_pricing_info(self, sales_content: Dict) -> str:
+    #     """Extract pricing from sales content"""
+    #     pricing = sales_content.get("pricing_structure", {})
+    #     main_pricing = pricing.get("main_pricing", "competitive pricing")
+    #     return main_pricing
+
+    # def _extract_key_features(self, sales_content: Dict) -> str:
+    #     """Extract key features from sales content"""
+    #     products = sales_content.get("products", [])
+    #     if products and products[0].get("features"):
+    #         features = products[0]["features"][:3]  # Top 3 features
+    #         return ", ".join(features)
+    #     return "powerful features"
+
+    # def _extract_value_proposition(self, sales_content: Dict) -> str:
+    #     """Extract value proposition from sales content"""
+    #     value_props = sales_content.get("value_propositions", [])
+    #     if value_props:
+    #         return value_props[0].get("statement", "significant value")
+    #     return "great value for your investment"
+
+
+
+
+    def _mediate_document_interaction(self, user_message: str, document_content: Dict, doc_type: str) -> str:
+        """LLM mediator for any document type - handles gracefully"""
+        
+        if not self.llm_available:
+            return self._extract_direct_answer(user_message, document_content)
+        
         try:
-            flow_data = current_state.get("flow_data", {})
-            flow_type = current_state.get("flow_type")
-            current_step_id = current_state.get("current_step")
-            
-            # 🆕 DEBUG: Log current state
-            logger.info(f"💼 Processing sales response: flow_type={flow_type}, current_step={current_step_id}")
-            logger.info(f"💼 User message: '{user_message}'")
-            
-            conversation_flows = flow_data.get("conversation_flows", {})
-            current_flow = conversation_flows.get(flow_type, {})
-            steps = current_flow.get("steps", [])
-            
-            # Find current step
-            current_step = None
-            for step in steps:
-                if step.get("id") == current_step_id:
-                    current_step = step
-                    break
-            
-            if not current_step:
-                logger.warning(f"💼 Current step '{current_step_id}' not found in steps: {[s.get('id') for s in steps]}")
-                response = "I'd be happy to continue helping you. What specific information would you like to know?"
-                return {
-                    "found": True,
-                    "content": response,
-                    "source": "SALES_CONVERSATION"
-                }
-            
-            # Process user response against branches
-            branches = current_step.get("branches", {})
-            user_response_lower = user_message.lower()
-            
-            # 🆕 DEBUG: Log branch analysis
-            logger.info(f"💼 Available branches: {list(branches.keys())}")
-            logger.info(f"💼 User response (lower): '{user_response_lower}'")
-            
-            next_step_info = None
-            
-            # Check each branch
-            for branch_key, branch_value in branches.items():
-                if branch_key == "default":
-                    continue
-                    
-                branch_keywords = branch_key.split("|")
-                logger.info(f"💼 Checking branch '{branch_key}' with keywords: {branch_keywords}")
-                
-                for keyword in branch_keywords:
-                    keyword_clean = keyword.strip().lower()
-                    if keyword_clean in user_response_lower:
-                        next_step_info = branch_value
-                        logger.info(f"💼 ✅ MATCHED keyword: '{keyword_clean}' → next: {branch_value.get('next')}")
-                        break
-                
-                if next_step_info:
-                    break
-            
-            # Use default if no match
-            if not next_step_info:
-                next_step_info = branches.get("default", {})
-                logger.info(f"💼 No keyword match, using default: {next_step_info}")
-            
-            next_step_id = next_step_info.get("next")
-            logger.info(f"💼 Next step ID: {next_step_id}")
-            
-            if next_step_id:
-                # Find next step
-                next_step = None
-                for step in steps:
-                    if step.get("id") == next_step_id:
-                        next_step = step
-                        break
-                
-                if next_step:
-                    logger.info(f"💼 Found next step: {next_step_id}, updating conversation state")
-                    memory.update_sales_conversation_step(session_id, next_step_id)
-                    response = self._generate_sales_step_response(next_step, flow_data, user_message)
-                else:
-                    logger.warning(f"💼 Next step '{next_step_id}' not found in steps")
-                    response = "Is there anything else about our products you'd like to discuss?"
-            else:
-                logger.info(f"💼 No next step defined, continuing conversation")
-                response = "What other questions can I help you with today?"
-            
-            logger.info(f"💼 Final response: '{response[:100]}...'")
-            
-            return {
-                "found": True,
-                "content": response,
-                "source": "SALES_CONVERSATION",
-                "confidence": 0.9
-            }
+            # Build context-aware prompt
+            prompt = self._build_mediator_prompt(user_message, document_content, doc_type)
+            result = self.llm.invoke(prompt)
+            return result.content.strip()
             
         except Exception as e:
-            logger.error(f"Error processing sales conversation response: {e}")
-            memory.clear_sales_conversation_state(session_id)
-            return {
-                "found": True,
-                "content": "I'm having trouble with the conversation flow. How else can I help you today?",
-                "source": "SALES_CONVERSATION_ERROR"
-            }
+            logger.error(f"LLM mediation failed: {e}")
+            return self._extract_direct_answer(user_message, document_content)
 
-    def _generate_sales_step_response(self, step: Dict, sales_content: Dict, user_message: str = "") -> str:
-        """Generate personalized response for sales conversation step"""
+    def _build_mediator_prompt(self, user_message: str, content: Dict, doc_type: str) -> str:
+        """Build smart prompt based on document type"""
         
-        message_template = step.get("message", "")
+        base_instructions = f"""You are helping a user interact with {doc_type} content.
+    User asked: "{user_message}"
+
+    Be conversational and helpful. Use the available content to provide a relevant response.
+    If exact information isn't available, use related content to still be helpful."""
+
+        if doc_type == "sales":
+            context = f"""
+    SALES CONTENT AVAILABLE:
+    Products: {content.get('products', [])}
+    Pricing: {content.get('pricing_structure', {})}
+    Features: Extract from products above
+
+    Be consultative. If they ask about use cases, explain how the product helps different users.
+    Response:"""
+
+        elif doc_type == "troubleshooting":
+            context = f"""
+    TROUBLESHOOTING CONTENT:
+    Available steps: {content.get('steps', [])}
+    Keywords: {content.get('keywords', [])}
+
+    Be solution-focused and empathetic. Guide them through solutions.
+    Response:"""
+
+        else:
+            context = f"""
+    AVAILABLE CONTENT:
+    {json.dumps(content, indent=2)[:1500]}
+
+    Use this content to provide a helpful response.
+    Response:"""
+
+        return base_instructions + context
+
+    def _extract_direct_answer(self, user_message: str, content: Dict) -> str:
+        """Fallback when LLM not available"""
+        # Simple extraction logic
+        if 'products' in content and content['products']:
+            product = content['products'][0]
+            return f"I can help with {product.get('name', 'our product')}. {product.get('description', '')}"
         
-        # Replace placeholders with actual sales content
-        replacements = {
-            "[PRICE]": self._extract_pricing_info(sales_content),
-            "[FEATURES]": self._extract_key_features(sales_content),
-            "[VALUE_PROP]": self._extract_value_proposition(sales_content),
-            "[COMPANY]": sales_content.get("company_name", "our company")
-        }
+        return "I'd be happy to help with your question. Could you be more specific about what you'd like to know?"
+
+
+    # Add this method to UnifiedIntelligentEngine class:
+
+
+    def _build_mediator_prompt(self, user_message: str, content: Dict, doc_type: str) -> str:
+        """Build smart prompt based on document type"""
         
-        response = message_template
-        for placeholder, value in replacements.items():
-            response = response.replace(placeholder, value)
+        base_instructions = f"""You are helping a user interact with {doc_type} content.
+    User asked: "{user_message}"
+
+    Be conversational and helpful. Use the available content to provide a relevant response.
+    If exact information isn't available, use related content to still be helpful."""
+
+        if doc_type == "sales":
+            context = f"""
+    SALES CONTENT AVAILABLE:
+    Products: {content.get('products', [])}
+    Pricing: {content.get('pricing_structure', {})}
+    Features: Extract from products above
+
+    Be consultative. If they ask about use cases, explain how the product helps different users.
+    Response:"""
+
+        elif doc_type == "troubleshooting":
+            context = f"""
+    TROUBLESHOOTING CONTENT:
+    Available steps: {content.get('steps', [])}
+    Keywords: {content.get('keywords', [])}
+
+    Be solution-focused and empathetic. Guide them through solutions.
+    Response:"""
+
+        else:
+            context = f"""
+    AVAILABLE CONTENT:
+    {json.dumps(content, indent=2)[:1500]}
+
+    Use this content to provide a helpful response.
+    Response:"""
+
+        return base_instructions + context
+
+    def _extract_direct_answer(self, user_message: str, content: Dict) -> str:
+        """Fallback when LLM not available"""
+        # Simple extraction logic
+        if 'products' in content and content['products']:
+            product = content['products'][0]
+            return f"I can help with {product.get('name', 'our product')}. {product.get('description', '')}"
         
-        return response
-
-    def _extract_pricing_info(self, sales_content: Dict) -> str:
-        """Extract pricing from sales content"""
-        pricing = sales_content.get("pricing_structure", {})
-        main_pricing = pricing.get("main_pricing", "competitive pricing")
-        return main_pricing
-
-    def _extract_key_features(self, sales_content: Dict) -> str:
-        """Extract key features from sales content"""
-        products = sales_content.get("products", [])
-        if products and products[0].get("features"):
-            features = products[0]["features"][:3]  # Top 3 features
-            return ", ".join(features)
-        return "powerful features"
-
-    def _extract_value_proposition(self, sales_content: Dict) -> str:
-        """Extract value proposition from sales content"""
-        value_props = sales_content.get("value_propositions", [])
-        if value_props:
-            return value_props[0].get("statement", "significant value")
-        return "great value for your investment"
-
+        return "I'd be happy to help with your question. Could you be more specific about what you'd like to know?"
 
 
 
