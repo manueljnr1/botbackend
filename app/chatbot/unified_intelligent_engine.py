@@ -1725,18 +1725,31 @@ Enhanced response:"""
             return content
         
         try:
-            format_prompt = f"""Reformat this response to be more readable in a chat interface. Make it scannable and easy to read.
+            # OPTION 1: Update this prompt to be more specific about bullet points
+            format_prompt = f"""Reformat this response to be more readable in a chat interface.
 
     ORIGINAL RESPONSE:
     {content}
 
-    FORMATTING INSTRUCTIONS:
-    - Convert any lists to bullet points (•)
+    FORMATTING REQUIREMENTS:
+    - Use bullet points (•) NOT dashes (-)
     - Keep paragraphs short (2-3 sentences max)
-    - Add line breaks between different topics
-    - Use bullet points for features, benefits, steps, options, etc.
-    - Keep the exact same information and tone
-    - Don't add new information
+    - Add line breaks between sections
+    - Format lists properly with bullet points
+    - Keep the exact same information
+
+    EXAMPLE FORMAT:
+    Company X offers these key features:
+
+    - Visual Sales Pipeline for easy tracking
+    - Automatic Follow-Ups to stay engaged
+    - Lead Capture Forms for lead generation
+
+    Advanced features include:
+    - Lead Scoring
+    - Workflow Automation
+    - Custom Fields
+
 
     REFORMATTED RESPONSE:"""
 
