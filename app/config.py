@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     INSTAGRAM_WEBHOOK_ENDPOINT: str = "/api/instagram/webhook"
     INSTAGRAM_MAX_MESSAGE_LENGTH: int = 1000
     
-    CHATBOT_WIDGET_ICON_URL = os.getenv("CHATBOT_WIDGET_ICON_URL", "/static/assets/chatbot-icon-32x32.png")
+    CHATBOT_WIDGET_ICON_URL: str = '/static/assets/chatbot-icon-32x32.png'
 
 
     # 📧 NEW: Frontend URL for email confirmation redirects
