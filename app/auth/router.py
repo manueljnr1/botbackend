@@ -143,7 +143,8 @@ async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depe
     # Check if this is an admin token (from admin login endpoint)
     if is_admin_flag:
         # This is an admin token - look up in Admin table
-        admin = db.query(Admin).filter(Admin.id == subject, Admin.is_active == True).first()
+        admin_id = int(subject)
+        admin = db.query(Admin).filter(Admin.id == admin_id, Admin.is_active == True).first()
         if admin is None:
             raise credentials_exception
         return admin
