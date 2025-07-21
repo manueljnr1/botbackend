@@ -962,7 +962,9 @@ Enhancement:"""
             ending_phrases = [
                 "thank you. bye", "thanks. bye", "bye", "goodbye", 
                 "that's all", "end conversation", "thanks, goodbye",
-                "thank you, bye", "thanks bye", "thank you bye"
+                "thank you, bye", "thanks bye", "thank you bye",
+                "thank you very much", "thanks", "you are the  best",
+                
             ]
             
             user_lower = user_message.lower().strip()

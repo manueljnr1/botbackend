@@ -18,7 +18,7 @@ import logging
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from datetime import datetime
-
+from fastapi.staticfiles import StaticFiles
 
 from app.chatbot.models import ChatSession, ChatMessage
 from app.pricing.models import PricingPlan, TenantSubscription 
@@ -194,6 +194,7 @@ app.add_middleware(CustomerDetectionMiddleware, enabled=True)
 app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
 app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
 app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 
