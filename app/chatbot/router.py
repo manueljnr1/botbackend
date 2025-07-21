@@ -3206,6 +3206,8 @@ async def smart_chat_with_followup_streaming(
             
             # Get tenant and check limits
             tenant = get_tenant_from_api_key(api_key, db)
+            tenant_name = tenant.name  # 🔧 FIX: Get tenant name early
+            tenant_business_name = tenant.business_name or tenant_name or "Our Company"  # 🔧 FIX: Get business name early
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
             # ⭐ NEW: Initialize unified intelligent engine
@@ -3283,7 +3285,7 @@ async def smart_chat_with_followup_streaming(
             
             # 🔔 NEW: Check if we should ask for email (new conversations without email)
             if feedback_manager.should_request_email(session_id, user_id):
-                business_name = tenant.business_name or tenant.name or "Our Company"
+                business_name = tenant_business_name  # 🔧 FIX: Use cached value
                 email_request = feedback_manager.generate_email_request_message(business_name)
                 
                 # 🧠 Store the email request as bot message in memory
@@ -3427,7 +3429,7 @@ async def smart_chat_with_followup_streaming(
                 result["response"], 
                 result.get("intent", "general"),
                 result.get("context", "unknown"),
-                tenant.name
+                tenant_name  # 🔧 FIX: Use cached value
             )
             
             # 🧠 Enhanced follow-ups could consider conversation history
