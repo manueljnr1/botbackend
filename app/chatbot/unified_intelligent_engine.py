@@ -1587,24 +1587,45 @@ Enhanced response:"""
             logger.error(f"LLM mediation failed: {e}")
             return self._extract_direct_answer(user_message, document_content)
 
+
+
+
     # def _build_mediator_prompt(self, user_message: str, content: Dict, doc_type: str) -> str:
     #     """Build smart prompt based on document type"""
         
     #     base_instructions = f"""You are helping a user interact with {doc_type} content.
     # User asked: "{user_message}"
 
-    # Be conversational and helpful. Use the available content to provide a relevant response.
-    # If exact information isn't available, use related content to still be helpful.
-    # """
+    # CRITICAL FORMATTING RULES:
+    # - Use bullet points (•) for lists of features, benefits, or options
+    # - Keep paragraphs to maximum 2-3 sentences
+    # - Break long responses into clear sections
+    # - Use line breaks between different topics
+    # - Be conversational and helpful
+
+    # If exact information isn't available, use related content to still be helpful."""
 
     #     if doc_type == "sales":
     #         context = f"""
     # SALES CONTENT AVAILABLE:
     # Products: {content.get('products', [])}
     # Pricing: {content.get('pricing_structure', {})}
-    # Features: Extract from products above
 
-    # Be consultative. If they ask about use cases, explain how the product helps different users.
+    # RESPONSE FORMAT REQUIRED:
+    # - Use bullet points for all features and benefits
+    # - Present pricing in clear, separate paragraphs
+    # - Keep each point concise (1-2 sentences max)
+
+    # Example format:
+    # Here are the key features:
+    # - Feature 1: Brief description
+    # - Feature 2: Brief description
+
+    # Pricing options:
+    # Solo plan: $X/month with basic features
+    # Team plan: $Y/month with advanced features
+
+    # Be consultative and helpful.
     # Response:"""
 
     #     elif doc_type == "troubleshooting":
@@ -1613,7 +1634,15 @@ Enhanced response:"""
     # Available steps: {content.get('steps', [])}
     # Keywords: {content.get('keywords', [])}
 
-    # Be solution-focused and empathetic. Guide them through solutions.
+    # REQUIRED FORMAT:
+    # - Use numbered steps (1. 2. 3.) for instructions
+    # - Keep each step to one clear action
+    # - Use bullet points for lists of options
+    # - You can bolden titles 
+    # - You can use arrows
+
+
+    # Be solution-focused and empathetic.
     # Response:"""
 
     #     else:
@@ -1621,7 +1650,11 @@ Enhanced response:"""
     # AVAILABLE CONTENT:
     # {json.dumps(content, indent=2)[:1500]}
 
-    # Use this content to provide a helpful response.
+    # REQUIRED FORMAT:
+    # - Use bullet points for any lists
+    # - Break content into short, scannable paragraphs
+    # - Maximum 3 sentences per paragraph
+
     # Response:"""
 
     #     return base_instructions + context
@@ -1634,69 +1667,31 @@ Enhanced response:"""
         base_instructions = f"""You are helping a user interact with {doc_type} content.
     User asked: "{user_message}"
 
-    CRITICAL FORMATTING RULES:
-    - Use bullet points (•) for lists of features, benefits, or options
+    UNIVERSAL FORMATTING RULES (APPLY TO ALL RESPONSES):
+    - Use bullet points (•) for ANY list of 2+ items
+    - Use bullet points for features, steps, options, benefits, requirements, etc.
     - Keep paragraphs to maximum 2-3 sentences
-    - Break long responses into clear sections
-    - Use line breaks between different topics
-    - Be conversational and helpful
+    - Use line breaks between different topics/sections
+    - NEVER write lists in paragraph form - always use bullet points
+    - Number steps only for sequential processes (1. 2. 3.)
 
-    If exact information isn't available, use related content to still be helpful."""
+    Be conversational and helpful. Use the available content to provide a relevant response."""
 
-        if doc_type == "sales":
-            context = f"""
-    SALES CONTENT AVAILABLE:
-    Products: {content.get('products', [])}
-    Pricing: {content.get('pricing_structure', {})}
-
-    RESPONSE FORMAT REQUIRED:
-    - Use bullet points for all features and benefits
-    - Present pricing in clear, separate paragraphs
-    - Keep each point concise (1-2 sentences max)
-
-    Example format:
-    Here are the key features:
-    - Feature 1: Brief description
-    - Feature 2: Brief description
-
-    Pricing options:
-    Solo plan: $X/month with basic features
-    Team plan: $Y/month with advanced features
-
-    Be consultative and helpful.
-    Response:"""
-
-        elif doc_type == "troubleshooting":
-            context = f"""
-    TROUBLESHOOTING CONTENT:
-    Available steps: {content.get('steps', [])}
-    Keywords: {content.get('keywords', [])}
-
-    REQUIRED FORMAT:
-    - Use numbered steps (1. 2. 3.) for instructions
-    - Keep each step to one clear action
-    - Use bullet points for lists of options
-    - You can bolden titles 
-    - You can use arrows
-
-
-    Be solution-focused and empathetic.
-    Response:"""
-
-        else:
-            context = f"""
+        # Simplified, universal context for any document type
+        context = f"""
     AVAILABLE CONTENT:
     {json.dumps(content, indent=2)[:1500]}
 
-    REQUIRED FORMAT:
-    - Use bullet points for any lists
-    - Break content into short, scannable paragraphs
-    - Maximum 3 sentences per paragraph
+    REMEMBER: Format ANY lists with bullet points. Whether it's:
+    - Product features → bullet points
+    - Troubleshooting steps → bullet points  
+    - Pricing options → bullet points
+    - Benefits → bullet points
+    - Requirements → bullet points
 
     Response:"""
 
         return base_instructions + context
-
 
 
     def _extract_direct_answer(self, user_message: str, content: Dict) -> str:
