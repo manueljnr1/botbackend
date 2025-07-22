@@ -159,7 +159,7 @@ class RefactoredSuperTenantAdminEngine:
 
 
     def _admin_llm_mediator(self, user_message: str, state: AdminConversationState, 
-                        tenant: Tenant, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+                            tenant: Tenant, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """
         LLM mediator for admin requests - intelligently processes and routes admin tasks
         Replaces rigid intent parsing with conversational understanding
@@ -175,12 +175,16 @@ class RefactoredSuperTenantAdminEngine:
             # Let LLM understand and route the admin request
             mediation_result = self._mediate_admin_request(user_message, admin_context, state)
             
-            # Execute the mediated action
-            return self._execute_mediated_admin_action(mediation_result, state, tenant)
+            # Execute the mediated action - ADD DATA_MANAGER
+            from app.chatbot.tenant_data_manager import TenantDataManager
+            data_manager = TenantDataManager(self.db, tenant.id)
+            
+            return self._execute_mediated_admin_action(mediation_result, state, data_manager)
             
         except Exception as e:
             logger.error(f"Admin LLM mediation failed: {e}")
             return self._fallback_admin_routing(user_message, state)
+
 
     def _mediate_admin_request(self, user_message: str, admin_context: str, 
                             state: AdminConversationState) -> Dict[str, Any]:
@@ -269,39 +273,39 @@ class RefactoredSuperTenantAdminEngine:
         
         return "\n".join(context_parts)
 
-    def _execute_mediated_admin_action(self, mediation_result: Dict, state: AdminConversationState, 
-                                    tenant: Tenant) -> Dict[str, Any]:
-        """Execute the action determined by LLM mediation"""
+    # def _execute_mediated_admin_action(self, mediation_result: Dict, state: AdminConversationState, 
+    #                               data_manager: TenantDataManager) -> Dict[str, Any]:
+    #     """Execute the action determined by LLM mediation"""
         
-        admin_action = mediation_result.get('admin_action', 'help')
-        response_style = mediation_result.get('response_style', 'conversational')
+    #     admin_action = mediation_result.get('admin_action', 'help')
+    #     response_style = mediation_result.get('response_style', 'conversational')
         
-        # Update state based on mediation
-        from app.chatbot.admin_intent_parser import AdminActionType
-        try:
-            action_type = AdminActionType(admin_action)
-            state.update_state(
-                type('MockIntent', (), {
-                    'action': action_type,
-                    'requires_confirmation': mediation_result.get('requires_confirmation', False),
-                    'parameters': {}
-                })(),
-                required_params={param: None for param in mediation_result.get('requires_parameters', [])}
-            )
-        except ValueError:
-            action_type = AdminActionType.HELP
+    #     # Update state based on mediation
+    #     from app.chatbot.admin_intent_parser import AdminActionType
+    #     try:
+    #         action_type = AdminActionType(admin_action)
+    #         state.update_state(
+    #             type('MockIntent', (), {
+    #                 'action': action_type,
+    #                 'requires_confirmation': mediation_result.get('requires_confirmation', False),
+    #                 'parameters': {}
+    #             })(),
+    #             required_params={param: None for param in mediation_result.get('requires_parameters', [])}
+    #         )
+    #     except ValueError:
+    #         action_type = AdminActionType.HELP
         
-        # Generate contextual response
-        response = self._generate_mediated_response(mediation_result, state, tenant)
+    #     # Generate contextual response
+    #     response = self._generate_mediated_response(mediation_result, state, tenant)
         
-        return {
-            "success": True,
-            "response": response,
-            "action": admin_action,
-            "mediation_confidence": mediation_result.get('confidence', 0.7),
-            "conversation_flow": mediation_result.get('conversation_flow'),
-            "llm_mediated": True
-        }
+    #     return {
+    #         "success": True,
+    #         "response": response,
+    #         "action": admin_action,
+    #         "mediation_confidence": mediation_result.get('confidence', 0.7),
+    #         "conversation_flow": mediation_result.get('conversation_flow'),
+    #         "llm_mediated": True
+    #     }
 
     def _generate_mediated_response(self, mediation_result: Dict, state: AdminConversationState, 
                                 tenant: Tenant) -> str:
@@ -417,7 +421,7 @@ class RefactoredSuperTenantAdminEngine:
         return result
 
     def _execute_mediated_admin_action(self, mediation_result: Dict, state: AdminConversationState, 
-                                    data_manager: TenantDataManager) -> Dict[str, Any]:
+                                  data_manager: TenantDataManager) -> Dict[str, Any]:
         """Execute action based on LLM mediation results"""
         
         admin_action = mediation_result.get('admin_action', 'help')
