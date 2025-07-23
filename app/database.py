@@ -44,11 +44,17 @@
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import DisconnectionError, TimeoutError, OperationalError
+from sqlalchemy.exc import DisconnectionError, TimeoutError, OperationalError, DatabaseError
 from contextlib import contextmanager
 import logging
 import time
 from app.config import settings
+from typing import Callable, Any
+
+
+logger = logging.getLogger(__name__)
+
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -187,6 +193,83 @@ def create_tables_safely():
             wait_time = 2 ** attempt
             db_logger.warning(f"⚠️ Table creation attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
             time.sleep(wait_time)
+
+
+
+def retry_database_initialization(
+    func: Callable,
+    max_retries: int = 3,
+    delay: float = 1.0,
+    backoff_factor: float = 2.0
+) -> Any:
+    """
+    Retry database initialization operations with exponential backoff.
+    
+    Args:
+        func: The database operation to retry
+        max_retries: Maximum number of retry attempts
+        delay: Initial delay between retries in seconds
+        backoff_factor: Factor to multiply delay by after each retry
+    
+    Returns:
+        Result of the successful function call
+    
+    Raises:
+        The last exception if all retries fail
+    """
+    last_exception = None
+    current_delay = delay
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Database operation attempt {attempt + 1}/{max_retries}")
+            result = func()
+            logger.info(f"Database operation succeeded on attempt {attempt + 1}")
+            return result
+            
+        except (OperationalError, DatabaseError, ConnectionError) as e:
+            last_exception = e
+            logger.warning(
+                f"Database operation failed on attempt {attempt + 1}/{max_retries}: {str(e)}"
+            )
+            
+            if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                logger.info(f"Retrying in {current_delay} seconds...")
+                time.sleep(current_delay)
+                current_delay *= backoff_factor
+            else:
+                logger.error("All database operation attempts failed")
+    
+    # If we get here, all retries failed
+    raise last_exception
+
+
+def create_tables_with_retry():
+    """Create database tables with retry logic"""
+    from app.database import Base, engine  # Import your database objects
+    
+    def _create_tables():
+        Base.metadata.create_all(bind=engine)
+        return True
+    
+    return retry_database_initialization(_create_tables)
+
+
+def initialize_database_with_retry():
+    """Initialize database connection with retry logic"""
+    from app.database import engine
+    
+    def _test_connection():
+        # Test the database connection
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
+        return True
+    
+    return retry_database_initialization(_test_connection)
+
+
+
+
 
 # Import your models
 from app.auth.models import User, PasswordReset
