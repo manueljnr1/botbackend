@@ -768,11 +768,17 @@
 
 
 
+
+
+
+
+
+
 # app/chatbot/super_tenant_admin_engine.py
 """
-Refactored Super Tenant Admin Engine with LLM Mediator and Unified Engine Delegation
-Admin Mediator: Natural conversation flow, intent detection, delegation decisions
-Unified Mediator: Platform documentation processing (already working)
+Refactored Super Tenant Admin Engine with LLM Mediator Layer
+Foundation: Working admin logic with natural conversation
+Layer: Admin LLM Mediator + Unified Engine delegation for platform docs
 """
 
 import logging
@@ -835,9 +841,8 @@ class AdminConversationState:
 
 class RefactoredSuperTenantAdminEngine:
     """
-    Refactored admin engine with LLM Mediator and Unified Engine delegation
-    Admin Mediator: Natural conversation + tenant data operations + delegation decisions
-    Unified Mediator: Platform documentation (already working in unified engine)
+    Foundation: Working admin logic with natural conversation
+    Layer: LLM Mediator + Unified Engine delegation
     """
     
     def __init__(self, db: Session):
@@ -852,7 +857,7 @@ class RefactoredSuperTenantAdminEngine:
                 temperature=0.4,
                 openai_api_key=settings.OPENAI_API_KEY
             )
-        logger.info("🤖 Refactored SuperTenantAdminEngine initialized with Admin LLM Mediator.")
+        logger.info("🤖 SuperTenantAdminEngine initialized with Foundation + Mediator Layer.")
 
     def _get_or_create_conversation_state(self, user_identifier: str, tenant_id: int) -> AdminConversationState:
         """Gets or creates a state for the current conversation."""
@@ -871,7 +876,7 @@ class RefactoredSuperTenantAdminEngine:
         session_context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Main processing with Admin LLM Mediator and Unified Engine delegation
+        Main processing: Foundation logic + Mediator layer
         """
         try:
             data_manager = TenantDataManager(self.db, authenticated_tenant_id)
@@ -881,13 +886,13 @@ class RefactoredSuperTenantAdminEngine:
 
             memory.store_message(session_id, user_message, True)
 
-            # Get the current state of the conversation
+            # Get conversation state
             state = self._get_or_create_conversation_state(user_identifier, authenticated_tenant_id)
             
-            # Get tenant for processing
+            # Get tenant
             tenant = self.db.query(Tenant).filter(Tenant.id == authenticated_tenant_id).first()
 
-            # 🆕 NEW: Admin LLM Mediator - makes delegation decision
+            # NEW LAYER: Admin LLM Mediator - decides routing
             mediation_result = self._admin_llm_mediator(
                 user_message=user_message,
                 state=state,
@@ -897,6 +902,7 @@ class RefactoredSuperTenantAdminEngine:
 
             # Route based on mediation decision
             if mediation_result["delegate_to_unified"]:
+                # NEW: Platform documentation questions
                 result = self._delegate_to_unified_mediator(
                     user_message=user_message,
                     tenant=tenant,
@@ -904,15 +910,15 @@ class RefactoredSuperTenantAdminEngine:
                     mediation_context=mediation_result
                 )
             else:
-                result = self._handle_with_admin_mediator(
+                # FOUNDATION: Working admin logic
+                result = self._execute_foundation_admin_logic(
                     user_message=user_message,
                     state=state,
                     data_manager=data_manager,
-                    mediation_result=mediation_result,
                     tenant=tenant
                 )
 
-            # Add proactive suggestions if successful
+            # Foundation: Proactive suggestions
             if result.get("success") and not state.pending_confirmation and not state.required_params:
                 suggestion = self._get_proactive_suggestion(state, data_manager)
                 if suggestion:
@@ -924,7 +930,7 @@ class RefactoredSuperTenantAdminEngine:
                 details={
                     "user_message": user_message, 
                     "success": result.get("success", False),
-                    "processing_method": result.get("processing_method", "unknown"),
+                    "processing_method": result.get("processing_method", "foundation"),
                     "mediation_decision": mediation_result.get("reasoning", "")
                 }
             )
@@ -940,70 +946,42 @@ class RefactoredSuperTenantAdminEngine:
     def _admin_llm_mediator(self, user_message: str, state: AdminConversationState, 
                            tenant: Tenant, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """
-        Admin LLM Mediator - Decides between tenant data operations vs platform documentation
-        This is the key intelligence layer for natural admin conversations
+        NEW LAYER: Admin LLM Mediator - decides between tenant data vs platform docs
         """
         
         if not self.llm_available:
             return self._fallback_admin_mediation(user_message)
         
         try:
-            # Build context for admin mediation
-            admin_context = self._build_admin_mediation_context(state, tenant, conversation_history)
-            
             prompt = PromptTemplate(
-                input_variables=["user_message", "admin_context", "tenant_name"],
-                template="""You are an intelligent admin mediator for a chatbot platform. Analyze this admin request and determine the best approach.
-
-ADMIN CONTEXT:
-{admin_context}
+                input_variables=["user_message", "tenant_name"],
+                template="""You are an admin mediator. Decide if this is about TENANT DATA or PLATFORM DOCUMENTATION.
 
 USER MESSAGE: "{user_message}"
-
 TENANT: {tenant_name}
-
-CRITICAL DECISION: Is this about TENANT DATA MANAGEMENT or PLATFORM DOCUMENTATION?
 
 TENANT DATA MANAGEMENT (Admin Engine):
 - Managing THEIR OWN FAQs: "show my FAQs", "add FAQ", "delete FAQ #5"
-- THEIR analytics: "show my usage stats", "my chatbot performance"  
+- THEIR analytics: "show my stats", "my chatbot performance"  
 - THEIR settings: "update my branding", "change my prompt"
-- THEIR knowledge base: "my documents", "upload to my KB"
 
 PLATFORM DOCUMENTATION (Unified Engine):
-- How the platform works: "how does knowledge base work?", "what features do you have?"
+- How platform works: "how does knowledge base work?", "what features do you have?"
 - Platform capabilities: "what integrations are available?", "how to use this platform?"
-- General info about Lyra platform: "what is this software?", "how do I get started?"
-- Feature explanations: "explain the FAQ feature", "how does Discord integration work?"
-
-CONVERSATION FLOW:
-- Greetings: Handle naturally with admin context
-- Clarifications: Ask for more details naturally
-- Confirmations: Handle gracefully
+- General platform info: "what is this software?", "how do I get started?"
 
 RESPONSE FORMAT (JSON):
 {{
     "delegate_to_unified": true/false,
-    "admin_action": "specific_action_name",
     "confidence": 0.95,
-    "conversation_flow": "greeting|clarification|tenant_operation|platform_question",
-    "response_approach": "direct|guided|conversational|informational",
-    "reasoning": "why this decision was made",
-    "requires_followup": true/false
+    "reasoning": "explanation"
 }}
 
-Examples:
-- "hello" → delegate_to_unified: false, admin_action: "greeting", conversation_flow: "greeting"
-- "show my FAQs" → delegate_to_unified: false, admin_action: "list_tenant_faqs", conversation_flow: "tenant_operation"  
-- "how does the knowledge base feature work?" → delegate_to_unified: true, conversation_flow: "platform_question"
-- "what integrations are available?" → delegate_to_unified: true, conversation_flow: "platform_question"
-
-Mediation Analysis:"""
+Analysis:"""
             )
             
             result = self.llm.invoke(prompt.format(
                 user_message=user_message,
-                admin_context=admin_context,
                 tenant_name=tenant.business_name or tenant.name
             ))
             
@@ -1011,7 +989,7 @@ Mediation Analysis:"""
             json_match = re.search(r'\{.*\}', result.content, re.DOTALL)
             if json_match:
                 mediation = json.loads(json_match.group())
-                logger.info(f"🧠 Admin mediation: {'UNIFIED' if mediation.get('delegate_to_unified') else 'ADMIN'} - {mediation.get('reasoning', '')[:100]}...")
+                logger.info(f"🧠 Mediation: {'UNIFIED' if mediation.get('delegate_to_unified') else 'FOUNDATION'} - {mediation.get('reasoning', '')[:100]}...")
                 return mediation
                 
         except Exception as e:
@@ -1019,470 +997,336 @@ Mediation Analysis:"""
         
         return self._fallback_admin_mediation(user_message)
 
-    def _build_admin_mediation_context(self, state: AdminConversationState, tenant: Tenant, 
-                                     conversation_history: List[Dict] = None) -> str:
-        """Build context for admin mediation"""
+    def _fallback_admin_mediation(self, user_message: str) -> Dict[str, Any]:
+        """Fallback when LLM mediation fails"""
+        message_lower = user_message.lower()
         
+        # Platform keywords
+        platform_keywords = ['how does', 'what is', 'explain', 'how to use', 'what features', 'platform', 'software']
+        
+        # Tenant keywords  
+        tenant_keywords = ['my faq', 'my analytics', 'my settings', 'my chatbot', 'add faq', 'delete faq', 'show my']
+        
+        if any(keyword in message_lower for keyword in platform_keywords):
+            return {"delegate_to_unified": True, "reasoning": "Fallback: Platform keywords detected"}
+        else:
+            return {"delegate_to_unified": False, "reasoning": "Fallback: Tenant data assumed"}
+
+    def _delegate_to_unified_mediator(self, user_message: str, tenant: Tenant, 
+                                    user_identifier: str, mediation_context: Dict) -> Dict[str, Any]:
+        """
+        NEW LAYER: Delegate to Unified Engine for platform documentation
+        """
+        try:
+            from app.chatbot.unified_intelligent_engine import get_unified_intelligent_engine
+            
+            # Get super tenant for platform docs
+            SUPER_TENANT_IDS = [324112833]
+            super_tenant = self.db.query(Tenant).filter(Tenant.id.in_(SUPER_TENANT_IDS)).first()
+            
+            if not super_tenant or not super_tenant.api_key:
+                return {
+                    "success": False,
+                    "response": "❌ Platform documentation is temporarily unavailable.",
+                    "processing_method": "unified_delegation_error"
+                }
+            
+            # Initialize unified engine
+            unified_engine = get_unified_intelligent_engine(self.db, super_tenant.id)
+            
+            # Enhance message for platform context
+            enhanced_message = f"[ADMIN PLATFORM QUERY] {tenant.business_name or tenant.name} admin asking: {user_message}"
+            
+            logger.info(f"🔀 Delegating to Unified Mediator: {enhanced_message[:100]}...")
+            
+            # Process with unified mediator
+            result = unified_engine.process_message(
+                api_key=super_tenant.api_key,
+                user_message=enhanced_message,
+                user_identifier=f"admin_{user_identifier}",
+                platform="admin_platform_docs"
+            )
+            
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "response": self._add_admin_context_to_platform_response(result["response"], tenant),
+                    "action": "platform_documentation",
+                    "processing_method": "unified_mediator_delegation",
+                    "answered_by": f"Platform Docs via {result.get('answered_by', 'Unified')}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "response": "❌ I couldn't find information about that platform feature.",
+                    "processing_method": "unified_delegation_failed"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error in unified delegation: {e}")
+            return {
+                "success": False,
+                "response": "❌ Platform documentation is temporarily unavailable.",
+                "processing_method": "unified_delegation_error"
+            }
+
+    def _add_admin_context_to_platform_response(self, unified_response: str, tenant: Tenant) -> str:
+        """Add light admin context to platform responses"""
+        if "feature" in unified_response.lower():
+            footer = f"\n\nAs a {tenant.business_name or tenant.name} admin, you can access these features through your dashboard."
+            return unified_response + footer
+        return unified_response
+
+    def _execute_foundation_admin_logic(self, user_message: str, state: AdminConversationState,
+                                      data_manager: TenantDataManager, tenant: Tenant) -> Dict[str, Any]:
+        """
+        FOUNDATION: Execute working admin logic with LLM mediation
+        """
+        try:
+            # Use LLM mediator for admin requests
+            result = self._admin_foundation_mediator(
+                user_message=user_message,
+                state=state,
+                tenant=tenant,
+                data_manager=data_manager
+            )
+
+            return result
+            
+        except Exception as e:
+            logger.error(f"Foundation admin logic failed: {e}")
+            return self._fallback_admin_routing(user_message, state)
+
+    def _admin_foundation_mediator(self, user_message: str, state: AdminConversationState, 
+                                 tenant: Tenant, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """
+        FOUNDATION: LLM mediator for admin requests (working logic)
+        """
+        if not self.llm_available:
+            return self._fallback_admin_routing(user_message, state)
+        
+        try:
+            # Build context for admin mediation
+            admin_context = self._build_admin_mediation_context(state, tenant)
+            
+            # Let LLM understand and route the admin request
+            mediation_result = self._mediate_admin_request(user_message, admin_context, state)
+            
+            # Execute the mediated action
+            return self._execute_mediated_admin_action(mediation_result, state, data_manager)
+            
+        except Exception as e:
+            logger.error(f"Foundation admin mediation failed: {e}")
+            return self._fallback_admin_routing(user_message, state)
+
+    def _mediate_admin_request(self, user_message: str, admin_context: str, 
+                             state: AdminConversationState) -> Dict[str, Any]:
+        """FOUNDATION: Core LLM mediation for admin requests"""
+        
+        prompt = f"""You are an intelligent admin assistant mediator. Analyze this admin request and determine the best action.
+
+ADMIN CONTEXT:
+{admin_context}
+
+USER REQUEST: "{user_message}"
+
+AVAILABLE ADMIN ACTIONS:
+- FAQ Management: add_faq, update_faq, delete_faq, list_faqs
+- Analytics: view_analytics, conversation_stats, usage_reports
+- Settings: update_prompt, update_branding, email_config
+- Integrations: setup_discord, setup_slack, setup_telegram
+- General: help, greeting, clarification_needed
+
+CONVERSATION STATE:
+- Current Intent: {state.current_intent.value if state.current_intent else 'None'}
+- Pending Confirmation: {state.pending_confirmation}
+- Required Params: {list(state.required_params.keys()) if state.required_params else 'None'}
+
+RESPONSE FORMAT (JSON):
+{{
+    "admin_action": "specific_action_name",
+    "confidence": 0.95,
+    "requires_parameters": ["param1", "param2"],
+    "requires_confirmation": true/false,
+    "conversation_flow": "continuation|new_task|clarification|completion",
+    "response_style": "direct|guided|conversational|supportive",
+    "user_intent_summary": "clear description of what user wants",
+    "reasoning": "why this action and approach"
+}}
+
+Analysis:"""
+
+        try:
+            result = self.llm.invoke(prompt)
+            import json, re
+            json_match = re.search(r'\{.*\}', result.content, re.DOTALL)
+            if json_match:
+                mediation = json.loads(json_match.group())
+                logger.info(f"🧠 Foundation mediation: {mediation.get('admin_action')} - {mediation.get('reasoning', '')[:50]}...")
+                return mediation
+        except Exception as e:
+            logger.error(f"Foundation mediation parsing failed: {e}")
+        
+        return {"admin_action": "help", "confidence": 0.3, "conversation_flow": "clarification"}
+
+    def _build_admin_mediation_context(self, state: AdminConversationState, tenant: Tenant) -> str:
+        """FOUNDATION: Build context for admin mediation"""
         context_parts = []
         
         # Tenant context
         context_parts.append(f"Business: {tenant.business_name or tenant.name}")
         context_parts.append(f"Tenant ID: {tenant.id}")
         
-        # Current admin state
+        # Current state context
         if state.current_intent:
-            context_parts.append(f"Current task: {state.current_intent.value.replace('_', ' ')}")
+            context_parts.append(f"Currently working on: {state.current_intent.value.replace('_', ' ')}")
         
-        if state.pending_confirmation:
-            context_parts.append("Waiting for confirmation")
-        
-        if state.required_params:
-            context_parts.append(f"Waiting for: {list(state.required_params.keys())}")
-        
-        # Recent conversation context
-        if conversation_history:
-            recent_topics = []
-            for msg in conversation_history[-3:]:
-                if not msg.get('is_from_user', True):  # Bot messages
-                    content = msg.get('content', '')[:50]
-                    recent_topics.append(content)
-            
-            if recent_topics:
-                context_parts.append(f"Recent bot responses: {recent_topics}")
+        if state.context_data:
+            context_parts.append(f"Context data: {state.context_data}")
         
         return "\n".join(context_parts)
 
-    def _fallback_admin_mediation(self, user_message: str) -> Dict[str, Any]:
-        """Fallback when LLM mediation fails"""
+    def _execute_mediated_admin_action(self, mediation_result: Dict, state: AdminConversationState, 
+                                     data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Execute action based on LLM mediation results"""
         
+        admin_action = mediation_result.get('admin_action', 'help')
+        conversation_flow = mediation_result.get('conversation_flow', 'new_task')
+        
+        # Map mediated action to existing action methods (FOUNDATION)
+        action_mapping = {
+            'add_faq': self._action_add_faq,
+            'update_faq': self._action_update_faq,
+            'delete_faq': self._action_delete_faq,
+            'list_faqs': self._action_list_faqs,
+            'view_analytics': self._action_view_analytics,
+            'view_settings': self._action_view_settings,
+            'help': self._action_help,
+            'greeting': self._action_greeting,
+            'setup_discord': self._action_setup_integration,
+            'setup_slack': self._action_setup_integration,
+            'setup_telegram': self._action_setup_integration
+        }
+        
+        # Get the appropriate action method
+        action_method = action_mapping.get(admin_action, self._action_unknown)
+        
+        # Update state with mediation results
+        if conversation_flow == 'new_task':
+            from app.chatbot.admin_intent_parser import AdminActionType
+            try:
+                action_type = AdminActionType(admin_action)
+                state.current_intent = action_type
+                state.required_params = {param: None for param in mediation_result.get('requires_parameters', [])}
+                state.pending_confirmation = mediation_result.get('requires_confirmation', False)
+            except ValueError:
+                state.current_intent = AdminActionType.HELP
+        
+        # Execute the action (FOUNDATION)
+        try:
+            result = action_method(state, data_manager)
+            
+            # Add mediation metadata
+            result.update({
+                "mediation_confidence": mediation_result.get('confidence', 0.7),
+                "conversation_flow": conversation_flow,
+                "llm_mediated": True,
+                "processing_method": "foundation_with_mediation"
+            })
+            
+            # Clear state after successful execution
+            if result.get("success") and conversation_flow != 'continuation':
+                state.clear()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error executing mediated action {admin_action}: {e}")
+            return {
+                "success": False,
+                "response": f"I encountered an error while trying to {admin_action.replace('_', ' ')}. Please try again.",
+                "error": str(e)
+            }
+
+    def _fallback_admin_routing(self, user_message: str, state: AdminConversationState) -> Dict[str, Any]:
+        """FOUNDATION: Fallback routing when LLM mediation fails"""
         message_lower = user_message.lower()
         
-        # Simple keyword-based fallback
-        platform_keywords = [
-            'how does', 'what is', 'explain', 'how to use', 'what features', 
-            'available integrations', 'platform', 'software', 'how it works'
-        ]
-        
-        tenant_keywords = [
-            'my faq', 'my analytics', 'my settings', 'my chatbot', 'my data',
-            'add faq', 'delete faq', 'show my', 'update my'
-        ]
-        
-        if any(keyword in message_lower for keyword in platform_keywords):
-            return {
-                "delegate_to_unified": True,
-                "conversation_flow": "platform_question",
-                "reasoning": "Fallback: Platform keywords detected"
-            }
-        elif any(keyword in message_lower for keyword in tenant_keywords):
-            return {
-                "delegate_to_unified": False,
-                "admin_action": "tenant_operation",
-                "conversation_flow": "tenant_operation", 
-                "reasoning": "Fallback: Tenant keywords detected"
-            }
+        if 'faq' in message_lower:
+            action = 'list_faqs'
+        elif any(word in message_lower for word in ['analytic', 'stat', 'usage']):
+            action = 'view_analytics'
+        elif any(word in message_lower for word in ['help', 'what', 'how']):
+            action = 'help'
         else:
-            return {
-                "delegate_to_unified": False,
-                "admin_action": "greeting",
-                "conversation_flow": "greeting",
-                "reasoning": "Fallback: Default to admin greeting"
-            }
+            action = 'greeting'
+        
+        return {
+            "success": True,
+            "response": f"I'll help you with {action.replace('_', ' ')}",
+            "action": action,
+            "processing_method": "fallback_routing"
+        }
 
-    def _delegate_to_unified_mediator(self, user_message: str, tenant: Tenant, 
-                                    user_identifier: str, mediation_context: Dict) -> Dict[str, Any]:
-        """
-        Delegate to Unified Engine Mediator for platform documentation
-        Admin Mediator → Unified Mediator delegation
-        """
-        try:
-            # Import unified engine (already has working mediator)
-            from app.chatbot.unified_intelligent_engine import get_unified_intelligent_engine
-            
-            # Get super tenant for unified engine processing (platform docs)
-            SUPER_TENANT_IDS = [324112833]  # Super tenant with platform documentation
-            super_tenant = self.db.query(Tenant).filter(
-                Tenant.id.in_(SUPER_TENANT_IDS)
-            ).first()
-            
-            if not super_tenant or not super_tenant.api_key:
-                return {
-                    "success": False,
-                    "response": "❌ Platform documentation is temporarily unavailable. Please try again later.",
-                    "processing_method": "unified_delegation_error"
-                }
-            
-            # Initialize unified engine with super tenant context (platform docs)
-            unified_engine = get_unified_intelligent_engine(self.db, super_tenant.id)
-            
-            # Enhance message with admin context for unified mediator
-            enhanced_message = self._enhance_message_for_unified_mediator(
-                user_message, mediation_context, tenant
-            )
-            
-            logger.info(f"🔀 Delegating to Unified Mediator: {enhanced_message[:100]}...")
-            
-            # Process with unified mediator (already working well)
-            result = unified_engine.process_message(
-                api_key=super_tenant.api_key,
-                user_message=enhanced_message,
-                user_identifier=f"admin_{user_identifier}",  # Mark as admin user
-                platform="admin_platform_docs"
-            )
-            
-            if result.get("success"):
-                logger.info(f"✅ Unified mediator processing successful")
-                
-                return {
-                    "success": True,
-                    "response": self._contextualize_unified_response(result["response"], tenant),
-                    "action": "platform_documentation",
-                    "processing_method": "unified_mediator_delegation",
-                    "answered_by": f"Platform Docs via {result.get('answered_by', 'Unified')}",
-                    "delegation_successful": True
-                }
-            else:
-                logger.error(f"❌ Unified mediator delegation failed: {result.get('error')}")
-                return {
-                    "success": False,
-                    "response": "❌ I couldn't find information about that platform feature. Please try rephrasing your question.",
-                    "processing_method": "unified_delegation_failed"
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Error in unified mediator delegation: {e}")
+    def _action_greeting(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Greeting action"""
+        state.last_intent_for_suggestion = AdminActionType.GREETING
+        tenant_name = data_manager.tenant.business_name or data_manager.tenant.name
+        response = self._generate_dynamic_response(
+            "Hello! I'm ready to help you manage the chatbot for {tenant_name}. What can I assist you with today?",
+            {"tenant_name": tenant_name}
+        )
+        return {"success": True, "response": response, "action": "greeting"}
+
+    def _action_add_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Add FAQ action"""
+        params = state.required_params
+        if not params.get('question') or not params.get('answer'):
             return {
                 "success": False,
-                "response": "❌ Platform documentation is temporarily unavailable. Please try again.",
-                "processing_method": "unified_delegation_error"
-            }
-
-    def _enhance_message_for_unified_mediator(self, user_message: str, mediation_context: Dict, 
-                                            tenant: Tenant) -> str:
-        """
-        Enhance message with admin context for unified mediator
-        This helps the unified mediator understand it's serving an admin asking about platform features
-        """
-        
-        tenant_name = tenant.business_name or tenant.name
-        conversation_flow = mediation_context.get("conversation_flow", "platform_question")
-        
-        if conversation_flow == "platform_question":
-            return f"[ADMIN PLATFORM QUERY] {tenant_name} admin asking: {user_message}"
-        else:
-            return f"[ADMIN CONTEXT] {user_message}"
-
-    def _contextualize_unified_response(self, unified_response: str, tenant: Tenant) -> str:
-        """
-        Contextualize unified mediator response for admin context
-        Add admin-specific context to platform documentation responses
-        """
-        
-        # Don't over-modify the already working unified response, just add light admin context
-        if "feature" in unified_response.lower() or "platform" in unified_response.lower():
-            footer = f"\n\nAs a {tenant.business_name or tenant.name} admin, you can access these features through your dashboard."
-            return unified_response + footer
-        
-        return unified_response
-
-    def _handle_with_admin_mediator(self, user_message: str, state: AdminConversationState,
-                                  data_manager: TenantDataManager, mediation_result: Dict,
-                                  tenant: Tenant) -> Dict[str, Any]:
-        """
-        Handle with Admin Mediator for tenant data operations and natural conversation
-        This is the natural conversation layer for admin operations
-        """
-        
-        admin_action = mediation_result.get("admin_action", "unknown")
-        conversation_flow = mediation_result.get("conversation_flow", "tenant_operation")
-        
-        # Natural conversation handling
-        if conversation_flow == "greeting":
-            return self._handle_admin_greeting(tenant, mediation_result)
-        elif conversation_flow == "clarification":
-            return self._handle_admin_clarification(user_message, state, mediation_result)
-        else:
-            # Tenant operations - use traditional admin methods with natural responses
-            return self._execute_admin_operation(user_message, state, data_manager, mediation_result)
-
-    def _handle_admin_greeting(self, tenant: Tenant, mediation_result: Dict) -> Dict[str, Any]:
-        """Handle admin greeting naturally"""
-        
-        if not self.llm_available:
-            return {
-                "success": True,
-                "response": f"Hello! I'm here to help you manage your {tenant.business_name or tenant.name} chatbot. What would you like to do?",
-                "action": "greeting",
-                "processing_method": "admin_mediator"
+                "response": "I need both a question and answer to add an FAQ. What question would you like to add?",
+                "requires_input": True
             }
         
         try:
-            prompt = f"""Generate a natural, friendly greeting for a business admin managing their chatbot.
-
-Business: {tenant.business_name or tenant.name}
-
-Create a warm, professional greeting that:
-- Welcomes them personally
-- Mentions they're managing their chatbot
-- Offers help without being pushy
-- Keeps it conversational, not robotic
-
-Response:"""
-
-            result = self.llm.invoke(prompt)
-            greeting = result.content.strip()
-            
-            return {
-                "success": True,
-                "response": greeting,
-                "action": "greeting",
-                "processing_method": "admin_mediator_natural"
-            }
-            
-        except Exception as e:
-            logger.error(f"Admin greeting generation failed: {e}")
-            return {
-                "success": True,
-                "response": f"Hello! I'm here to help you manage your {tenant.business_name or tenant.name} chatbot. What would you like to do?",
-                "action": "greeting",
-                "processing_method": "admin_mediator_fallback"
-            }
-
-    def _handle_admin_clarification(self, user_message: str, state: AdminConversationState, 
-                                  mediation_result: Dict) -> Dict[str, Any]:
-        """Handle when admin needs clarification"""
-        
-        if not self.llm_available:
-            return {
-                "success": True,
-                "response": "I'd be happy to help! Could you be more specific about what you'd like to do? I can help you manage FAQs, view analytics, update settings, and more.",
-                "action": "clarification",
-                "processing_method": "admin_mediator"
-            }
-        
-        try:
-            prompt = f"""The user said: "{user_message}" but it's unclear what admin task they want to do.
-
-Generate a helpful clarification request that:
-- Acknowledges their message
-- Asks for clarification naturally
-- Suggests specific admin options they might want
-- Keeps it conversational and helpful
-
-Available admin functions: FAQ management, analytics, settings, branding, integrations
-
-Clarification response:"""
-
-            result = self.llm.invoke(prompt)
-            clarification = result.content.strip()
-            
-            return {
-                "success": True,
-                "response": clarification,
-                "action": "clarification",
-                "processing_method": "admin_mediator_natural"
-            }
-            
-        except Exception as e:
-            logger.error(f"Admin clarification generation failed: {e}")
-            return {
-                "success": True,
-                "response": "I'd be happy to help! Could you be more specific about what you'd like to do?",
-                "action": "clarification",
-                "processing_method": "admin_mediator_fallback"
-            }
-
-    def _execute_admin_operation(self, user_message: str, state: AdminConversationState,
-                                data_manager: TenantDataManager, mediation_result: Dict) -> Dict[str, Any]:
-        """Execute admin operations with natural language processing"""
-        
-        # Use existing intent parser for specific operations
-        intent_result = self.intent_parser.parse(user_message)
-        
-        # Update state
-        state.update_state(intent_result)
-        
-        # Execute with natural response generation
-        if intent_result.action == AdminActionType.LIST_FAQS:
-            return self._action_list_faqs_natural(state, data_manager)
-        elif intent_result.action == AdminActionType.ADD_FAQ:
-            return self._action_add_faq_natural(state, data_manager, intent_result)
-        elif intent_result.action == AdminActionType.VIEW_ANALYTICS:
-            return self._action_view_analytics_natural(state, data_manager)
-        elif intent_result.action == AdminActionType.VIEW_SETTINGS:
-            return self._action_view_settings_natural(state, data_manager)
-        else:
-            return self._action_unknown_natural(state, mediation_result)
-
-    # Natural admin operation methods
-    def _action_list_faqs_natural(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
-        """List FAQs with natural language response"""
-        try:
-            faqs = data_manager.get_faqs(limit=20)
-            
-            if not faqs:
-                response = "You don't have any FAQs set up yet. Would you like me to help you create your first one?"
-            else:
-                faq_list = []
-                for faq in faqs:
-                    faq_list.append(f"**#{faq.id}**: {faq.question}")
-                
-                faq_text = "\n".join(faq_list)
-                
-                if self.llm_available:
-                    try:
-                        prompt = f"""Format this FAQ list in a natural, admin-friendly way:
-
-{faq_text}
-
-Create a response that:
-- Shows the FAQs clearly
-- Mentions how many there are
-- Offers next steps naturally
-- Keeps it conversational
-
-Response:"""
-
-                        result = self.llm.invoke(prompt)
-                        response = result.content.strip()
-                    except:
-                        response = f"Here are your {len(faqs)} FAQs:\n\n{faq_text}\n\nWould you like to add, edit, or delete any of these?"
-                else:
-                    response = f"Here are your {len(faqs)} FAQs:\n\n{faq_text}"
-            
-            state.last_intent_for_suggestion = AdminActionType.LIST_FAQS
-            
-            return {
-                "success": True,
-                "response": response,
-                "action": "list_faqs",
-                "processing_method": "admin_mediator_natural"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error listing FAQs: {e}")
-            return {
-                "success": False,
-                "response": "❌ I couldn't retrieve your FAQs right now. Please try again.",
-                "action": "list_faqs"
-            }
-
-    def _action_add_faq_natural(self, state: AdminConversationState, data_manager: TenantDataManager,
-                               intent_result: ParsedIntent) -> Dict[str, Any]:
-        """Add FAQ with natural conversation flow"""
-        question = intent_result.parameters.get('question')
-        answer = intent_result.parameters.get('answer')
-        
-        if not question:
-            return {
-                "success": False,
-                "response": "I'd be happy to help you add an FAQ! What question would you like to add?",
-                "requires_input": True,
-                "processing_method": "admin_mediator_natural"
-            }
-        
-        if not answer:
-            return {
-                "success": False,
-                "response": f"Great! I have the question: '{question}'. What should the answer be?",
-                "requires_input": True,
-                "processing_method": "admin_mediator_natural"
-            }
-        
-        try:
-            faq = data_manager.create_faq(question=question, answer=answer)
+            faq = data_manager.create_faq(question=params['question'], answer=params['answer'])
             state.add_context("last_faq_id", faq.id)
             state.last_intent_for_suggestion = AdminActionType.ADD_FAQ
-            
-            if self.llm_available:
-                try:
-                    prompt = f"""Generate a success message for adding this FAQ:
-Question: {question}
-FAQ ID: {faq.id}
-
-Make it natural and encouraging, mention the ID for reference.
-
-Response:"""
-
-                    result = self.llm.invoke(prompt)
-                    response = result.content.strip()
-                except:
-                    response = f"✅ Perfect! I've added that FAQ (#{faq.id}). Your chatbot now knows how to answer: '{question}'"
-            else:
-                response = f"✅ Successfully added FAQ #{faq.id}: '{question}'"
-            
-            return {
-                "success": True,
-                "response": response,
-                "action": "add_faq",
-                "processing_method": "admin_mediator_natural"
-            }
-            
+            response = f"✅ Successfully added FAQ #{faq.id}: '{params['question']}'"
+            return {"success": True, "response": response, "action": "add_faq"}
         except Exception as e:
             logger.error(f"Error adding FAQ: {e}")
-            return {
-                "success": False,
-                "response": "❌ I couldn't add that FAQ right now. Please try again.",
-                "action": "add_faq"
-            }
+            return {"success": False, "response": "❌ Failed to add FAQ. Please try again.", "action": "add_faq"}
 
-    def _action_view_analytics_natural(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
-        """View analytics with natural presentation"""
+    def _action_list_faqs(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: List FAQs action"""
+        try:
+            faqs = data_manager.get_faqs(limit=20)
+            if not faqs:
+                return {"success": True, "response": "You don't have any FAQs yet. Let's create one! Just tell me what question to add."}
+
+            faq_list = "\n".join([f"• **#{faq.id}**: {faq.question}" for faq in faqs])
+            state.last_intent_for_suggestion = AdminActionType.LIST_FAQS
+            response = f"Here are your current FAQs:\n\n{faq_list}"
+            return {"success": True, "response": response, "action": "list_faqs"}
+        except Exception as e:
+            logger.error(f"Error listing FAQs: {e}")
+            return {"success": False, "response": "❌ Could not retrieve FAQs.", "action": "list_faqs"}
+
+    def _action_view_analytics(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: View analytics action - CLEAN DATA ONLY"""
         try:
             analytics = data_manager.get_analytics_summary()
             
-            if self.llm_available:
-                try:
-                    prompt = f"""Present these analytics in a natural, encouraging way for a business admin:
-
-FAQs: {analytics['content_stats']['faqs']}
-Knowledge Bases: {analytics['content_stats']['knowledge_bases']}
-Chat Sessions (30 days): {analytics['usage_stats_30_days']['chat_sessions']}
-Messages (30 days): {analytics['usage_stats_30_days']['total_messages']}
-
-Integrations:
-- Discord: {analytics['integrations']['discord']}
-- Slack: {analytics['integrations']['slack']}
-- Telegram: {analytics['integrations']['telegram']}
-
-Make it conversational and insightful, not just raw numbers.
-
-Response:"""
-
-                    result = self.llm.invoke(prompt)
-                    response = result.content.strip()
-                except:
-                    response = self._format_analytics_fallback(analytics)
-            else:
-                response = self._format_analytics_fallback(analytics)
-            
-            state.last_intent_for_suggestion = AdminActionType.VIEW_ANALYTICS
-            
-            return {
-                "success": True,
-                "response": response,
-                "action": "view_analytics",
-                "processing_method": "admin_mediator_natural"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting analytics: {e}")
-            return {
-                "success": False,
-                "response": "❌ I couldn't retrieve your analytics right now. Please try again.",
-                "action": "view_analytics"
-            }
-
-    def _format_analytics_fallback(self, analytics: Dict) -> str:
-        """Fallback analytics formatting"""
-        return f"""📊 **Your Chatbot Performance**
+            # FOUNDATION: Clean analytics formatting (no hallucination)
+            response = f"""📊 **Your Chatbot Performance**
 
 **Content:**
-• {analytics['content_stats']['faqs']} FAQs helping your customers
+• {analytics['content_stats']['faqs']} FAQs
 • {analytics['content_stats']['knowledge_bases']} knowledge bases
 
 **Activity (Last 30 Days):**
-• {analytics['usage_stats_30_days']['chat_sessions']} conversations
+• {analytics['usage_stats_30_days']['chat_sessions']} chat sessions
 • {analytics['usage_stats_30_days']['total_messages']} total messages
 
 **Integrations:**
@@ -1490,96 +1334,101 @@ Response:"""
 • Slack: {'✅ Active' if analytics['integrations']['slack'] else '❌ Not set up'}
 • Telegram: {'✅ Active' if analytics['integrations']['telegram'] else '❌ Not set up'}"""
 
-    def _action_view_settings_natural(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
-        """View settings with natural presentation"""
+            state.last_intent_for_suggestion = AdminActionType.VIEW_ANALYTICS
+            return {"success": True, "response": response, "action": "view_analytics"}
+        except Exception as e:
+            logger.error(f"Error getting analytics: {e}")
+            return {"success": False, "response": "❌ Could not retrieve analytics.", "action": "view_analytics"}
+
+    def _action_delete_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Delete FAQ action"""
+        faq_id = state.required_params.get('faq_id')
+        if not faq_id:
+            return {
+                "success": False,
+                "response": "Which FAQ would you like to delete? Please provide the FAQ ID.",
+                "requires_input": True
+            }
+        
+        try:
+            success = data_manager.delete_faq(faq_id)
+            if success:
+                state.last_intent_for_suggestion = AdminActionType.DELETE_FAQ
+                return {"success": True, "response": f"✅ Successfully deleted FAQ #{faq_id}", "action": "delete_faq"}
+            else:
+                return {"success": False, "response": f"❌ FAQ #{faq_id} not found.", "action": "delete_faq"}
+        except Exception as e:
+            logger.error(f"Error deleting FAQ: {e}")
+            return {"success": False, "response": "❌ Failed to delete FAQ.", "action": "delete_faq"}
+
+    def _action_view_settings(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: View settings action"""
         try:
             settings = data_manager.get_tenant_settings()
-            
-            response = f"""⚙️ **Current Settings Overview**
+            response = f"""⚙️ **Current Settings**
 
 **Business Info:**
 • Name: {settings['business_name']}
 • Email: {settings['email']}
 
-**Chatbot Configuration:**
-• Custom prompt: {'✅ Configured' if settings['system_prompt'] else '❌ Using default'}
-• Branding: {'✅ Customized' if settings['branding']['logo_image_url'] else '❌ Using default'}
-
-**Email Setup:**
-• Feedback email: {settings['email_config']['feedback_email'] or 'Not configured'}
-
-Need to update any of these settings?"""
+**Chatbot:**
+• Custom prompt: {'✅ Set' if settings['system_prompt'] else '❌ Default'}
+• Branding: {'✅ Custom' if settings['branding']['logo_image_url'] else '❌ Default'}"""
 
             state.last_intent_for_suggestion = AdminActionType.VIEW_SETTINGS
-            
-            return {
-                "success": True,
-                "response": response,
-                "action": "view_settings",
-                "processing_method": "admin_mediator_natural"
-            }
-            
+            return {"success": True, "response": response, "action": "view_settings"}
         except Exception as e:
             logger.error(f"Error getting settings: {e}")
-            return {
-                "success": False,
-                "response": "❌ I couldn't retrieve your settings right now. Please try again.",
-                "action": "view_settings"
-            }
+            return {"success": False, "response": "❌ Could not retrieve settings.", "action": "view_settings"}
 
-    def _action_unknown_natural(self, state: AdminConversationState, mediation_result: Dict) -> Dict[str, Any]:
-        """Handle unknown actions naturally"""
-        
+    def _action_help(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Help action"""
+        state.last_intent_for_suggestion = AdminActionType.HELP
+        help_text = self.intent_parser.get_help_text()
+        return {"success": True, "response": help_text, "action": "help"}
+
+    def _action_setup_integration(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Setup integration action"""
+        integration_type = state.current_intent.value.replace('setup_', '') if state.current_intent else 'unknown'
+        return {
+            "success": True,
+            "response": f"🔗 {integration_type.title()} integration setup is coming soon!",
+            "action": f"setup_{integration_type}"
+        }
+
+    def _action_unknown(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Unknown action"""
+        response = self._generate_dynamic_response(
+            "I'm not quite sure how to help with that. You can ask me to manage FAQs, view analytics, and more.",
+            {}
+        )
+        return {"success": False, "response": response, "action": "unknown"}
+
+    def _generate_dynamic_response(self, prompt_template: str, context: Dict[str, Any]) -> str:
+        """FOUNDATION: Natural response generation"""
         if not self.llm_available:
-            return {
-                "success": False,
-                "response": "I'm not sure how to help with that. You can ask me to manage FAQs, view analytics, update settings, or ask for help.",
-                "action": "unknown",
-                "processing_method": "admin_mediator"
-            }
-        
+            return prompt_template.format(**context) if context else prompt_template
+
         try:
-            prompt = f"""The user said something unclear in admin context. Generate a helpful response that:
-- Acknowledges their message
-- Asks for clarification naturally  
-- Suggests what they might want to do
-- Lists key admin functions casually
-
-Available functions: FAQ management, analytics, settings, branding
-
-Helpful response:"""
-
-            result = self.llm.invoke(prompt)
-            response = result.content.strip()
-            
-            return {
-                "success": False,
-                "response": response,
-                "action": "unknown",
-                "processing_method": "admin_mediator_natural"
-            }
-            
+            prompt = PromptTemplate.from_template(prompt_template)
+            response = self.llm.invoke(prompt.format(**context))
+            return response.content.strip()
         except Exception as e:
-            logger.error(f"Unknown action response generation failed: {e}")
-            return {
-                "success": False,
-                "response": "I'm not sure how to help with that. Could you try rephrasing what you'd like to do?",
-                "action": "unknown",
-                "processing_method": "admin_mediator_fallback"
-            }
+            logger.error(f"Dynamic response generation failed: {e}")
+            return prompt_template.format(**context) if context else "I'm here to help!"
 
     def _get_proactive_suggestion(self, state: AdminConversationState, data_manager: TenantDataManager) -> Optional[str]:
-        """Generate proactive suggestions after successful actions"""
+        """FOUNDATION: Proactive suggestions"""
         if not self.llm_available or not state.last_intent_for_suggestion:
             return None
 
         try:
-            template = """A business admin just completed an action for their chatbot. Suggest a relevant next step naturally.
+            template = """A business admin just completed an action. Suggest a brief, relevant next step.
 
 Last Action: "{last_action}"
 Business: {tenant_name}
 
-Generate ONE brief, helpful suggestion that flows naturally from what they just did:"""
+Generate ONE brief suggestion:"""
 
             context = {
                 "last_action": state.last_intent_for_suggestion.value,
@@ -1597,7 +1446,21 @@ Generate ONE brief, helpful suggestion that flows naturally from what they just 
             logger.error(f"Failed to generate suggestion: {e}")
             return None
 
+    def _action_update_faq(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Update FAQ action (placeholder)"""
+        state.last_intent_for_suggestion = AdminActionType.UPDATE_FAQ
+        faq_id = state.required_params.get('faq_id', 'unknown')
+        return {
+            "success": True, 
+            "response": f"FAQ update for #{faq_id} is coming soon!",
+            "action": "update_faq"
+        }
+
+    def _action_confirm(self, state: AdminConversationState, data_manager: TenantDataManager) -> Dict[str, Any]:
+        """FOUNDATION: Confirmation action"""
+        return {"success": True, "response": "Confirmed.", "action": "confirm"}
+
 
 def get_super_tenant_admin_engine(db: Session) -> RefactoredSuperTenantAdminEngine:
-    """Factory function to create the integrated admin engine."""
+    """Factory function to create the admin engine with Foundation + Mediator Layer."""
     return RefactoredSuperTenantAdminEngine(db)
