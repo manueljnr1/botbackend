@@ -9,6 +9,9 @@ import shutil
 import uuid
 from datetime import datetime 
 import re
+import random
+import string
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.knowledge_base.models import KnowledgeBase, FAQ, DocumentType, ProcessingStatus
@@ -21,6 +24,42 @@ from app.services.storage import storage_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+
+# In router.py - add after imports, before router = APIRouter()
+
+class FAQIDGenerator:
+    def __init__(self):
+        self.collision_count = 0
+        self.total_generated = 0
+    
+    def generate_unique_id(self, db: Session, max_attempts: int = 10) -> str:
+        self.total_generated += 1
+        
+        for attempt in range(max_attempts):
+            faq_id = ''.join(random.choices(string.ascii_letters + string.digits, k=9))
+            
+            exists = db.query(
+                db.query(FAQ).filter(FAQ.id == faq_id).exists()
+            ).scalar()
+            
+            if not exists:
+                if attempt > 0:
+                    self.collision_count += attempt
+                return faq_id
+        
+        raise HTTPException(status_code=500, detail="Could not generate unique FAQ ID")
+
+# Global instance
+faq_id_generator = FAQIDGenerator()
+
+def generate_unique_faq_id(db: Session) -> str:
+    return faq_id_generator.generate_unique_id(db)
+
+
+
+
 
 router = APIRouter()
 
@@ -88,7 +127,7 @@ class FAQCreate(BaseModel):
     answer: str
 
 class FAQOut(BaseModel):
-    id: int
+    id: str
     question: str
     answer: str
     
@@ -115,6 +154,11 @@ def get_tenant_from_api_key(api_key: str, db: Session):
     if not tenant:
         raise HTTPException(status_code=403, detail="Invalid API key")
     return tenant
+
+
+def generate_faq_id() -> str:
+    """Generate a random 9-character string for FAQ ID"""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=9))
 
 # Existing endpoints (unchanged)
 @router.get("", response_model=List[KnowledgeBaseOut])
@@ -631,13 +675,110 @@ async def get_crawl_details(
     }
 
 # Existing FAQ endpoints continue unchanged...
+# @router.post("/faqs/upload", response_model=List[FAQOut])
+# async def upload_faq_sheet(
+#     file: UploadFile = File(...),
+#     x_api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Upload an FAQ sheet (CSV or Excel)"""
+#     tenant = get_tenant_from_api_key(x_api_key, db)
+#     tenant_id = tenant.id
+#     logger.info(f"FAQ upload requested. Tenant: {tenant.name} (ID: {tenant_id})")
+    
+#     # Save the uploaded file temporarily
+#     upload_dir = os.path.join("temp", f"tenant_{tenant_id}")
+#     os.makedirs(upload_dir, exist_ok=True)
+#     file_path = os.path.join(upload_dir, file.filename)
+#     logger.info(f"Saving FAQ file to: {file_path}")
+    
+#     with open(file_path, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+    
+#     # Process FAQ sheet
+#     processor = DocumentProcessor(tenant_id)
+#     try:
+#         logger.info(f"Processing FAQ sheet...")
+#         faqs_data = processor.process_faq_sheet(file_path)
+#         logger.info(f"FAQ sheet processed successfully. {len(faqs_data)} items found")
+#     except Exception as e:
+#         # Clean up temp file
+#         os.remove(file_path)
+#         logger.error(f"Failed to process FAQ sheet: {str(e)}")
+#         raise HTTPException(status_code=400, detail=f"Failed to process FAQ sheet: {str(e)}")
+    
+#     # Clean up temp file
+#     os.remove(file_path)
+    
+#     # Delete existing FAQs for this tenant
+#     existing_faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).count()
+#     db.query(FAQ).filter(FAQ.tenant_id == tenant_id).delete()
+#     logger.info(f"Deleted {existing_faqs} existing FAQ items")
+    
+#     # Add new FAQs
+#     new_faqs = []
+#     for faq_data in faqs_data:
+#         faq = FAQ(
+#             id=generate_unique_faq_id(db),
+#             tenant_id=tenant_id,
+#             question=faq_data['question'],
+#             answer=faq_data['answer']
+#         )
+#         db.add(faq)
+#         new_faqs.append(faq)
+    
+#     db.commit()
+#     logger.info(f"Added {len(new_faqs)} new FAQ items")
+    
+#     return new_faqs
+
+@router.get("/faqs", response_model=List[FAQOut])
+async def list_faqs(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """List all FAQs for the tenant"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    logger.info(f"Listing FAQs for tenant: {tenant.name} (ID: {tenant_id})")
+    
+    faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
+    logger.info(f"Found {len(faqs)} FAQs")
+    
+    return faqs
+
+@router.post("/faqs", response_model=FAQOut)
+async def create_faq(
+    faq: FAQCreate,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Create a new FAQ"""
+    tenant = get_tenant_from_api_key(x_api_key, db)
+    tenant_id = tenant.id
+    logger.info(f"Creating new FAQ for tenant: {tenant.name} (ID: {tenant_id})")
+    
+    new_faq = FAQ(
+        id=generate_faq_id(),
+        tenant_id=tenant_id,
+        question=faq.question,
+        answer=faq.answer
+    )
+    db.add(new_faq)
+    db.commit()
+    db.refresh(new_faq)
+    logger.info(f"FAQ created successfully. ID: {new_faq.id}")
+    
+    return new_faq
+
+
 @router.post("/faqs/upload", response_model=List[FAQOut])
 async def upload_faq_sheet(
     file: UploadFile = File(...),
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Upload an FAQ sheet (CSV or Excel)"""
+    """Upload an FAQ sheet (CSV or Excel) with unique string IDs"""
     tenant = get_tenant_from_api_key(x_api_key, db)
     tenant_id = tenant.id
     logger.info(f"FAQ upload requested. Tenant: {tenant.name} (ID: {tenant_id})")
@@ -671,63 +812,72 @@ async def upload_faq_sheet(
     db.query(FAQ).filter(FAQ.tenant_id == tenant_id).delete()
     logger.info(f"Deleted {existing_faqs} existing FAQ items")
     
-    # Add new FAQs
+    # Add new FAQs with unique ID generation and retry logic
     new_faqs = []
-    for faq_data in faqs_data:
-        faq = FAQ(
-            tenant_id=tenant_id,
-            question=faq_data['question'],
-            answer=faq_data['answer']
-        )
-        db.add(faq)
-        new_faqs.append(faq)
+    failed_faqs = []
     
-    db.commit()
-    logger.info(f"Added {len(new_faqs)} new FAQ items")
+    for i, faq_data in enumerate(faqs_data):
+        max_retries = 3
+        success = False
+        
+        for retry in range(max_retries):
+            try:
+                # Generate unique FAQ ID
+                faq_id = generate_unique_faq_id(db)
+                
+                faq = FAQ(
+                    id=faq_id,
+                    tenant_id=tenant_id,
+                    question=faq_data['question'],
+                    answer=faq_data['answer']
+                )
+                db.add(faq)
+                db.flush()  # Flush to catch constraint violations early
+                new_faqs.append(faq)
+                success = True
+                break  # Success, exit retry loop
+                
+            except IntegrityError as e:
+                db.rollback()
+                logger.warning(f"FAQ ID collision for item {i+1}, retry {retry + 1}: {e}")
+                
+                if retry == max_retries - 1:  # Last retry failed
+                    logger.error(f"Failed to create FAQ item {i+1} after {max_retries} retries")
+                    failed_faqs.append({
+                        'question': faq_data['question'][:50] + "...",
+                        'error': 'Failed to generate unique ID'
+                    })
+                continue
+            
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Unexpected error creating FAQ item {i+1}: {e}")
+                failed_faqs.append({
+                    'question': faq_data['question'][:50] + "...",
+                    'error': str(e)
+                })
+                break
+    
+    try:
+        db.commit()
+        logger.info(f"Successfully added {len(new_faqs)} new FAQ items")
+        
+        if failed_faqs:
+            logger.warning(f"Failed to create {len(failed_faqs)} FAQ items: {failed_faqs}")
+            # You might want to return this info to the client
+            
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to commit FAQ batch: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save FAQ items to database")
     
     return new_faqs
 
-@router.get("/faqs", response_model=List[FAQOut])
-async def list_faqs(
-    x_api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """List all FAQs for the tenant"""
-    tenant = get_tenant_from_api_key(x_api_key, db)
-    tenant_id = tenant.id
-    logger.info(f"Listing FAQs for tenant: {tenant.name} (ID: {tenant_id})")
-    
-    faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
-    logger.info(f"Found {len(faqs)} FAQs")
-    
-    return faqs
 
-@router.post("/faqs", response_model=FAQOut)
-async def create_faq(
-    faq: FAQCreate,
-    x_api_key: str = Header(..., alias="X-API-Key"),
-    db: Session = Depends(get_db)
-):
-    """Create a new FAQ"""
-    tenant = get_tenant_from_api_key(x_api_key, db)
-    tenant_id = tenant.id
-    logger.info(f"Creating new FAQ for tenant: {tenant.name} (ID: {tenant_id})")
-    
-    new_faq = FAQ(
-        tenant_id=tenant_id,
-        question=faq.question,
-        answer=faq.answer
-    )
-    db.add(new_faq)
-    db.commit()
-    db.refresh(new_faq)
-    logger.info(f"FAQ created successfully. ID: {new_faq.id}")
-    
-    return new_faq
 
 @router.put("/faqs/{faq_id}", response_model=FAQOut)
 async def update_faq(
-    faq_id: int,
+    faq_id: str,
     faq_update: FAQCreate,
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
@@ -752,7 +902,7 @@ async def update_faq(
 
 @router.delete("/faqs/{faq_id}")
 async def delete_faq(
-    faq_id: int,
+    faq_id: str,
     x_api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):

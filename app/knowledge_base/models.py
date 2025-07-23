@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum, Boolean, JSON,  Float
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Enum, Boolean, JSON,  Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -77,7 +77,7 @@ class KnowledgeBase(Base):
 class FAQ(Base):
     __tablename__ = "faqs"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(9), primary_key=True, unique=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"))
     question = Column(Text)
     answer = Column(Text)
@@ -86,6 +86,9 @@ class FAQ(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="faqs")
+    __table_args__ = (
+        UniqueConstraint('id', name='uq_faq_id'),
+    )
 
 
 
