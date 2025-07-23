@@ -36,12 +36,7 @@ class PricingService:
         return dt.astimezone(pytz.UTC)
         
     def create_default_plans(self):
-        """Create default pricing plans if they don't exist"""
-        
-        # Check if plans already exist
-        existing_plans = self.db.query(PricingPlan).count()
-        if existing_plans > 0:
-            return
+        """Create or update default pricing plans"""
         
         plans = [
             {
@@ -137,8 +132,19 @@ class PricingService:
         ]
         
         for plan_data in plans:
-            plan = PricingPlan(**plan_data)
-            self.db.add(plan)
+            # Check if plan exists by plan_type
+            existing_plan = self.db.query(PricingPlan).filter(
+                PricingPlan.plan_type == plan_data["plan_type"]
+            ).first()
+            
+            if existing_plan:
+                # Update existing plan
+                for key, value in plan_data.items():
+                    setattr(existing_plan, key, value)
+            else:
+                # Create new plan
+                plan = PricingPlan(**plan_data)
+                self.db.add(plan)
         
         self.db.commit()
     
