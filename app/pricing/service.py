@@ -53,10 +53,10 @@ class PricingService:
                 "max_messages_monthly": 50,  # 50 conversations
                 "custom_prompt_allowed": True,
                 "website_api_allowed": True,
-                "slack_allowed": True,
+                "slack_allowed": False,
                 "discord_allowed": True,
                 "whatsapp_allowed": False,  # Temporarily removed
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Bot Memory"]',
+                "features": '["50 Conversations", "Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Bot Memory"]',
                 "is_active": True,
                 "is_addon": False,
                 "is_popular": False,
@@ -74,7 +74,7 @@ class PricingService:
                 "slack_allowed": True,
                 "discord_allowed": True,
                 "whatsapp_allowed": False,  # Temporarily removed
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Bot Memory"]',
+                "features": '["2000 conversations", "Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Bot Memory"]',
                 "is_active": True,
                 "is_addon": False,
                 "is_popular": False,
@@ -92,7 +92,7 @@ class PricingService:
                 "slack_allowed": True,
                 "discord_allowed": True,
                 "whatsapp_allowed": False,  # Temporarily removed
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Bot Memory"]',
+                "features": '["5000 conversations", "Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Bot Memory"]',
                 "is_active": True,
                 "is_addon": False,
                 "is_popular": True,  # Popular plan
@@ -109,8 +109,8 @@ class PricingService:
                 "website_api_allowed": True,
                 "slack_allowed": True,
                 "discord_allowed": True,
-                "whatsapp_allowed": False,  # Temporarily removed
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access"]',
+                "whatsapp_allowed": False,  
+                "features": '["20,000  Conversations", "Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access"]',
                 "is_active": True,
                 "is_addon": False,
                 "is_popular": False,
@@ -128,7 +128,7 @@ class PricingService:
                 "slack_allowed": True,
                 "discord_allowed": True,
                 "whatsapp_allowed": False,  # Temporarily removed
-                "features": '["Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access", "White Label", "Custom Integrations"]',
+                "features": '["Unlimited Conversations", "Custom Prompt", "Slack Integration", "Discord Integration", "Web Integration", "Advanced Analytics", "Priority Support", "Enhanced Bot Memory", "API Access", "White Label", "Custom Integrations"]',
                 "is_active": True,
                 "is_addon": False,
                 "is_popular": False,
