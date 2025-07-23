@@ -1133,7 +1133,7 @@ USER REQUEST: "{user_message}"
 AVAILABLE ADMIN ACTIONS:
 - FAQ Management: add_faq, update_faq, delete_faq, list_faqs
 - Analytics: view_analytics, conversation_stats, usage_reports
-- Settings: update_prompt, update_branding, email_config
+- Settings: update_prompt, update_branding, email_config, view_setting
 - Integrations: setup_discord, setup_slack, setup_telegram
 - General: help, greeting, clarification_needed
 
@@ -1199,13 +1199,21 @@ Analysis:"""
             'update_faq': self._action_update_faq,
             'delete_faq': self._action_delete_faq,
             'list_faqs': self._action_list_faqs,
+            'show_faqs': self._action_list_faqs,
             'view_analytics': self._action_view_analytics,
             'view_settings': self._action_view_settings,
+            'show_settings': self._action_view_settings,
             'help': self._action_help,
             'greeting': self._action_greeting,
             'setup_discord': self._action_setup_integration,
             'setup_slack': self._action_setup_integration,
-            'setup_telegram': self._action_setup_integration
+            'setup_telegram': self._action_setup_integration,
+            'show_settings': self._action_view_settings,
+            'display_settings': self._action_view_settings,
+            'show_faqs': self._action_list_faqs,
+            'display_faqs': self._action_list_faqs,
+            'show_analytics': self._action_view_analytics,
+            'display_analytics': self._action_view_analytics
         }
         
         # Get the appropriate action method
@@ -1283,9 +1291,10 @@ Analysis:"""
         params = state.required_params
         if not params.get('question') or not params.get('answer'):
             return {
-                "success": False,
-                "response": "I need both a question and answer to add an FAQ. What question would you like to add?",
-                "requires_input": True
+                "success": True,  # ✅ Changed to True
+                "response": "I'd be happy to help you add an FAQ! What question would you like to add?",
+                "requires_input": True,
+                "action": "add_faq"  # ✅ Added action
             }
         
         try:
