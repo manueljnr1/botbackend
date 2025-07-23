@@ -102,7 +102,7 @@ async def get_detailed_plans(
             price_monthly=plan.price_monthly,
             price_yearly=plan.price_yearly,
             conversations_limit=plan.max_messages_monthly,
-            features=features_list,
+            features=features_list + [f"{plan.max_messages_monthly} conversations/month"], 
             integrations=integrations,
             is_popular=is_popular,
             is_addon=False  # All livechat addon references removed
