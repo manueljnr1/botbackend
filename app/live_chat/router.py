@@ -516,7 +516,7 @@ async def customer_websocket_endpoint(
           websocket=websocket,
           customer_id=customer_id,
           tenant_id=tenant_id,
-          conversation_id=str(conversation_id)
+          conversation_id=conversation_id
       )
       
       # ✅ ENSURE CUSTOMER IS ADDED TO CONVERSATION
