@@ -30,7 +30,7 @@ def get_engine_config():
     
     base_config = {
         "pool_pre_ping": True,
-        "pool_recycle": 3600,     # 1 hour
+        "pool_recycle": 1800,     # 1 hour
         "pool_timeout": 30,
         "echo": False,
     }

@@ -208,18 +208,6 @@ def root():
 
 
 
-# @app.get("/health")
-# def health_check():
-#     # Check environment variables
-#     env_vars = {
-#         "TWILIO_ACCOUNT_SID": os.getenv("TWILIO_ACCOUNT_SID", "Not set"),
-#         "TWILIO_AUTH_TOKEN": os.getenv("TWILIO_AUTH_TOKEN", "Not set") != "Not set",
-#         "Database URL": os.getenv("DATABASE_URL", "Default SQLite"),
-#         "OpenAI API Key": os.getenv("OPENAI_API_KEY", "Not set") != "Not set",
-#         "Frontend URL": settings.FRONTEND_URL or "Using default localhost:3000",  # ✅ Show config
-#         "Environment": settings.ENVIRONMENT
-#     }
-
     
 
 @app.get("/health")
@@ -316,6 +304,16 @@ async def startup_event():
                 logger.error("🚨 Exiting due to database failure in production")
                 import sys
                 sys.exit(1)
+
+
+        try:
+            from app.database import engine
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("✅ Database connections warmed")
+        except Exception as e:
+            logger.error(f"❌ Database warming failed: {e}")
 
         
         # 1. Start Discord, Slack, Instagram, and Telegram bots
