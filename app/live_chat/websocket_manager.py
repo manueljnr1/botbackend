@@ -491,6 +491,15 @@ class LiveChatMessageHandler:
                 # Get agent details
                 agent = self.db.query(Agent).filter(Agent.id == agent_id).first()
                 sender_name = agent.display_name if agent else "Agent"
+
+                await self.websocket_manager.add_connection_to_conversation(
+                    connection_id, str(conversation_id)
+                )
+                
+                # Verify agent has access to this conversation
+                if conversation.tenant_id != connection.tenant_id:
+                    await self._send_error(connection_id, "Access denied to conversation")
+                    return
             
             # Create message record
             message = LiveChatMessage(
