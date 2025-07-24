@@ -444,10 +444,14 @@
                     console.log('Connection established');
                     break;
                     
-                case 'new_message':
+                    case 'new_message':
+                    console.log('New message received:', message.data);
                     const messageData = message.data;
                     if (messageData.sender_type === 'agent') {
+                        console.log('Adding agent message:', messageData.content);
                         addAgentMessage(messageData.content, messageData.sender_name);
+                    } else {
+                        console.log('Message sender_type:', messageData.sender_type);
                     }
                     break;
                     
