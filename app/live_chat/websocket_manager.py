@@ -450,125 +450,131 @@ class LiveChatMessageHandler:
             await self._send_error(connection_id, str(e))
     
     async def _handle_chat_message(self, connection_id: str, data: dict):
-        """Handle a chat message from customer or agent"""
-        try:
-            conversation_id = data.get("conversation_id")
-            content = data.get("content", "").strip()
-            
-            if not conversation_id or not content:
-                await self._send_error(connection_id, "Missing conversation_id or content")
-                return
-            
-            # Get connection details
-            connection = self.websocket_manager.connections.get(connection_id)
-            if not connection:
-                await self._send_error(connection_id, "Connection not found")
-                return
-            
-            # Get conversation
-            conversation = self.db.query(LiveChatConversation).filter(
-                LiveChatConversation.id == conversation_id
-            ).first()
-            
-            if not conversation:
-                await self._send_error(connection_id, "Conversation not found")
-                return
-            
-            # Determine sender details
-            if connection.connection_type == ConnectionType.CUSTOMER:
-                sender_type = SenderType.CUSTOMER
-                sender_id = connection.user_id
-                sender_name = data.get("sender_name", "Customer")
-                agent_id = None
-            else:  # Agent
-                sender_type = SenderType.AGENT
-                agent_id = int(connection.user_id)
-                sender_id = str(agent_id)
-                
-                # Get agent details
-                agent = self.db.query(Agent).filter(Agent.id == agent_id).first()
-                sender_name = agent.display_name if agent else "Agent"
-            
-            # Create message record
-            message = LiveChatMessage(
-                conversation_id=conversation_id,
-                content=content,
-                message_type=MessageType.TEXT,
-                sender_type=sender_type,
-                sender_id=sender_id,
-                agent_id=agent_id,
-                sender_name=sender_name,
-                sent_at=datetime.now(timezone.utc)  # Add this line
-            )
-            
-            self.db.add(message)
-            
-            # Update conversation
-            conversation.last_activity_at = datetime.now(timezone.utc)
-            conversation.message_count += 1
-            
-            if sender_type == SenderType.AGENT:
-                conversation.agent_message_count += 1
-            # Mark as active if agent's first message
-                if conversation.status == ConversationStatus.ASSIGNED:
-                    conversation.status = ConversationStatus.ACTIVE
-                    conversation.first_response_at = datetime.now(timezone.utc)
-                
-                # Calculate response time
-                    if conversation.queue_entry_time:
-                        queue_time = conversation.queue_entry_time
-                        if queue_time.tzinfo is None:
-                            queue_time = queue_time.replace(tzinfo=timezone.utc)
-                    
-                        current_time = datetime.now(timezone.utc)
-                        response_seconds = (current_time - queue_time).total_seconds()
-                        conversation.response_time_seconds = int(response_seconds)
-            else:
-                conversation.customer_message_count += 1
+       """Handle a chat message from customer or agent"""
+       try:
+           conversation_id = data.get("conversation_id")
+           content = data.get("content", "").strip()
+           
+           if not conversation_id or not content:
+               await self._send_error(connection_id, "Missing conversation_id or content")
+               return
+           
+           # Get connection details
+           connection = self.websocket_manager.connections.get(connection_id)
+           if not connection:
+               await self._send_error(connection_id, "Connection not found")
+               return
+           
+           # Get conversation
+           conversation = self.db.query(LiveChatConversation).filter(
+               LiveChatConversation.id == conversation_id
+           ).first()
+           
+           if not conversation:
+               await self._send_error(connection_id, "Conversation not found")
+               return
+           
+           # DEBUG: Log customer state before processing
+           logger.info(f"Before message processing - Customer: {conversation.customer_identifier}, Status: {conversation.status}")
+           
+           # Determine sender details
+           if connection.connection_type == ConnectionType.CUSTOMER:
+               sender_type = SenderType.CUSTOMER
+               sender_id = connection.user_id
+               sender_name = data.get("sender_name", "Customer")
+               agent_id = None
+           else:  # Agent
+               sender_type = SenderType.AGENT
+               agent_id = int(connection.user_id)
+               sender_id = str(agent_id)
+               
+               # Get agent details
+               agent = self.db.query(Agent).filter(Agent.id == agent_id).first()
+               sender_name = agent.display_name if agent else "Agent"
+           
+           # Create message record
+           message = LiveChatMessage(
+               conversation_id=conversation_id,
+               content=content,
+               message_type=MessageType.TEXT,
+               sender_type=sender_type,
+               sender_id=sender_id,
+               agent_id=agent_id,
+               sender_name=sender_name,
+               sent_at=datetime.now(timezone.utc)
+           )
+           
+           self.db.add(message)
+           
+           # Update conversation
+           conversation.last_activity_at = datetime.now(timezone.utc)
+           conversation.message_count += 1
+           
+           if sender_type == SenderType.AGENT:
+               conversation.agent_message_count += 1
+               # Mark as active if agent's first message
+               if conversation.status == ConversationStatus.ASSIGNED:
+                   conversation.status = ConversationStatus.ACTIVE
+                   conversation.first_response_at = datetime.now(timezone.utc)
+               
+               # Calculate response time
+               if conversation.queue_entry_time:
+                   queue_time = conversation.queue_entry_time
+                   if queue_time.tzinfo is None:
+                       queue_time = queue_time.replace(tzinfo=timezone.utc)
+               
+                   current_time = datetime.now(timezone.utc)
+                   response_seconds = (current_time - queue_time).total_seconds()
+                   conversation.response_time_seconds = int(response_seconds)
+           else:
+               conversation.customer_message_count += 1
 
-            self.db.commit()
-            self.db.refresh(message)
-            
-            # Broadcast message to conversation participants
-            message_data = {
-                "message_id": message.id,
-                "conversation_id": conversation_id,
-                "content": content,
-                "sender_type": sender_type,
-                "sender_id": sender_id,
-                "sender_name": sender_name,
-                "sent_at": message.sent_at.isoformat(),
-                "message_type": MessageType.TEXT
-            }
-            
-            broadcast_msg = WebSocketMessage(
-                message_type="new_message",
-                data=message_data,
-                conversation_id=conversation_id
-            )
-            
-            await self.websocket_manager.send_to_conversation(
-                conversation_id, broadcast_msg, exclude_connection=connection_id
-            )
-            
-            # Send confirmation to sender
-            confirmation = WebSocketMessage(
-                message_type="message_sent",
-                data={
-                    "message_id": message.id,
-                    "conversation_id": conversation_id,
-                    "status": "delivered"
-                }
-            )
-            
-            await connection.send_message(confirmation)
-            
-            logger.info(f"Message sent in conversation {conversation_id} by {sender_type}")
-            
-        except Exception as e:
-            logger.error(f"Error handling chat message: {str(e)}")
-            self.db.rollback()
-            await self._send_error(connection_id, "Failed to send message")
+           self.db.commit()
+           self.db.refresh(message)
+           
+           # DEBUG: Log customer state after processing
+           logger.info(f"After message processing - Customer: {conversation.customer_identifier}, Status: {conversation.status}")
+           
+           # Broadcast message to conversation participants
+           message_data = {
+               "message_id": message.id,
+               "conversation_id": conversation_id,
+               "content": content,
+               "sender_type": sender_type,
+               "sender_id": sender_id,
+               "sender_name": sender_name,
+               "sent_at": message.sent_at.isoformat(),
+               "message_type": MessageType.TEXT
+           }
+           
+           broadcast_msg = WebSocketMessage(
+               message_type="new_message",
+               data=message_data,
+               conversation_id=conversation_id
+           )
+           
+           await self.websocket_manager.send_to_conversation(
+               conversation_id, broadcast_msg, exclude_connection=connection_id
+           )
+           
+           # Send confirmation to sender
+           confirmation = WebSocketMessage(
+               message_type="message_sent",
+               data={
+                   "message_id": message.id,
+                   "conversation_id": conversation_id,
+                   "status": "delivered"
+               }
+           )
+           
+           await connection.send_message(confirmation)
+           
+           logger.info(f"Message sent in conversation {conversation_id} by {sender_type}")
+           
+       except Exception as e:
+           logger.error(f"Error handling chat message: {str(e)}")
+           self.db.rollback()
+           await self._send_error(connection_id, "Failed to send message")
     
     async def _handle_typing_indicator(self, connection_id: str, data: dict, is_typing: bool):
         """Handle typing indicator"""
