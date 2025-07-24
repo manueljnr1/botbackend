@@ -40,7 +40,7 @@ def get_engine_config():
         base_config["connect_args"] = {
             "application_name": "lyra",
             "connect_timeout": 10,
-            "prepared_statement_cache_size": 0,
+            "prepare_threshold": None,  # Disable prepared statements
         }
     else:
         # For SQLite - only use supported parameters
