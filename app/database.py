@@ -40,6 +40,7 @@ def get_engine_config():
         base_config["connect_args"] = {
             "application_name": "lyra",
             "connect_timeout": 10,
+            "prepared_statement_cache_size": 0,
         }
     else:
         # For SQLite - only use supported parameters
