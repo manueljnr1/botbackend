@@ -37,6 +37,7 @@ class PricingService:
         
     def create_default_plans(self):
         """Create or update default pricing plans"""
+        print("🔥 UPDATING PLANS WITH NEW FEATURES")
         
         plans = [
             {

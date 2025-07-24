@@ -241,37 +241,57 @@ class Settings(BaseSettings):
     @property
     def get_database_engine_config(self) -> dict:
         """Get database engine configuration based on environment"""
+        
+        # Check if we're using PostgreSQL or SQLite
+        is_postgresql = "postgresql" in self.DATABASE_URL.lower()
+        
         base_config = {
             "pool_pre_ping": True,
             "pool_recycle": 3600,
             "pool_timeout": 30,
-            "connect_args": {
+        }
+        
+        # Only add PostgreSQL-specific parameters if using PostgreSQL
+        if is_postgresql:
+            base_config["connect_args"] = {
                 "application_name": "lyra",
                 "connect_timeout": 10,
             }
-        }
+        else:
+            # For SQLite - only use supported parameters
+            base_config["connect_args"] = {
+                "check_same_thread": False,  # Allow SQLite across threads
+            }
         
         if self.is_production():
-            return {
+            config = {
                 **base_config,
                 "pool_size": 5,
                 "max_overflow": 10,
                 "echo": False,
             }
         elif self.is_staging():
-            return {
+            config = {
                 **base_config,
                 "pool_size": 3,
                 "max_overflow": 7,
                 "echo": False,
             }
         else:  # development
-            return {
+            config = {
                 **base_config,
                 "pool_size": 2,
                 "max_overflow": 5,
                 "echo": True,  # SQL logging in development
             }
+            
+            # For SQLite in development, disable pooling for better compatibility
+            if not is_postgresql:
+                config.update({
+                    "poolclass": None,  # Disable connection pooling for SQLite
+                })
+        
+        return config
 
 
 settings = Settings()

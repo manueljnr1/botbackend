@@ -3,170 +3,620 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Initialize Pricing Plans</title>
+    <title>Live Chat Widget</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-            color: #555;
-        }
-        input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
+        * {
+            margin: 0;
+            padding: 0;
             box-sizing: border-box;
         }
-        button {
-            background-color: #007bff;
-            color: white;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             width: 100%;
+            max-width: 400px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: slideUp 0.5s ease-out;
         }
-        button:hover {
-            background-color: #0056b3;
+
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
-        button:disabled {
-            background-color: #ccc;
+
+        .config-panel {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .config-group {
+            margin-bottom: 15px;
+        }
+
+        .config-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #495057;
+            font-size: 13px;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+        }
+
+        .start-btn {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .start-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .chat-header h2 {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .chat-status {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.customer {
+            text-align: right;
+        }
+
+        .message.agent {
+            text-align: left;
+        }
+
+        .message.system {
+            text-align: center;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            padding: 12px 16px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+
+        .message.customer .message-bubble {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.agent .message-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e9ecef;
+        }
+
+        .message.system .message-bubble {
+            background: #ffc107;
+            color: #856404;
+            font-size: 12px;
+            padding: 8px 12px;
+        }
+
+        .message-time {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .chat-input {
+            padding: 15px;
+            border-top: 1px solid #e9ecef;
+            background: white;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 20px;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .message-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 10px 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            background: #5a6fd8;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
             cursor: not-allowed;
         }
-        .result {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 4px;
+
+        .typing-indicator {
             display: none;
+            padding: 10px 15px;
+            font-style: italic;
+            color: #6c757d;
+            font-size: 12px;
         }
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+
+        .typing-indicator.show {
+            display: block;
         }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .loading {
+
+        .connection-status {
             text-align: center;
-            color: #666;
+            padding: 10px;
+            font-size: 12px;
+            background: #e7f3ff;
+            color: #0066cc;
+            border-bottom: 1px solid #b3d9ff;
+        }
+
+        .hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Initialize Pricing Plans</h1>
-        
-        <form id="initForm">
-            <div class="form-group">
-                <label for="baseUrl">Base URL:</label>
-                <input type="url" id="baseUrl" placeholder="https://your-api.com" required>
+    <div class="chat-container">
+        <!-- Configuration Panel -->
+        <div class="config-panel" id="configPanel">
+            <div class="config-group">
+                <label for="baseUrl">Base URL</label>
+                <input type="text" id="baseUrl" placeholder="https://api.example.com" value="https://chatbot-api-production-2de6.up.railway.app">
             </div>
             
-            <div class="form-group">
-                <label for="token">Admin Token:</label>
-                <input type="text" id="token" placeholder="Bearer token" required>
+            <div class="config-group">
+                <label for="apiKey">API Key</label>
+                <input type="text" id="apiKey" placeholder="your-api-key">
             </div>
             
-            <button type="submit" id="submitBtn">Initialize Pricing Plans</button>
-        </form>
-        
-        <div id="result" class="result"></div>
+            <div class="config-group">
+                <label for="userIdentifier">User Identifier</label>
+                <input type="text" id="userIdentifier" placeholder="user@example.com" value="test-user-123">
+            </div>
+            
+            <div class="config-group">
+                <label for="customerName">Your Name (Optional)</label>
+                <input type="text" id="customerName" placeholder="John Doe">
+            </div>
+            
+            <div class="config-group">
+                <label for="initialMessage">Initial Message (Optional)</label>
+                <input type="text" id="initialMessage" placeholder="Hello, I need help...">
+            </div>
+            
+            <button class="start-btn" onclick="startChat()">Start Live Chat</button>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="chat-interface hidden" id="chatInterface">
+            <div class="chat-header">
+                <h2>Live Support</h2>
+                <div class="chat-status" id="chatStatus">Connecting...</div>
+            </div>
+            
+            <div class="connection-status" id="connectionStatus">Connecting to support...</div>
+            
+            <div class="chat-messages" id="chatMessages"></div>
+            
+            <div class="typing-indicator" id="typingIndicator">
+                Agent is typing...
+            </div>
+            
+            <div class="chat-input">
+                <div class="input-group">
+                    <input type="text" class="message-input" id="messageInput" placeholder="Type your message..." disabled>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        document.getElementById('initForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
+        let websocket = null;
+        let conversationId = null;
+        let isConnected = false;
+        let typingTimeout = null;
+
+        // Start chat function
+        async function startChat() {
             const baseUrl = document.getElementById('baseUrl').value.trim();
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value.trim();
-            const submitBtn = document.getElementById('submitBtn');
-            const result = document.getElementById('result');
-            
-            // Reset result
-            result.style.display = 'none';
-            result.className = 'result';
-            
-            // Loading state
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Initializing...';
-            
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const userIdentifier = document.getElementById('userIdentifier').value.trim();
+            const customerName = document.getElementById('customerName').value.trim();
+            const initialMessage = document.getElementById('initialMessage').value.trim();
+
+            if (!baseUrl || !apiKey || !userIdentifier) {
+                alert('Please fill in Base URL, API Key, and User Identifier');
+                return;
+            }
+
             try {
-                // First, login to get admin token
-                const loginResponse = await fetch(`${baseUrl}/tenants/login`, {
+                // Show loading
+                document.querySelector('.start-btn').disabled = true;
+                document.querySelector('.start-btn').textContent = 'Starting...';
+
+                // Call start chat endpoint
+                const response = await fetch(`${baseUrl}/live-chat/start-chat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
                     },
                     body: JSON.stringify({
-                        username: username,
-                        password: password
+                        customer_identifier: userIdentifier,
+                        customer_name: customerName || null,
+                        initial_message: initialMessage || null
                     })
                 });
-                
-                if (!loginResponse.ok) {
-                    throw new Error(`Login failed: ${loginResponse.status} ${loginResponse.statusText}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
+
+                const data = await response.json();
                 
-                const loginData = await loginResponse.json();
-                const token = loginData.access_token;
-                
-                // Now call the initialize endpoint
-                const initResponse = await fetch(`${baseUrl}/pricing/initialize-defaults`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
+                if (data.success) {
+                    conversationId = data.conversation_id;
+                    
+                    // Extract tenant_id from websocket_url
+                    const urlParams = new URLSearchParams(data.websocket_url.split('?')[1]);
+                    const tenantId = urlParams.get('tenant_id');
+                    
+                    // Switch to chat interface
+                    document.getElementById('configPanel').classList.add('hidden');
+                    document.getElementById('chatInterface').classList.remove('hidden');
+                    
+                    // Show queue position if any
+                    if (data.queue_position) {
+                        updateStatus(`In queue (position ${data.queue_position})`);
+                        addSystemMessage(data.message);
+                    } else {
+                        updateStatus('Connected');
                     }
-                });
+                    
+                    // Connect WebSocket
+                    connectWebSocket(baseUrl, conversationId, userIdentifier, tenantId);
+                } else {
+                    throw new Error(data.message || 'Failed to start chat');
+                }
+            } catch (error) {
+                console.error('Error starting chat:', error);
+                alert(`Error: ${error.message}`);
                 
-                if (!initResponse.ok) {
-                    throw new Error(`Initialization failed: ${initResponse.status} ${initResponse.statusText}`);
+                // Reset button
+                document.querySelector('.start-btn').disabled = false;
+                document.querySelector('.start-btn').textContent = 'Start Live Chat';
+            }
+        }
+
+        // Connect WebSocket
+        function connectWebSocket(baseUrl, conversationId, userIdentifier, tenantId) {
+            const wsUrl = baseUrl.replace('http', 'ws') + `/live-chat/ws/customer/${conversationId}?customer_id=${userIdentifier}&tenant_id=${tenantId}`;
+            
+            updateConnectionStatus('Connecting to chat...');
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function() {
+                console.log('WebSocket connected');
+                isConnected = true;
+                updateConnectionStatus('Connected to support');
+                updateStatus('Connected');
+                
+                // Enable input
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                
+                // Hide connection status after 2 seconds
+                setTimeout(() => {
+                    document.getElementById('connectionStatus').style.display = 'none';
+                }, 2000);
+            };
+            
+            websocket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+            
+            websocket.onclose = function() {
+                console.log('WebSocket disconnected');
+                isConnected = false;
+                updateConnectionStatus('Disconnected - Attempting to reconnect...');
+                updateStatus('Disconnected');
+                
+                // Disable input
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                
+                // Attempt to reconnect after 3 seconds
+                setTimeout(() => {
+                    if (!isConnected) {
+                        connectWebSocket(baseUrl, conversationId, userIdentifier, tenantId);
+                    }
+                }, 3000);
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus('WebSocket failed - using polling');
+                
+                // Start polling fallback
+                startPollingFallback(baseUrl, conversationId, userIdentifier);
+            };
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(message) {
+            console.log('Received message:', message);
+            
+            switch (message.type) {
+                case 'connection_established':
+                    console.log('Connection established');
+                    break;
+                    
+                case 'new_message':
+                    const messageData = message.data;
+                    if (messageData.sender_type === 'agent') {
+                        addAgentMessage(messageData.content, messageData.sender_name);
+                    }
+                    break;
+                    
+                case 'agent_joined':
+                    addSystemMessage(`${message.data.agent_name} has joined the chat`);
+                    updateStatus(`Connected with ${message.data.agent_name}`);
+                    break;
+                    
+                case 'conversation_closed':
+                    addSystemMessage('Conversation has been closed');
+                    updateStatus('Chat ended');
+                    document.getElementById('messageInput').disabled = true;
+                    document.getElementById('sendBtn').disabled = true;
+                    break;
+                    
+                case 'typing_indicator':
+                    if (message.data.user_type === 'agent' && message.data.is_typing) {
+                        showTypingIndicator();
+                    } else {
+                        hideTypingIndicator();
+                    }
+                    break;
+                    
+                case 'error':
+                    console.error('WebSocket error:', message.data.message);
+                    addSystemMessage(`Error: ${message.data.message}`);
+                    break;
+                    
+                case 'message_sent':
+                    // Message confirmation
+                    console.log('Message sent successfully');
+                    break;
+            }
+        }
+
+        // Send message
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message || !isConnected) return;
+            
+            // Add to UI immediately
+            addCustomerMessage(message);
+            
+            // Send via WebSocket
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'chat_message',
+                    data: {
+                        conversation_id: conversationId,
+                        content: message,
+                        sender_name: document.getElementById('customerName').value || 'Customer'
+                    }
+                }));
+            }
+            
+            // Clear input
+            messageInput.value = '';
+            
+            // Send typing stop
+            sendTypingIndicator(false);
+        }
+
+        // Add customer message to UI
+        function addCustomerMessage(content) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message customer';
+            
+            messageDiv.innerHTML = `
+                <div class="message-bubble">${escapeHtml(content)}</div>
+                <div class="message-time">${new Date().toLocaleTimeString()}</div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Add agent message to UI
+        function addAgentMessage(content, senderName = 'Agent') {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message agent';
+            
+            messageDiv.innerHTML = `
+                <div class="message-bubble">${escapeHtml(content)}</div>
+                <div class="message-time">${senderName} • ${new Date().toLocaleTimeString()}</div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Add system message to UI
+        function addSystemMessage(content) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message system';
+            
+            messageDiv.innerHTML = `
+                <div class="message-bubble">${escapeHtml(content)}</div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Typing indicator functions
+        function sendTypingIndicator(isTyping) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: isTyping ? 'typing_start' : 'typing_stop',
+                    data: {
+                        conversation_id: conversationId
+                    }
+                }));
+            }
+        }
+
+        function showTypingIndicator() {
+            document.getElementById('typingIndicator').classList.add('show');
+        }
+
+        function hideTypingIndicator() {
+            document.getElementById('typingIndicator').classList.remove('show');
+        }
+
+        // Update status
+        function updateStatus(status) {
+            document.getElementById('chatStatus').textContent = status;
+        }
+
+        function updateConnectionStatus(status) {
+            document.getElementById('connectionStatus').textContent = status;
+            document.getElementById('connectionStatus').style.display = 'block';
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            } else {
+                // Send typing indicator
+                sendTypingIndicator(true);
+                
+                // Clear previous timeout
+                if (typingTimeout) {
+                    clearTimeout(typingTimeout);
                 }
                 
-                const initData = await initResponse.json();
-                
-                // Success
-                result.className = 'result success';
-                result.textContent = 'Pricing plans initialized successfully!';
-                result.style.display = 'block';
-                
-            } catch (error) {
-                // Error
-                result.className = 'result error';
-                result.textContent = `Error: ${error.message}`;
-                result.style.display = 'block';
-            } finally {
-                // Reset button
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Initialize Pricing Plans';
+                // Set timeout to stop typing indicator
+                typingTimeout = setTimeout(() => {
+                    sendTypingIndicator(false);
+                }, 1000);
+            }
+        });
+
+        // Handle form submission in config panel
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !document.getElementById('configPanel').classList.contains('hidden')) {
+                startChat();
             }
         });
     </script>

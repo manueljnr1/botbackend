@@ -62,36 +62,57 @@ db_logger = logging.getLogger('database')
 
 def get_engine_config():
     """Database engine configuration for Transaction pooler"""
+    
+    # Check if we're using PostgreSQL or SQLite
+    database_url = getattr(settings, 'DATABASE_URL', 'sqlite:///./chatbot.db')
+    is_postgresql = "postgresql" in database_url.lower()
+    
     base_config = {
         "pool_pre_ping": True,
         "pool_recycle": 3600,     # 1 hour
         "pool_timeout": 30,
         "echo": False,
-        "connect_args": {
+    }
+    
+    # Only add PostgreSQL-specific connect_args if using PostgreSQL
+    if is_postgresql:
+        base_config["connect_args"] = {
             "application_name": "lyra",
             "connect_timeout": 10,
         }
-    }
+    else:
+        # For SQLite - only use supported parameters
+        base_config["connect_args"] = {
+            "check_same_thread": False,  # Allow SQLite across threads
+        }
     
     if settings.is_production():
-        return {
+        config = {
             **base_config,
             "pool_size": 5,           # Back to normal
             "max_overflow": 10,       # Back to normal
         }
     elif settings.is_staging():
-        return {
+        config = {
             **base_config,
             "pool_size": 3,
             "max_overflow": 7,
         }
     else:  # development
-        return {
+        config = {
             **base_config,
             "pool_size": 2,
             "max_overflow": 5,
             "echo": True,             # SQL logging in dev
         }
+        
+        # For SQLite in development, optimize for single-threaded usage
+        if not is_postgresql:
+            config.update({
+                "poolclass": None,  # Disable connection pooling for SQLite
+            })
+    
+    return config
 
 # Create engine
 database_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")

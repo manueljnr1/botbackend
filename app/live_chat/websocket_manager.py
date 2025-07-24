@@ -2,7 +2,7 @@
 import json
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -497,29 +497,35 @@ class LiveChatMessageHandler:
                 sender_type=sender_type,
                 sender_id=sender_id,
                 agent_id=agent_id,
-                sender_name=sender_name
+                sender_name=sender_name,
+                sent_at=datetime.now(timezone.utc)  # Add this line
             )
             
             self.db.add(message)
             
             # Update conversation
-            conversation.last_activity_at = datetime.utcnow()
+            conversation.last_activity_at = datetime.now(timezone.utc)
             conversation.message_count += 1
             
             if sender_type == SenderType.AGENT:
                 conversation.agent_message_count += 1
-                # Mark as active if agent's first message
+            # Mark as active if agent's first message
                 if conversation.status == ConversationStatus.ASSIGNED:
                     conversation.status = ConversationStatus.ACTIVE
-                    conversation.first_response_at = datetime.utcnow()
-                    
-                    # Calculate response time
+                    conversation.first_response_at = datetime.now(timezone.utc)
+                
+                # Calculate response time
                     if conversation.queue_entry_time:
-                        response_seconds = (datetime.utcnow() - conversation.queue_entry_time).total_seconds()
+                        queue_time = conversation.queue_entry_time
+                        if queue_time.tzinfo is None:
+                            queue_time = queue_time.replace(tzinfo=timezone.utc)
+                    
+                        current_time = datetime.now(timezone.utc)
+                        response_seconds = (current_time - queue_time).total_seconds()
                         conversation.response_time_seconds = int(response_seconds)
             else:
                 conversation.customer_message_count += 1
-            
+
             self.db.commit()
             self.db.refresh(message)
             
