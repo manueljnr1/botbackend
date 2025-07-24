@@ -262,12 +262,11 @@ class Settings(BaseSettings):
             base_config["connect_args"] = {
                 "check_same_thread": False,  # Allow SQLite across threads
             }
-        
         if self.is_production():
             config = {
                 **base_config,
-                "pool_size": 5,
-                "max_overflow": 10,
+                "pool_size": 10,        # Increase from 5
+                "max_overflow": 20,     # Increase from 10
                 "echo": False,
             }
         elif self.is_staging():
