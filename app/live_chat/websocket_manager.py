@@ -246,27 +246,37 @@ class LiveChatWebSocketManager:
             logger.info(f"Connection disconnected: {connection_id}")
     
     async def send_to_conversation(self, conversation_id: str, message: WebSocketMessage, 
-                                 exclude_connection: str = None):
+                             exclude_connection: str = None):
         """Send message to all connections in a conversation - IMPROVED VERSION"""
+        
+        # DEBUG: Log what we're looking for
+        logger.info(f"Looking for connections in conversation: {conversation_id}")
+        logger.info(f"Available conversations: {list(self.connections_by_conversation.keys())}")
+        
         async with self._lock:
             connection_ids = self.connections_by_conversation.get(conversation_id, set()).copy()
         
+        # DEBUG: Log found connections
+        logger.info(f"Found {len(connection_ids)} connections for conversation {conversation_id}: {connection_ids}")
+        
         if exclude_connection:
             connection_ids.discard(exclude_connection)
+            logger.info(f"After excluding {exclude_connection}: {connection_ids}")
         
         # Send to all connections and track failed ones
         failed_connections = []
         for conn_id in connection_ids:
             connection = self.connections.get(conn_id)
+            logger.info(f"Sending to connection {conn_id}: active={connection.is_active if connection else 'None'}")
             if connection and connection.is_active:
                 success = await connection.send_message(message)
+                logger.info(f"Message send result for {conn_id}: {success}")
                 if not success:
                     failed_connections.append(conn_id)
         
         # Clean up failed connections
         for conn_id in failed_connections:
             await self.disconnect(conn_id)
-
 
     
     async def send_to_agent(self, agent_id: int, message: WebSocketMessage):
