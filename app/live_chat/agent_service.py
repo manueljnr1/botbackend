@@ -277,7 +277,12 @@ class AgentAuthService:
             # Update last login
             agent.last_login = datetime.utcnow()
             agent.last_seen = datetime.utcnow()
-            self.db.commit()
+            try:
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Database commit error: {e}")
+                self.db.commit()
             
             # Create access token
             access_token = create_access_token(
