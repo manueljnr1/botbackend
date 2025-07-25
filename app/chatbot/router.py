@@ -2639,12 +2639,11 @@ async def super_tenant_admin_chat(
                 authenticated_tenant_id=tenant.id,
                 user_identifier=user_id,
                 session_context={
-                    "admin_mode": True, 
-                    "super_tenant_hosted": True, 
+                    "admin_mode": True,
+                    "super_tenant_hosted": True,
                     "chatbot_owner_id": chatbot_owner.id,
                     "unified_engine_available": True
-                },
-                request=http_request
+                }
             )
             
             if not result.get("success"):
