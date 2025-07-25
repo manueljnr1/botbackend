@@ -2634,7 +2634,7 @@ async def super_tenant_admin_chat(
             # 🆕 Use enhanced admin engine with unified integration
             admin_engine = get_super_tenant_admin_engine(db)
             
-            result = admin_engine.process_admin_message(
+            result = await admin_engine.process_admin_message(
                 user_message=request.message,
                 authenticated_tenant_id=tenant.id,
                 user_identifier=user_id,
