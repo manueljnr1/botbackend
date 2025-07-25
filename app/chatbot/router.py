@@ -347,7 +347,7 @@ async def chat(request: ChatRequest, api_key: str = Header(..., alias="X-API-Key
         
         # Process message
         logger.info("⚡ Processing message with chatbot engine...")
-        result = engine.process_message(api_key, request.message, request.user_identifier)
+        result = await engine.process_message(api_key, request.message, request.user_identifier)
         
         if not result.get("success"):
             error_message = result.get("error", "Unknown error")
@@ -482,7 +482,7 @@ async def chat_with_simple_sentence_streaming(
             # Get response
             logger.info("🤖 Getting response from chatbot engine...")
             engine = ChatbotEngine(db)
-            result = engine.process_message(
+            result = await engine.process_message(
                 api_key=api_key,
                 user_message=request.message,
                 user_identifier=request.user_identifier
@@ -545,7 +545,7 @@ async def chat_with_handoff_detection(
         engine = ChatbotEngine(db)
         
         # Process with handoff detection
-        result = engine.process_message_with_handoff_detection(
+        result = await engine.process_message_with_handoff_detection(
             api_key, request.message, request.user_identifier
         )
         
@@ -589,7 +589,7 @@ async def chat_with_simple_memory(
         engine = ChatbotEngine(db)
         
         # Process with simple memory
-        result = engine.process_message_simple_memory(
+        result =await engine.process_message_simple_memory(
             api_key=api_key,
             user_message=request.message,
             user_identifier=request.user_identifier,
@@ -2995,7 +2995,7 @@ async def smart_chat_with_followup_streaming(
             # ⭐ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
             
-            result = engine.process_message(
+            result = await engine.process_message(
                 api_key=api_key,
                 user_message=request.message,
                 user_identifier=user_id,
@@ -3317,7 +3317,7 @@ async def smart_chat_with_followup_streaming(
             # ⭐ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
             
-            result = engine.process_message(
+            result = await engine.process_message(
                 api_key=api_key,
                 user_message=request.message,  # 🧠 Use context-enhanced message
                 user_identifier=user_id,
@@ -3558,7 +3558,7 @@ async def smart_chat_with_followup_streaming(
             # ⭐ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
             
-            result = engine.process_message(
+            result = await engine.process_message(
                 api_key=api_key,
                 user_message=request.message,
                 user_identifier=user_id,
@@ -3816,7 +3816,7 @@ async def smart_chat_unified(
         # Process with unified engine (single call)
         start_time = time.time()
         
-        result = engine.process_message(
+        result = await engine.process_message(
             api_key=api_key,
             user_message=request.message,
             user_identifier=user_id,

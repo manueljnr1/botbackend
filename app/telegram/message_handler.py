@@ -180,7 +180,7 @@ class TelegramMessageHandler:
             logger.info(f"🚀 Processing Telegram message with UnifiedIntelligentEngine for tenant {tenant.id}")
             
             # Process with unified intelligent engine
-            result = self.unified_engine.process_message(
+            result = await self.unified_engine.process_message(
                 api_key=tenant.api_key,
                 user_message=text,
                 user_identifier=chat_record.user_identifier,

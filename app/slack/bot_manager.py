@@ -339,8 +339,7 @@ class SlackBotManager:
                     user_identifier = f"slack_{user_id}_{channel_id}"
                     
                     # Process with unified engine
-                    result = await asyncio.to_thread(
-                        engine.process_message,
+                    result = await engine.process_message(
                         api_key=tenant.api_key,
                         user_message=cleaned_text,
                         user_identifier=user_identifier,

@@ -359,7 +359,7 @@ class TenantDiscordBot:
                     await asyncio.sleep(typing_delay)
                     
                     # UPDATED: Use UnifiedIntelligentEngine.process_message
-                    result = engine.process_message(
+                    result = await engine.process_message(
                         api_key=tenant.api_key,
                         user_message=clean_message,
                         user_identifier=f"discord:{message.author.id}",

@@ -173,7 +173,7 @@ class InstagramMemoryManager:
         self.formatter = InstagramResponseFormatter()
         self.chunk_handler = None  # Initialize when needed
     
-    def process_with_unified_engine(self, instagram_conversation: InstagramConversation, 
+    async def process_with_unified_engine(self, instagram_conversation: InstagramConversation, 
                                   instagram_message: InstagramMessage) -> Optional[Dict]:
         """🔥 NEW: Process with unified engine while maintaining Instagram context"""
         try:
@@ -197,7 +197,7 @@ class InstagramMemoryManager:
             # 4. Process with unified engine (gets full conversation context)
             unified_engine = get_unified_intelligent_engine(self.db)
             
-            result = unified_engine.process_message(
+            result = await unified_engine.process_message(
                 api_key=tenant.api_key,
                 user_message=instagram_message.get_display_content(),
                 user_identifier=user_identifier,

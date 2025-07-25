@@ -868,7 +868,7 @@ class RefactoredSuperTenantAdminEngine:
         state.last_interaction = datetime.utcnow()
         return state
 
-    def process_admin_message(
+    async def process_admin_message(
         self,
         user_message: str,
         authenticated_tenant_id: int,
@@ -903,7 +903,7 @@ class RefactoredSuperTenantAdminEngine:
             # Route based on mediation decision
             if mediation_result["delegate_to_unified"]:
                 # NEW: Platform documentation questions
-                result = self._delegate_to_unified_mediator(
+                result = await self._delegate_to_unified_mediator(
                     user_message=user_message,
                     tenant=tenant,
                     user_identifier=user_identifier,
@@ -1012,7 +1012,7 @@ Analysis:"""
         else:
             return {"delegate_to_unified": False, "reasoning": "Fallback: Tenant data assumed"}
 
-    def _delegate_to_unified_mediator(self, user_message: str, tenant: Tenant, 
+    async def _delegate_to_unified_mediator(self, user_message: str, tenant: Tenant, 
                                     user_identifier: str, mediation_context: Dict) -> Dict[str, Any]:
         """
         NEW LAYER: Delegate to Unified Engine for platform documentation
@@ -1040,7 +1040,7 @@ Analysis:"""
             logger.info(f"🔀 Delegating to Unified Mediator: {enhanced_message[:100]}...")
             
             # Process with unified mediator
-            result = unified_engine.process_message(
+            result =  await unified_engine.process_message(
                 api_key=super_tenant.api_key,
                 user_message=enhanced_message,
                 user_identifier=f"admin_{user_identifier}",
