@@ -3232,8 +3232,12 @@ async def smart_chat_with_followup_streaming(
                 user_id = f"auto_{str(uuid.uuid4())}"
                 auto_generated = True
             
-            # 🧠 Get or create session and retrieve conversation history
             session_id, is_new_session = memory.get_or_create_session(user_id, "web")
+
+            # ⭐ ADD LOCATION DETECTION HERE (before email check)
+            if is_new_session:
+                await engine._detect_and_store_location(http_request, tenant.id, session_id, user_id)
+
             conversation_history = memory.get_conversation_history(user_id, min(7, request.max_context))
             
             # Send initial metadata with memory info
