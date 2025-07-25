@@ -36,6 +36,11 @@ class ChatSession(Base):
     platform = Column(String, default="web")  # web, discord, etc.
 
 
+    user_country = Column(String, nullable=True)
+    user_city = Column(String, nullable=True) 
+    user_region = Column(String, nullable=True)
+
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     

@@ -15,6 +15,7 @@ import random
 import time
 import re
 from app.config import settings
+from fastapi import Request
 
 
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -2483,6 +2484,7 @@ async def check_admin_context(
 @router.post("/chat/super-tenant-admin")
 async def super_tenant_admin_chat(
     request: SmartChatRequest,
+    http_request: Request,
     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),
     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),
     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
@@ -2641,7 +2643,8 @@ async def super_tenant_admin_chat(
                     "super_tenant_hosted": True, 
                     "chatbot_owner_id": chatbot_owner.id,
                     "unified_engine_available": True
-                }
+                },
+                request=http_request
             )
             
             if not result.get("success"):
@@ -3193,6 +3196,7 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 @router.post("/chat/smart")
 async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
+    http_request: Request,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
@@ -3318,7 +3322,8 @@ async def smart_chat_with_followup_streaming(
                 api_key=api_key,
                 user_message=request.message,  # 🧠 Use context-enhanced message
                 user_identifier=user_id,
-                platform="web"
+                platform="web",
+                request=http_request
             )
             
             if not result.get("success"):

@@ -19,6 +19,7 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
+from app.database import create_tables_with_retry, initialize_database_with_retry
 
 from app.chatbot.models import ChatSession, ChatMessage
 from app.pricing.models import PricingPlan, TenantSubscription 
@@ -49,7 +50,7 @@ from app.live_chat.transcript_router import router as transcript_router
 
 from app.chatbot.admin_router import router as enhanced_admin_router
 from app.admin import intent_training_router
-
+from app.analytics.router import router as analytics_router
 
 
 from app.config import settings
@@ -195,6 +196,7 @@ app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["tra
 app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
 app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 
 
 
@@ -296,14 +298,20 @@ async def startup_event():
 
         from app.database import retry_database_initialization
         
-        db_success = await retry_database_initialization()
-        if not db_success:
-            logger.error("❌ Database initialization failed - some features may not work")
-            if settings.is_production():
-                # In production, you might want to exit
-                logger.error("🚨 Exiting due to database failure in production")
-                import sys
-                sys.exit(1)
+        try:
+            initialize_database_with_retry()  # Test connection
+            create_tables_with_retry()        # Create tables
+            db_success = True
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            db_success = False
+            if not db_success:
+                logger.error("❌ Database initialization failed - some features may not work")
+                if settings.is_production():
+                    # In production, you might want to exit
+                    logger.error("🚨 Exiting due to database failure in production")
+                    import sys
+                    sys.exit(1)
 
 
         try:

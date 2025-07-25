@@ -82,91 +82,140 @@ class UnifiedIntelligentEngine:
     
 
 
-    def process_message(
-      self,
-      api_key: str,
-      user_message: str,
-      user_identifier: str,
-      platform: str = "web"
-      ) -> Dict[str, Any]:
-      """
-      This is the new "Intelligent Router". It orchestrates the entire response process.
-      """
-      try:
-          # --- 1. PRE-PROCESSING & SECURITY ---
-          tenant = self._get_tenant_by_api_key(api_key)
-          if not tenant:
-              return {"error": "Invalid API key", "success": False}
+    async def process_message(
+     self,
+     api_key: str,
+     user_message: str,
+     user_identifier: str,
+     platform: str = "web",
+     request: Optional[Any] = None
+     ) -> Dict[str, Any]:
+     """
+     This is the new "Intelligent Router". It orchestrates the entire response process.
+     """
+     try:
+         # --- 1. PRE-PROCESSING & SECURITY ---
+         tenant = self._get_tenant_by_api_key(api_key)
+         if not tenant:
+             return {"error": "Invalid API key", "success": False}
 
-          self.tenant_id = tenant.id
+         self.tenant_id = tenant.id
 
-          # Initialize memory and get session FIRST
-          memory = SimpleChatbotMemory(self.db, tenant.id)
-          session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+         # Initialize memory and get session FIRST
+         memory = SimpleChatbotMemory(self.db, tenant.id)
+         session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
 
-          # Security check
-          is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
-          if not is_safe:
-              return {
-                  "success": True, 
-                  "response": security_response, 
-                  "answered_by": "security_system",
-                  "session_id": session_id
-              }
+         # --- LOCATION DETECTION FOR NEW SESSIONS ---
+         if is_new_session:
+             await self._detect_and_store_location(request, tenant.id, session_id, user_identifier)
 
-          # Get conversation history for greeting analysis
-          conversation_history = memory.get_conversation_history(user_identifier, 6)
+         # Security check
+         is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+         if not is_safe:
+             return {
+                 "success": True, 
+                 "response": security_response, 
+                 "answered_by": "security_system",
+                 "session_id": session_id
+             }
 
-          # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
-          smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
-          
-          if smart_greeting_response:
-              # Store the greeting exchange
-              memory.store_message(session_id, user_message, True)
-              memory.store_message(session_id, smart_greeting_response, False)
-              
-              return {
-                  "success": True,
-                  "response": smart_greeting_response,
-                  "session_id": session_id,
-                  "is_new_session": is_new_session,
-                  "answered_by": "IMPROVED_SMART_GREETING",
-                  "intent": "greeting",
-                  "architecture": "hybrid_intelligent_router"
-              }
+         # Get conversation history for greeting analysis
+         conversation_history = memory.get_conversation_history(user_identifier, 6)
 
-          # --- 3. INTENT & CONTEXT ANALYSIS ---
-          intent_result = self._classify_intent(user_message, tenant)
-          context_result = self._check_context_relevance(user_message, intent_result, tenant)
+         # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
+         smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
+         
+         if smart_greeting_response:
+             # Store the greeting exchange
+             memory.store_message(session_id, user_message, True)
+             memory.store_message(session_id, smart_greeting_response, False)
+             
+             return {
+                 "success": True,
+                 "response": smart_greeting_response,
+                 "session_id": session_id,
+                 "is_new_session": is_new_session,
+                 "answered_by": "IMPROVED_SMART_GREETING",
+                 "intent": "greeting",
+                 "architecture": "hybrid_intelligent_router"
+             }
 
-          # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
-          if context_result['is_product_related']:
-              response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
-          else:
-              response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
+         # --- 3. INTENT & CONTEXT ANALYSIS ---
+         intent_result = self._classify_intent(user_message, tenant)
+         context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
-          # --- 5. POST-PROCESSING & MEMORY ---
-          final_content = fix_response_formatting(response_data['content'])
-          
-          # Store messages
-          memory.store_message(session_id, user_message, True)
-          memory.store_message(session_id, final_content, False)
+         # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
+         if context_result['is_product_related']:
+             response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
+         else:
+             response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
-          return {
-              "success": True,
-              "response": final_content,
-              "session_id": session_id,
-              "is_new_session": is_new_session,
-              "answered_by": response_data.get('source', 'unknown'),
-              "intent": intent_result.get('intent', 'unknown'),
-              "architecture": "hybrid_intelligent_router"
-          }
+         # --- 5. POST-PROCESSING & MEMORY ---
+         final_content = fix_response_formatting(response_data['content'])
+         
+         # Store messages
+         memory.store_message(session_id, user_message, True)
+         memory.store_message(session_id, final_content, False)
 
-      except Exception as e:
-          logger.error(f"Error in intelligent router: {e}")
-          return {"error": str(e), "success": False}
+         return {
+             "success": True,
+             "response": final_content,
+             "session_id": session_id,
+             "is_new_session": is_new_session,
+             "answered_by": response_data.get('source', 'unknown'),
+             "intent": intent_result.get('intent', 'unknown'),
+             "architecture": "hybrid_intelligent_router"
+         }
+
+     except Exception as e:
+         logger.error(f"Error in intelligent router: {e}")
+         return {"error": str(e), "success": False}
 
 
+
+
+
+
+
+    async def _detect_and_store_location(self, request, tenant_id: int, session_id: str, user_identifier: str):
+        """Detect and store user location for new sessions"""
+        try:
+            from app.chatbot.models import ChatSession
+            from app.live_chat.customer_detection_service import CustomerDetectionService
+            
+            session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if session and not session.user_country:
+                # Use real request if available, otherwise mock
+                detection_request = request
+                if not detection_request:
+                    class MockRequest:
+                        def __init__(self):
+                            self.client = type('obj', (object,), {'host': '127.0.0.1'})()
+                            self.headers = {
+                                'user-agent': 'ChatBot/1.0',
+                                'accept-language': 'en-US,en;q=0.9'
+                            }
+                    detection_request = MockRequest()
+                
+                detection_service = CustomerDetectionService(self.db)
+                customer_data = await detection_service.detect_customer(
+                    detection_request, tenant_id, user_identifier
+                )
+                
+                if customer_data.get('geolocation'):
+                    geo = customer_data['geolocation']
+                    session.user_country = geo.get('country')
+                    session.user_city = geo.get('city')
+                    session.user_region = geo.get('region')
+                    self.db.commit()
+                    
+                    logger.info(f"📍 Location detected: {geo.get('city')}, {geo.get('country')} for {user_identifier}")
+            
+        except Exception as e:
+            logger.error(f"Location detection failed: {e}")
 
 
     def _manage_session_lifecycle(self, memory: SimpleChatbotMemory, session_id: str, user_identifier: str):
@@ -565,9 +614,6 @@ class UnifiedIntelligentEngine:
             Tenant.api_key == api_key,
             Tenant.is_active == True
         ).first()
-
-
-
 
 
 
@@ -1089,7 +1135,6 @@ Answer:"""
     
     
 
-
     
     def _handle_general_knowledge(self, user_message: str, tenant: Tenant, intent_result: Dict) -> Dict:
         """Handles general knowledge, casual chat, and greetings with a secure, non-leaking prompt."""
@@ -1375,10 +1420,6 @@ Enhanced response:"""
 
 
 
-    
-
-
-
     def _handle_product_related(self, user_message: str, tenant: Tenant, context_result: Dict, session_id: str = None, intent_result: Dict = None) -> Dict[str, Any]:
         """Enhanced product handling using passed intent classification"""
         
@@ -1571,23 +1612,6 @@ Enhanced response:"""
 
 
 
-    # def _mediate_document_interaction(self, user_message: str, document_content: Dict, doc_type: str) -> str:
-    #     """LLM mediator for any document type - handles gracefully"""
-        
-    #     if not self.llm_available:
-    #         return self._extract_direct_answer(user_message, document_content)
-        
-    #     try:
-    #         # Build context-aware prompt
-    #         prompt = self._build_mediator_prompt(user_message, document_content, doc_type)
-    #         result = self.llm.invoke(prompt)
-    #         return result.content.strip()
-            
-    #     except Exception as e:
-    #         logger.error(f"LLM mediation failed: {e}")
-    #         return self._extract_direct_answer(user_message, document_content)
-
-
 
 
 
@@ -1614,74 +1638,7 @@ Enhanced response:"""
 
 
 
-    # def _build_mediator_prompt(self, user_message: str, content: Dict, doc_type: str) -> str:
-    #     """Build smart prompt based on document type"""
-        
-    #     base_instructions = f"""You are helping a user interact with {doc_type} content.
-    # User asked: "{user_message}"
 
-    # CRITICAL FORMATTING RULES:
-    # - Use bullet points (•) for lists of features, benefits, or options
-    # - Keep paragraphs to maximum 2-3 sentences
-    # - Break long responses into clear sections
-    # - Use line breaks between different topics
-    # - Be conversational and helpful
-
-    # If exact information isn't available, use related content to still be helpful."""
-
-    #     if doc_type == "sales":
-    #         context = f"""
-    # SALES CONTENT AVAILABLE:
-    # Products: {content.get('products', [])}
-    # Pricing: {content.get('pricing_structure', {})}
-
-    # RESPONSE FORMAT REQUIRED:
-    # - Use bullet points for all features and benefits
-    # - Present pricing in clear, separate paragraphs
-    # - Keep each point concise (1-2 sentences max)
-
-    # Example format:
-    # Here are the key features:
-    # - Feature 1: Brief description
-    # - Feature 2: Brief description
-
-    # Pricing options:
-    # Solo plan: $X/month with basic features
-    # Team plan: $Y/month with advanced features
-
-    # Be consultative and helpful.
-    # Response:"""
-
-    #     elif doc_type == "troubleshooting":
-    #         context = f"""
-    # TROUBLESHOOTING CONTENT:
-    # Available steps: {content.get('steps', [])}
-    # Keywords: {content.get('keywords', [])}
-
-    # REQUIRED FORMAT:
-    # - Use numbered steps (1. 2. 3.) for instructions
-    # - Keep each step to one clear action
-    # - Use bullet points for lists of options
-    # - You can bolden titles 
-    # - You can use arrows
-
-
-    # Be solution-focused and empathetic.
-    # Response:"""
-
-    #     else:
-    #         context = f"""
-    # AVAILABLE CONTENT:
-    # {json.dumps(content, indent=2)[:1500]}
-
-    # REQUIRED FORMAT:
-    # - Use bullet points for any lists
-    # - Break content into short, scannable paragraphs
-    # - Maximum 3 sentences per paragraph
-
-    # Response:"""
-
-    #     return base_instructions + context
 
 
 

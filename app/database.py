@@ -65,7 +65,7 @@ def get_engine_config():
             **base_config,
             "pool_size": 2,
             "max_overflow": 5,
-            "echo": True,             # SQL logging in dev
+            "echo": False,             # SQL logging in dev
         }
         
         # For SQLite in development, optimize for single-threaded usage
