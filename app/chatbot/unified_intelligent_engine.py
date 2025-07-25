@@ -93,7 +93,11 @@ class UnifiedIntelligentEngine:
      """
      This is the new "Intelligent Router". It orchestrates the entire response process.
      """
+     
      try:
+         logger.info(f"🔥 UNIFIED ENGINE process_message called with request type: {type(request)}") 
+
+     
          # --- 1. PRE-PROCESSING & SECURITY ---
          tenant = self._get_tenant_by_api_key(api_key)
          if not tenant:
