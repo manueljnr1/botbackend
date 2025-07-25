@@ -183,26 +183,21 @@ class UnifiedIntelligentEngine:
             from app.chatbot.models import ChatSession
             from app.live_chat.customer_detection_service import CustomerDetectionService
             
+            # Only proceed if we have a REAL request
+            if not request or not hasattr(request, 'client') or not hasattr(request, 'headers'):
+                logger.info(f"🌍 No real request available - skipping location detection")
+                return
+            
             session = self.db.query(ChatSession).filter(
                 ChatSession.session_id == session_id
             ).first()
             
             if session and not session.user_country:
-                # Use real request if available, otherwise mock
-                detection_request = request
-                if not detection_request:
-                    class MockRequest:
-                        def __init__(self):
-                            self.client = type('obj', (object,), {'host': '127.0.0.1'})()
-                            self.headers = {
-                                'user-agent': 'ChatBot/1.0',
-                                'accept-language': 'en-US,en;q=0.9'
-                            }
-                    detection_request = MockRequest()
+                logger.info(f"🌍 Using REAL request for location detection")
                 
                 detection_service = CustomerDetectionService(self.db)
                 customer_data = await detection_service.detect_customer(
-                    detection_request, tenant_id, user_identifier
+                    request, tenant_id, user_identifier
                 )
                 
                 if customer_data.get('geolocation'):
