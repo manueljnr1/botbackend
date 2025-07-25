@@ -241,11 +241,12 @@ def create_tables_with_retry():
 def initialize_database_with_retry():
     """Initialize database connection with retry logic"""
     from app.database import engine
+    from sqlalchemy import text # Import text
     
     def _test_connection():
         # Test the database connection
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1")) # Add text() wrapper here
         return True
     
     return retry_database_initialization(_test_connection)
