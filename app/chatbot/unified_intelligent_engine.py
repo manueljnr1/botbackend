@@ -261,7 +261,36 @@ class UnifiedIntelligentEngine:
         return None
 
    
+    def _get_pending_team_message(self, session_id: str) -> Optional[str]:
+        """Get pending team message using EscalationEngine"""
+        from app.chatbot.escalation_engine import EscalationEngine
+        escalation_engine = EscalationEngine(self.db, self.tenant_id)
+        return escalation_engine.get_pending_team_message(session_id)
 
+    def _check_escalation_triggers(self, user_message: str, bot_response: str, 
+                                conversation_history: List[Dict], session_id: str,
+                                user_identifier: str) -> Optional[Dict]:
+        """Check escalation triggers using EscalationEngine"""
+        from app.chatbot.escalation_engine import EscalationEngine
+        escalation_engine = EscalationEngine(self.db, self.tenant_id)
+        
+        should_escalate, reason, escalation_data = escalation_engine.should_escalate(
+            user_message, bot_response, conversation_history
+        )
+        
+        if should_escalate:
+            escalation_id = escalation_engine.create_escalation(
+                session_id, user_identifier, escalation_data, user_message
+            )
+            if escalation_id:
+                return {
+                    "success": True,
+                    "response": "I've escalated your issue to our team. They'll get back to you shortly.",
+                    "escalation_created": True,
+                    "escalation_id": escalation_id
+                }
+        
+        return None
 
 
 
@@ -1830,7 +1859,7 @@ Enhanced response:"""
 
 
     INSTRUCTIONS (STRICT)
-    - If someone write a world or statement you do not understand, subtly ask for clarity instead of makig blind decisions
+- If someone write a world or statement you do not understand, subtly ask for clarity instead of makig blind decisions
 
     Be conversational and helpful. Use the available content to provide a relevant response.
     If exact information isn't available, use related content to still be helpful."""
