@@ -40,6 +40,7 @@ from app.tenants.models import Tenant
 from sqlalchemy import func
 from app.chatbot.unified_intelligent_engine import get_unified_intelligent_engine
 from app.chatbot.email_scraper_engine import EmailScraperEngine, ScrapedEmail
+from app.chatbot.escalation_engine import EscalationEngine
 
 
 # 🔥 PRICING INTEGRATION - ADD THESE IMPORTS
@@ -2158,326 +2159,6 @@ async def check_admin_context(
 
 
 
-# @router.post("/chat/super-tenant-admin")
-# async def super_tenant_admin_chat(
-#     request: SmartChatRequest,
-#     tenant_api_key: str = Header(..., alias="X-Tenant-API-Key"),
-#     chatbot_api_key: str = Header(..., alias="X-Chatbot-API-Key"),
-#     super_tenant_context: str = Header(None, alias="X-Super-Tenant-Context"),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Super Tenant Admin Chat with intelligent delay simulation
-#     """
-    
-#     async def stream_admin_response():
-#         try:
-#             logger.info(f"🤖 Admin chat with delay simulation: {request.message[:50]}...")
-            
-#             # Security validation
-#             if super_tenant_context != "super_tenant_official_widget":
-#                 logger.warning(f"🚨 Unauthorized admin access attempt")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Admin features not available in this context', 'status_code': 403})}\n"
-#                 return
-            
-#             # Validate chatbot owner is super tenant
-#             try:
-#                 chatbot_owner = get_tenant_from_api_key(chatbot_api_key, db)
-#                 SUPER_TENANT_IDS = [324112833]
-                
-#                 if not getattr(chatbot_owner, 'is_super_tenant', False) and chatbot_owner.id not in SUPER_TENANT_IDS:
-#                     logger.warning(f"🚨 Unauthorized super tenant access: {chatbot_owner.id}")
-#                     yield f"{json.dumps({'type': 'error', 'error': 'Unauthorized chatbot host', 'status_code': 403})}\n"
-#                     return
-                    
-#             except Exception as e:
-#                 logger.error(f"❌ Invalid chatbot API key: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Invalid chatbot credentials', 'status_code': 403})}\n"
-#                 return
-            
-#             # Authenticate admin tenant
-#             try:
-#                 tenant = get_tenant_from_api_key(tenant_api_key, db)
-#                 check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
-                
-#                 if not tenant.is_active:
-#                     yield f"{json.dumps({'type': 'error', 'error': 'Account inactive', 'status_code': 403})}\n"
-#                     return
-                    
-#             except Exception as e:
-#                 logger.error(f"❌ Tenant authentication failed: {str(e)}")
-#                 yield f"{json.dumps({'type': 'error', 'error': 'Authentication failed', 'status_code': 403})}\n"
-#                 return
-            
-#             # Auto-generate user ID
-#             user_id = request.user_identifier
-#             auto_generated = False
-            
-#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
-#                 user_id = f"admin_auto_{str(uuid.uuid4())}"
-#                 auto_generated = True
-            
-#             # Send metadata
-#             yield f"{json.dumps({'type': 'metadata', 'user_id': user_id, 'auto_generated': auto_generated, 'admin_mode': True, 'tenant_id': tenant.id, 'super_tenant_name': chatbot_owner.name})}\n"
-            
-#             # Initialize memory and context analysis
-#             from app.chatbot.simple_memory import SimpleChatbotMemory
-#             memory = SimpleChatbotMemory(db, tenant.id)
-#             conversation_history = memory.get_conversation_history(user_id, request.max_context)
-            
-#             # ⭐ NEW: Initialize delay simulator for admin
-#             engine = ChatbotEngine(db)
-#             delay_simulator = engine.delay_simulator
-            
-#             # Context analysis for admin conversations
-#             context_analysis = None
-#             topic_change_response = None
-            
-#             if conversation_history and len(conversation_history) > 1:
-#                 context_analysis = engine.analyze_conversation_context_llm(
-#                     request.message, 
-#                     conversation_history, 
-#                     tenant.name
-#                 )
-                
-#                 logger.info(f"🧠 Admin context analysis: {context_analysis.get('type')} - {context_analysis.get('reasoning', 'N/A')}")
-                
-#                 special_handling_types = ['RECENT_GREETING', 'FRESH_GREETING', 'SIMPLE_GREETING', 'CONVERSATION_SUMMARY', 'CONVERSATION_SUMMARY_FALLBACK']
-                
-#                 if context_analysis and context_analysis.get('type') in special_handling_types:
-#                     topic_change_response = engine.handle_topic_change_response(
-#                         request.message,
-#                         context_analysis.get('previous_topic', ''),
-#                         context_analysis.get('suggested_approach', ''),
-#                         tenant.name,
-#                         context_analysis
-#                     )
-            
-#             # Handle admin greeting with delay
-#             if topic_change_response:
-#                 logger.info(f"🔄 Sending admin greeting response with delay")
-                
-#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
-#                 memory.store_message(session_id, request.message, True)
-#                 memory.store_message(session_id, topic_change_response, False)
-                
-#                 # ⭐ Calculate delay for admin greeting
-#                 if delay_simulator:
-#                     response_delay = delay_simulator.calculate_response_delay(request.message, topic_change_response)
-#                     logger.info(f"⏱️ Admin greeting delay: {response_delay:.2f}s")
-#                     await asyncio.sleep(response_delay)
-                
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': topic_change_response,
-#                     'session_id': session_id,
-#                     'answered_by': 'ADMIN_GREETING_DETECTION',
-#                     'context_analysis': context_analysis,
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id,
-#                     'response_delay': response_delay if delay_simulator else 0
-#                 }
-#                 yield f"{json.dumps(main_response)}\n"
-                
-#                 # Natural follow-up delay for admin
-#                 followup_delay = 2.2 + random.uniform(0.3, 0.8)  # 2.2-3.0s for admin
-#                 await asyncio.sleep(followup_delay)
-                
-#                 clarifying_followup = {
-#                     'type': 'followup',
-#                     'content': "What would you like help with?",
-#                     'index': 0,
-#                     'is_last': True
-#                 }
-#                 yield f"{json.dumps(clarifying_followup)}\n"
-                
-#                 yield f"{json.dumps({'type': 'complete', 'total_followups': 1, 'admin_greeting_handled': True})}\n"
-                
-#                 track_conversation_started_with_super_tenant(
-#                     tenant_id=tenant.id,
-#                     user_identifier=user_id,
-#                     platform="admin_web",
-#                     db=db
-#                 )
-                
-#                 return
-
-#             # ⭐ ENHANCED: Analyze admin message context
-#             admin_context_analysis = await analyze_admin_message_with_llm(
-#                 request.message, 
-#                 conversation_history, 
-#                 tenant,
-#                 chatbot_owner
-#             )
-            
-#             # ⭐ Process admin message with timing
-#             start_time = time.time()
-            
-#             if admin_context_analysis.get('requires_admin_engine', True):
-#                 # Use admin engine
-#                 admin_engine = get_super_tenant_admin_engine(db)
-                
-#                 result = admin_engine.process_admin_message(
-#                     user_message=request.message,
-#                     authenticated_tenant_id=tenant.id,
-#                     user_identifier=user_id,
-#                     session_context={
-#                         "admin_mode": True, 
-#                         "super_tenant_hosted": True, 
-#                         "chatbot_owner_id": chatbot_owner.id,
-#                         "llm_context": admin_context_analysis
-#                     }
-#                 )
-                
-#                 if not result.get("success"):
-#                     logger.error(f"❌ Admin engine failed: {result.get('error')}")
-#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-#                     return
-                
-#                 session_id, _ = memory.get_or_create_session(user_id, "admin_web")
-#                 memory.store_message(session_id, request.message, True)
-#                 memory.store_message(session_id, result["response"], False)
-                
-#                 # ⭐ Calculate admin-specific delay
-#                 response_delay = 0
-#                 if delay_simulator:
-#                     # Admin responses tend to be more complex, slight bias toward longer delays
-#                     base_delay = delay_simulator.calculate_response_delay(request.message, result["response"])
-#                     admin_complexity_bonus = 0.3  # 300ms bonus for admin operations
-#                     response_delay = min(5.0, base_delay + admin_complexity_bonus)
-                    
-#                     processing_time = time.time() - start_time
-#                     actual_delay = max(0.3, response_delay - processing_time)  # Min 300ms for admin
-                    
-#                     logger.info(f"⏱️ Admin delay: {response_delay:.2f}s, Processing: {processing_time:.2f}s, Actual: {actual_delay:.2f}s")
-#                     await asyncio.sleep(actual_delay)
-                
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': result.get("response", ""),
-#                     'session_id': session_id,
-#                     'answered_by': result.get('action', 'ADMIN_ENGINE'),
-#                     'action': result.get('action'),
-#                     'requires_confirmation': result.get('requires_confirmation', False),
-#                     'requires_input': result.get('requires_input', False),
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id,
-#                     'context_analysis': context_analysis,
-#                     'response_delay': response_delay
-#                 }
-                
-#             else:
-#                 # Use smart chat processing with admin context
-#                 logger.info(f"🔍 Using smart chat processing for admin context")
-                
-#                 result = engine.process_web_message_with_advanced_feedback_llm(
-#                     api_key=tenant_api_key,
-#                     user_message=request.message,
-#                     user_identifier=user_id,
-#                     max_context=request.max_context,
-#                     use_smart_llm=True
-#                 )
-                
-#                 if not result.get("success"):
-#                     logger.error(f"❌ Smart chat processing failed: {result.get('error')}")
-#                     yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
-#                     return
-                
-#                 # ⭐ Calculate delay for smart admin response
-#                 response_delay = 0
-#                 if delay_simulator:
-#                     response_delay = delay_simulator.calculate_response_delay(request.message, result["response"])
-#                     processing_time = time.time() - start_time
-#                     actual_delay = max(0.2, response_delay - processing_time)
-                    
-#                     logger.info(f"⏱️ Smart admin delay: {response_delay:.2f}s, Actual: {actual_delay:.2f}s")
-#                     await asyncio.sleep(actual_delay)
-                
-#                 main_response = {
-#                     'type': 'main_response',
-#                     'content': result["response"],
-#                     'session_id': result.get('session_id'),
-#                     'answered_by': f"ADMIN_{result.get('answered_by', 'CHATBOT')}",
-#                     'email_captured': result.get('email_captured', False),
-#                     'feedback_triggered': result.get('feedback_triggered', False),
-#                     'faq_matched': result.get('faq_matched', False),
-#                     'admin_mode': True,
-#                     'tenant_id': tenant.id,
-#                     'context_analysis': context_analysis,
-#                     'admin_context_analysis': admin_context_analysis,
-#                     'response_delay': response_delay
-#                 }
-            
-#             yield f"{json.dumps(main_response)}\n"
-            
-#             # Track conversation
-#             track_conversation_started_with_super_tenant(
-#                 tenant_id=tenant.id,
-#                 user_identifier=user_id,
-#                 platform="admin_web",
-#                 db=db
-#             )
-            
-#             # ⭐ ENHANCED: Admin follow-up timing
-#             base_admin_delay = 2.0 + random.uniform(0.4, 1.0)  # 2.0-3.0s for admin follow-ups
-#             await asyncio.sleep(base_admin_delay)
-            
-#             # Generate intelligent follow-ups
-#             should_generate, followups = should_generate_followups_llm(
-#                 request.message, 
-#                 main_response['content'], 
-#                 tenant.name
-#             )
-            
-#             # If no regular follow-ups, generate admin-specific ones
-#             if not (should_generate and followups):
-#                 admin_followups = await generate_admin_followups_llm(
-#                     request.message,
-#                     main_response['content'],
-#                     tenant,
-#                     admin_context_analysis
-#                 )
-#                 followups = admin_followups
-#                 should_generate = bool(followups)
-            
-#             # Stream follow-ups with admin timing
-#             if should_generate and followups:
-#                 for i, followup in enumerate(followups):
-#                     if i > 0:
-#                         # ⭐ Admin-appropriate inter-followup delays
-#                         inter_delay = 1.0 + random.uniform(0.2, 0.6)  # 1.0-1.6s between admin follow-ups
-#                         await asyncio.sleep(inter_delay)
-                    
-#                     followup_data = {
-#                         'type': 'followup',
-#                         'content': followup,
-#                         'index': i,
-#                         'is_last': i == len(followups) - 1,
-#                         'admin_followup': True
-#                     }
-#                     yield f"{json.dumps(followup_data)}\n"
-            
-#             # Send completion
-#             yield f"{json.dumps({'type': 'complete', 'total_followups': len(followups) if followups else 0, 'admin_enhanced': True, 'delay_simulation': True})}\n"
-            
-#         except HTTPException as e:
-#             logger.error(f"🚫 HTTP error: {e.detail}")
-#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
-#         except Exception as e:
-#             logger.error(f"💥 Error: {str(e)}")
-#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
-#     return StreamingResponse(
-#         stream_admin_response(),
-#         media_type="application/x-ndjson",
-#         headers={
-#             "Cache-Control": "no-cache",
-#             "Connection": "keep-alive",
-#             "X-Accel-Buffering": "no"
-#         }
-#     )
-
-
 
 
 
@@ -3785,9 +3466,6 @@ Follow-ups:"""
 
 
 
-
-
-
 #===== Discord & Telegram
 
 @router.post("/chat/smart2dd", response_model=ChatResponse)
@@ -3877,3 +3555,136 @@ async def smart_chat_unified(
         )
     
 
+
+
+
+
+@router.post("/escalation/create")
+async def create_escalation_endpoint(
+   escalation_data: dict,
+   api_key: str = Header(..., alias="X-API-Key"),
+   db: Session = Depends(get_db)
+):
+   """Create escalation from bot conversation"""
+   try:
+       tenant = get_tenant_from_api_key(api_key, db)
+       
+       # Import here to avoid circular imports
+       from app.chatbot.escalation_engine import EscalationEngine
+       escalation_engine = EscalationEngine(db, tenant.id)
+       
+       escalation_id = escalation_engine.create_escalation(
+           session_id=escalation_data["session_id"],
+           user_identifier=escalation_data["user_identifier"],
+           escalation_data=escalation_data.get("escalation_details", {}),
+           user_message=escalation_data["user_message"]
+       )
+       
+       if escalation_id:
+           return {"success": True, "escalation_id": escalation_id}
+       else:
+           return {"success": False, "error": "Failed to create escalation"}
+           
+   except Exception as e:
+       logger.error(f"Error in escalation creation: {e}")
+       raise HTTPException(status_code=500, detail="Escalation creation failed")
+
+@router.get("/escalation/respond/{escalation_id}", response_class=HTMLResponse)
+async def get_escalation_response_form(
+   request: Request,
+   escalation_id: str, 
+   db: Session = Depends(get_db)
+):
+   """Team response form using template"""
+   try:
+       # Import models here
+       from app.chatbot.models import Escalation
+       from app.tenants.models import Tenant
+       
+       escalation = db.query(Escalation).filter(
+           Escalation.escalation_id == escalation_id
+       ).first()
+       
+       if not escalation:
+           return HTMLResponse("<h1>Escalation not found</h1>", status_code=404)
+       
+       # Check if already resolved
+       if escalation.status == "resolved":
+           return HTMLResponse("""
+               <div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                   <h2>✅ Escalation Already Resolved</h2>
+                   <p>This escalation has already been resolved and closed.</p>
+               </div>
+           """)
+       
+       tenant = db.query(Tenant).filter(Tenant.id == escalation.tenant_id).first()
+       
+       return templates.TemplateResponse("escalation_response_form.html", {
+           "request": request,
+           "escalation_id": escalation.escalation_id,
+           "company_name": tenant.business_name if tenant else "Company",
+           "user_identifier": escalation.user_identifier,
+           "original_issue": escalation.original_issue,
+           "conversation_summary": escalation.conversation_summary,
+           "escalation_reason": escalation.reason,
+           "escalated_at": escalation.created_at.strftime("%B %d, %Y at %I:%M %p")
+       })
+       
+   except Exception as e:
+       logger.error(f"Error loading response form: {e}")
+       return HTMLResponse("<h1>Error loading form</h1>", status_code=500)
+
+@router.post("/escalation/submit/{escalation_id}")
+async def submit_escalation_response(
+   request: Request,
+   escalation_id: str,
+   response: str = Form(...),
+   resolve: Optional[str] = Form(None),
+   db: Session = Depends(get_db)
+):
+   """Process team response using template"""
+   try:
+       # Import models here
+       from app.chatbot.models import Escalation, EscalationMessage
+       
+       escalation = db.query(Escalation).filter(
+           Escalation.escalation_id == escalation_id
+       ).first()
+       
+       if not escalation:
+           raise HTTPException(status_code=404, detail="Escalation not found")
+       
+       if not response.strip():
+           raise HTTPException(status_code=400, detail="Response cannot be empty")
+       
+       # Store team response
+       team_message = EscalationMessage(
+           escalation_id=escalation.id,
+           content=response.strip(),
+           from_team=True,
+           sent_to_customer=False
+       )
+       
+       self.db.add(team_message)
+       
+       # Mark as resolved if requested
+       resolved = resolve == "true"
+       if resolved:
+           escalation.status = "resolved"
+           escalation.resolved_at = datetime.utcnow()
+       
+       db.commit()
+       
+       logger.info(f"✅ Team response stored for escalation {escalation_id}" + 
+                  f" - Resolved: {resolved}")
+       
+       return templates.TemplateResponse("escalation_success.html", {
+           "request": request,
+           "resolved": resolved
+       })
+       
+   except HTTPException:
+       raise
+   except Exception as e:
+       logger.error(f"Error submitting response: {e}")
+       raise HTTPException(status_code=500, detail="Failed to submit response")

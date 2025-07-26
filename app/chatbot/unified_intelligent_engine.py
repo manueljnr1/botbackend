@@ -83,100 +83,184 @@ class UnifiedIntelligentEngine:
 
 
     async def process_message(
-     self,
-     api_key: str,
-     user_message: str,
-     user_identifier: str,
-     platform: str = "web",
-     request: Optional[Any] = None
-     ) -> Dict[str, Any]:
-     """
-     This is the new "Intelligent Router". It orchestrates the entire response process.
-     """
-     
-     try:
-         logger.info(f"🔥 UNIFIED ENGINE process_message called with request type: {type(request)}") 
+        self,
+        api_key: str,
+        user_message: str,
+        user_identifier: str,
+        platform: str = "web",
+        request: Optional[Any] = None
+        ) -> Dict[str, Any]:
+        """
+        This is the new "Intelligent Router". It orchestrates the entire response process.
+        """
+        
+        try:
+            logger.info(f"🔥 UNIFIED ENGINE process_message called with request type: {type(request)}") 
 
-     
-         # --- 1. PRE-PROCESSING & SECURITY ---
-         tenant = self._get_tenant_by_api_key(api_key)
-         if not tenant:
-             return {"error": "Invalid API key", "success": False}
+        
+            # --- 1. PRE-PROCESSING & SECURITY ---
+            tenant = self._get_tenant_by_api_key(api_key)
+            if not tenant:
+                return {"error": "Invalid API key", "success": False}
 
-         self.tenant_id = tenant.id
+            self.tenant_id = tenant.id
 
-         # Initialize memory and get session FIRST
-         memory = SimpleChatbotMemory(self.db, tenant.id)
-         session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
+            # Initialize memory and get session FIRST
+            memory = SimpleChatbotMemory(self.db, tenant.id)
+            session_id, is_new_session = memory.get_or_create_session(user_identifier, platform)
 
-         # --- LOCATION DETECTION FOR NEW SESSIONS ---
-         if is_new_session:
-             await self._detect_and_store_location(request, tenant.id, session_id, user_identifier)
+            # --- LOCATION DETECTION FOR NEW SESSIONS ---
+            if is_new_session:
+                await self._detect_and_store_location(request, tenant.id, session_id, user_identifier)
 
-         # Security check
-         is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
-         if not is_safe:
-             return {
-                 "success": True, 
-                 "response": security_response, 
-                 "answered_by": "security_system",
-                 "session_id": session_id
-             }
+            # Security check
+            is_safe, security_response = check_message_security(user_message, tenant.business_name or tenant.name)
+            if not is_safe:
+                return {
+                    "success": True, 
+                    "response": security_response, 
+                    "answered_by": "security_system",
+                    "session_id": session_id
+                }
 
-         # Get conversation history for greeting analysis
-         conversation_history = memory.get_conversation_history(user_identifier, 6)
+            # Get conversation history for greeting analysis
+            conversation_history = memory.get_conversation_history(user_identifier, 6)
 
-         # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
-         smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
-         
-         if smart_greeting_response:
-             # Store the greeting exchange
-             memory.store_message(session_id, user_message, True)
-             memory.store_message(session_id, smart_greeting_response, False)
-             
-             return {
-                 "success": True,
-                 "response": smart_greeting_response,
-                 "session_id": session_id,
-                 "is_new_session": is_new_session,
-                 "answered_by": "IMPROVED_SMART_GREETING",
-                 "intent": "greeting",
-                 "architecture": "hybrid_intelligent_router"
-             }
+            # 🚨 CHECK FOR PENDING TEAM MESSAGES FIRST
+            pending_team_message = self._get_pending_team_message(session_id)
+            if pending_team_message:
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, pending_team_message, False)
+                return {
+                    "success": True,
+                    "response": pending_team_message,
+                    "session_id": session_id,
+                    "answered_by": "TEAM_ESCALATION",
+                    "team_message": True
+                }
 
-         # --- 3. INTENT & CONTEXT ANALYSIS ---
-         intent_result = self._classify_intent(user_message, tenant)
-         context_result = self._check_context_relevance(user_message, intent_result, tenant)
+            # --- 2. IMPROVED GREETING ANALYSIS (before intent classification) ---
+            smart_greeting_response = self.handle_improved_greeting(user_message, session_id, conversation_history)
+            
+            if smart_greeting_response:
+                # Store the greeting exchange
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, smart_greeting_response, False)
+                
+                return {
+                    "success": True,
+                    "response": smart_greeting_response,
+                    "session_id": session_id,
+                    "is_new_session": is_new_session,
+                    "answered_by": "IMPROVED_SMART_GREETING",
+                    "intent": "greeting",
+                    "architecture": "hybrid_intelligent_router"
+                }
 
-         # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
-         if context_result['is_product_related']:
-             response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
-         else:
-             response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
+            # --- 3. INTENT & CONTEXT ANALYSIS ---
+            intent_result = self._classify_intent(user_message, tenant)
+            context_result = self._check_context_relevance(user_message, intent_result, tenant)
 
-         # --- 5. POST-PROCESSING & MEMORY ---
-         final_content = fix_response_formatting(response_data['content'])
-         
-         # Store messages
-         memory.store_message(session_id, user_message, True)
-         memory.store_message(session_id, final_content, False)
+            # --- 4. ROUTING TO SPECIALIZED HANDLERS ---
+            if context_result['is_product_related']:
+                response_data = self._handle_product_related(user_message, tenant, context_result, session_id, intent_result)
+            else:
+                response_data = self._handle_general_knowledge(user_message, tenant, intent_result)
 
-         return {
-             "success": True,
-             "response": final_content,
-             "session_id": session_id,
-             "is_new_session": is_new_session,
-             "answered_by": response_data.get('source', 'unknown'),
-             "intent": intent_result.get('intent', 'unknown'),
-             "architecture": "hybrid_intelligent_router"
-         }
+            # --- 5. POST-PROCESSING & MEMORY ---
+            final_content = fix_response_formatting(response_data['content'])
+            
+            # 🚨 ESCALATION CHECK
+            escalation_response = self._check_escalation_triggers(user_message, final_content, conversation_history, session_id, user_identifier)
+            if escalation_response:
+                memory.store_message(session_id, user_message, True)
+                memory.store_message(session_id, escalation_response["response"], False)
+                return escalation_response
+            
+            # Store messages
+            memory.store_message(session_id, user_message, True)
+            memory.store_message(session_id, final_content, False)
 
-     except Exception as e:
-         logger.error(f"Error in intelligent router: {e}")
-         return {"error": str(e), "success": False}
+            return {
+                "success": True,
+                "response": final_content,
+                "session_id": session_id,
+                "is_new_session": is_new_session,
+                "answered_by": response_data.get('source', 'unknown'),
+                "intent": intent_result.get('intent', 'unknown'),
+                "architecture": "hybrid_intelligent_router"
+            }
+
+        except Exception as e:
+            logger.error(f"Error in intelligent router: {e}")
+            return {"error": str(e), "success": False}
 
 
 
+
+
+    def _check_escalation_triggers(self, user_message: str, bot_response: str, 
+                                conversation_history: List[Dict], session_id: str,
+                                user_identifier: str) -> Optional[Dict]:
+        """
+        Check if escalation should be triggered after LLM mediator response
+        Returns escalation response dict or None
+        """
+        if not self.llm_available:
+            return self._basic_escalation_check(user_message, bot_response, session_id, user_identifier)
+        
+        try:
+            context_text = self._build_escalation_context(conversation_history)
+            
+            prompt = f"""Analyze if this customer needs human assistance.
+
+    USER: "{user_message}"
+    BOT: "{bot_response}"
+    CONTEXT: {context_text}
+
+    ESCALATE IF:
+    - User shows frustration ("not helpful", "doesn't work")
+    - Bot says "I don't have that information" repeatedly
+    - Technical issue bot can't solve
+    - User explicitly asks for human help
+
+    JSON Response:
+    {{"should_escalate": true/false, "confidence": 0.0-1.0, "reason": "string"}}"""
+
+            result = self.llm.invoke(prompt)
+            
+            import json, re
+            json_match = re.search(r'\{.*\}', result.content, re.DOTALL)
+            if json_match:
+                analysis = json.loads(json_match.group())
+                
+                if analysis.get('should_escalate') and analysis.get('confidence', 0) > 0.7:
+                    return self._create_escalation_response(analysis, session_id, user_identifier, user_message)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Escalation check failed: {e}")
+            return None
+
+    def _create_escalation_response(self, analysis: Dict, session_id: str, 
+                                user_identifier: str, user_message: str) -> Dict:
+        """Create escalation and return response"""
+        # Create escalation record, send team email, return escalation offer
+        escalation_id = self._create_escalation_record(session_id, user_identifier, analysis, user_message)
+        
+        if escalation_id:
+            escalation_offer = f"I understand this needs specialist attention. I've escalated your issue to our team. They'll review and get back to you shortly."
+            return {
+                "success": True,
+                "response": escalation_offer,
+                "escalation_created": True,
+                "escalation_id": escalation_id
+            }
+        
+        return None
+
+   
 
 
 

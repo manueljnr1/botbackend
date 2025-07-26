@@ -280,7 +280,10 @@ class TenantDiscordBot:
             async with self.get_db_context() as db:
                 try:
                     # Reset using UnifiedEngine approach
-                    engine = UnifiedIntelligentEngine(db)
+                    
+                    engine = UnifiedIntelligentEngine(db, self.tenant_id)
+
+
                     user_identifier = f"discord:{ctx.author.id}"
                     
                     # Clear memory (UnifiedEngine handles this internally)

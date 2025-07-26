@@ -1,0 +1,76 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Response Sent Successfully</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f8f9fa;
+            text-align: center;
+        }
+        .success-container {
+            background: white;
+            padding: 50px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .success-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        .success-title {
+            color: #28a745;
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        .success-message {
+            color: #6c757d;
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .info-box {
+            background: #e7f3ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .next-steps {
+            color: #495057;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container">
+        <div class="success-icon">✅</div>
+        <h1 class="success-title">Response Sent Successfully!</h1>
+        
+        <p class="success-message">
+            Your response has been queued for delivery to the customer via the chatbot.
+        </p>
+        
+        <div class="info-box">
+            <p class="next-steps">
+                <strong>What happens next:</strong><br>
+                The customer will receive your message during their next interaction with the chatbot.
+                {% if resolved %}
+                <br><br>
+                This escalation has been marked as <strong>resolved</strong>.
+                {% endif %}
+            </p>
+        </div>
+        
+        <p style="color: #6c757d; font-size: 14px; margin-top: 30px;">
+            You can close this window. The customer will be notified automatically.
+        </p>
+    </div>
+</body>
+</html>

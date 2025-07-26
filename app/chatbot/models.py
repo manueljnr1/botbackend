@@ -1,7 +1,14 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Boolean, JSON
+from sqlalchemy import Column, ForeignKey, Integer, String, Text, DateTime, Boolean, JSON, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+import enum
+
+
+
+
+
+
 
 
 class ChatSession(Base):
@@ -56,3 +63,57 @@ class ChatMessage(Base):
     
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
+
+
+
+
+
+
+
+class EscalationStatus(enum.Enum):
+    PENDING = "pending"
+    ACTIVE = "active" 
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+
+class Escalation(Base):
+    __tablename__ = "escalations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    escalation_id = Column(String, unique=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    session_id = Column(String, ForeignKey("chat_sessions.session_id"))
+    user_identifier = Column(String, index=True)
+    
+    # Context & details
+    reason = Column(String(100))
+    original_issue = Column(Text)
+    conversation_summary = Column(Text)
+    
+    # Status & communication
+    status = Column(String(20), default="pending")
+    team_notified = Column(Boolean, default=False)
+    team_email_id = Column(String, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant")
+    session = relationship("ChatSession")
+    messages = relationship("EscalationMessage", back_populates="escalation", cascade="all, delete-orphan")
+
+class EscalationMessage(Base):
+    __tablename__ = "escalation_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    escalation_id = Column(Integer, ForeignKey("escalations.id"))
+    content = Column(Text)
+    from_team = Column(Boolean, default=False)
+    sent_to_customer = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    escalation = relationship("Escalation", back_populates="messages")
