@@ -1731,6 +1731,9 @@ Enhanced response:"""
         base_instructions = f"""You are helping a user interact with {doc_type} content.
     User asked: "{user_message}"
 
+    INSTRUCTIONS (STRICT)
+    - If someone write a world or statement you do not understand, subtly ask for clarity instead of makig blind decisions
+
     UNIVERSAL FORMATTING RULES (APPLY TO ALL RESPONSES):
     - Use bullet points (•) for ANY list of 2+ items
     - Use bullet points for features, steps, options, benefits, requirements, etc.
@@ -1824,6 +1827,10 @@ Enhanced response:"""
         
         base_instructions = f"""You are helping a user interact with {doc_type} content.
     User asked: "{user_message}"
+
+
+    INSTRUCTIONS (STRICT)
+    - If someone write a world or statement you do not understand, subtly ask for clarity instead of makig blind decisions
 
     Be conversational and helpful. Use the available content to provide a relevant response.
     If exact information isn't available, use related content to still be helpful."""
