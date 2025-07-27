@@ -974,6 +974,8 @@ PLATFORM DOCUMENTATION (Unified Engine):
 - General platform info: "what is this software?", "how do I get started?"
 - Simple greetings: "hello", "hi", "hey", "good morning" (unless combined with admin commands)
 
+CRITICAL RULE: Simple greetings like "hello" should ALWAYS go to unified engine (delegate_to_unified: true).
+
 RESPONSE FORMAT (JSON):
 {{
     "delegate_to_unified": true/false,
