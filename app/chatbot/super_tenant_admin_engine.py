@@ -960,6 +960,9 @@ class RefactoredSuperTenantAdminEngine:
 USER MESSAGE: "{user_message}"
 TENANT: {tenant_name}
 
+INSTRUCTIONS (STRICT)
+- If someone write a world or statement you do not understand, subtly ask for clarity instead of makig blind decisions
+
 TENANT DATA MANAGEMENT (Admin Engine):
 - Managing THEIR OWN FAQs: "show my FAQs", "add FAQ", "delete FAQ #5"
 - THEIR analytics: "show my stats", "my chatbot performance"  
@@ -969,6 +972,7 @@ PLATFORM DOCUMENTATION (Unified Engine):
 - How platform works: "how does knowledge base work?", "what features do you have?"
 - Platform capabilities: "what integrations are available?", "how to use this platform?"
 - General platform info: "what is this software?", "how do I get started?"
+- Simple greetings: "hello", "hi", "hey", "good morning" (unless combined with admin commands)
 
 RESPONSE FORMAT (JSON):
 {{
