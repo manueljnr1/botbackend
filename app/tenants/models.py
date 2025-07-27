@@ -140,7 +140,7 @@ class Tenant(Base):
     last_confirmation_attempt = Column(DateTime(timezone=True), nullable=True)
 
 
-
+    fine_tuning_enabled = Column(Boolean, default=True)
 
 
 

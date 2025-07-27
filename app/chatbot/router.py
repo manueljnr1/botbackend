@@ -3636,55 +3636,54 @@ async def get_escalation_response_form(
 
 @router.post("/escalation/submit/{escalation_id}")
 async def submit_escalation_response(
-   request: Request,
-   escalation_id: str,
-   response: str = Form(...),
-   resolve: Optional[str] = Form(None),
-   db: Session = Depends(get_db)
+    request: Request,
+    escalation_id: str,
+    response: str = Form(...),
+    resolve: Optional[str] = Form(None),
+    db: Session = Depends(get_db)  # This gives you 'db', not 'self.db'
 ):
-   """Process team response using template"""
-   try:
-       # Import models here
-       from app.chatbot.models import Escalation, EscalationMessage
-       
-       escalation = db.query(Escalation).filter(
-           Escalation.escalation_id == escalation_id
-       ).first()
-       
-       if not escalation:
-           raise HTTPException(status_code=404, detail="Escalation not found")
-       
-       if not response.strip():
-           raise HTTPException(status_code=400, detail="Response cannot be empty")
-       
-       # Store team response
-       team_message = EscalationMessage(
-           escalation_id=escalation.id,
-           content=response.strip(),
-           from_team=True,
-           sent_to_customer=False
-       )
-       
-       self.db.add(team_message)
-       
-       # Mark as resolved if requested
-       resolved = resolve == "true"
-       if resolved:
-           escalation.status = "resolved"
-           escalation.resolved_at = datetime.utcnow()
-       
-       db.commit()
-       
-       logger.info(f"✅ Team response stored for escalation {escalation_id}" + 
-                  f" - Resolved: {resolved}")
-       
-       return templates.TemplateResponse("escalation_success.html", {
-           "request": request,
-           "resolved": resolved
-       })
-       
-   except HTTPException:
-       raise
-   except Exception as e:
-       logger.error(f"Error submitting response: {e}")
-       raise HTTPException(status_code=500, detail="Failed to submit response")
+    """Process team response using template"""
+    try:
+        from app.chatbot.models import Escalation, EscalationMessage
+        
+        escalation = db.query(Escalation).filter(
+            Escalation.escalation_id == escalation_id
+        ).first()
+        
+        if not escalation:
+            raise HTTPException(status_code=404, detail="Escalation not found")
+        
+        if not response.strip():
+            raise HTTPException(status_code=400, detail="Response cannot be empty")
+        
+        # Store team response
+        team_message = EscalationMessage(
+            escalation_id=escalation.id,
+            content=response.strip(),
+            from_team=True,
+            sent_to_customer=False
+        )
+        
+        db.add(team_message)  # Changed from self.db to db
+        
+        # Mark as resolved if requested
+        resolved = resolve == "true"
+        if resolved:
+            escalation.status = "resolved"
+            escalation.resolved_at = datetime.utcnow()
+        
+        db.commit()  # Changed from self.db to db
+        
+        logger.info(f"✅ Team response stored for escalation {escalation_id}" + 
+                   f" - Resolved: {resolved}")
+        
+        return templates.TemplateResponse("escalation_success.html", {
+            "request": request,
+            "resolved": resolved
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting response: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit response")

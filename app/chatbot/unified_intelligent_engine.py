@@ -729,6 +729,50 @@ class UnifiedIntelligentEngine:
 
 
 
+    def _apply_learned_patterns(self, user_message: str, tenant_id: int) -> Optional[str]:
+        """Apply learned patterns to improve responses"""
+        try:
+            from app.fine_tuning.models import LearningPattern, AutoImprovement
+            
+            # Check for learned patterns that match this message
+            patterns = self.db.query(LearningPattern).filter(
+                LearningPattern.tenant_id == tenant_id,
+                LearningPattern.is_active == True,
+                LearningPattern.confidence_score > 0.7
+            ).all()
+            
+            user_lower = user_message.lower()
+            best_match = None
+            best_score = 0.0
+            
+            for pattern in patterns:
+                pattern_text = pattern.user_message_pattern.lower()
+                
+                # Simple similarity check (could be enhanced with NLP)
+                if pattern_text in user_lower or any(word in user_lower for word in pattern_text.split() if len(word) > 3):
+                    score = pattern.confidence_score * pattern.success_rate if pattern.success_rate > 0 else pattern.confidence_score
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_match = pattern
+            
+            if best_match and best_score > 0.8:
+                # Apply learned improvement
+                improved_response = best_match.improved_response
+                
+                # Update usage stats
+                best_match.usage_count += 1
+                best_match.last_used = datetime.utcnow()
+                self.db.commit()
+                
+                logger.info(f"🧠 Applied learned pattern: confidence={best_score:.2f}")
+                return improved_response
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to apply learned patterns: {e}")
+            return None
 
 
 
@@ -1536,6 +1580,15 @@ Enhanced response:"""
         """Enhanced product handling using passed intent classification"""
         
         logger.info(f"🔍 Enhanced product routing for: {user_message[:50]}...")
+
+
+        learned_response = self._apply_learned_patterns(user_message, tenant.id)
+        if learned_response:
+            return {
+                "content": learned_response,
+                "source": "LEARNED_PATTERN", 
+                "confidence": 0.95
+            }
         
         # Handle conversation endings
         if intent_result and intent_result.get('intent') == 'conversation_ending':
