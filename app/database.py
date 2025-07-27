@@ -253,6 +253,14 @@ def initialize_database_with_retry():
 
 
 
+def reset_connection_pool():
+    """Reset database connection pool"""
+    try:
+        engine.dispose()
+        logger.info("Database connection pool reset")
+    except Exception as e:
+        logger.error(f"Pool reset failed: {e}")
+
 
 
 # Import your models

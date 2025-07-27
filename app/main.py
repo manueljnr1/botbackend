@@ -294,6 +294,15 @@ async def live_chat_health_check():
 async def startup_event():
     """Combined startup event - UPDATED with Telegram"""
     try:
+
+        from app.database import engine
+        try:
+            engine.dispose()
+            logger.info("🔄 Database connection pool reset")
+        except Exception as e:
+            logger.error(f"❌ Pool reset failed: {e}")
+
+
         env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
 
