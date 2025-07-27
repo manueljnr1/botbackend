@@ -7,7 +7,7 @@ Tenant controls + Admin oversight for autonomous learning system
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any, d
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime, date, time, timedelta
 

@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class TrainingRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
     model_version: str
     description: str = "Central intent model training"
 
 class TrainingResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
     success: bool
     message: str
     model_version: str
