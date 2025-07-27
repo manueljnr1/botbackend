@@ -51,21 +51,21 @@ def get_engine_config():
     if settings.is_production():
         config = {
             **base_config,
-            "pool_size": 5,           # Back to normal
-            "max_overflow": 10,       # Back to normal
+            "pool_size": 20,          # Increased from 5
+            "max_overflow": 30,       # Increased from 10
         }
     elif settings.is_staging():
         config = {
             **base_config,
-            "pool_size": 3,
-            "max_overflow": 7,
+            "pool_size": 10,          # Increased from 3
+            "max_overflow": 15,       # Increased from 7
         }
     else:  # development
         config = {
             **base_config,
-            "pool_size": 2,
-            "max_overflow": 5,
-            "echo": False,             # SQL logging in dev
+            "pool_size": 8,           # Increased from 2
+            "max_overflow": 12,       # Increased from 5
+            "echo": False,
         }
         
         # For SQLite in development, optimize for single-threaded usage
