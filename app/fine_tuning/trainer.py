@@ -40,16 +40,21 @@ class BackgroundTrainer:
         self.training_interval = 30 * 60  # 30 minutes in seconds
         self.is_running = False
         self.llm_available = LLM_AVAILABLE and bool(settings.OPENAI_API_KEY)
-        self.semantic_analyzer = SemanticAnalyzer(self.llm if self.llm_available else None)
-        self.confidence_analyzer = ConfidenceAnalyzer(self.llm if self.llm_available else None)
-        self.proactive_learner = ProactiveLearner(self.db)
-            
+        
+        # Initialize LLM first
         if self.llm_available:
             self.llm = ChatOpenAI(
                 model_name="gpt-3.5-turbo",
                 temperature=0.2,
                 openai_api_key=settings.OPENAI_API_KEY
             )
+        else:
+            self.llm = None
+        
+        # Now initialize analyzers (after self.llm is set)
+        self.semantic_analyzer = SemanticAnalyzer(self.llm if self.llm_available else None)
+        self.confidence_analyzer = ConfidenceAnalyzer(self.llm if self.llm_available else None)
+        self.proactive_learner = ProactiveLearner(self.db)
         
         logger.info("🧠 Background Trainer initialized - Autonomous learning enabled")
     
@@ -565,11 +570,11 @@ JSON Response:"""
 
     async def _analyze_response_confidence(self, tenant_id: int):
         """Analyze bot response confidence and flag improvements"""
-        # Get recent bot responses
         cutoff_time = datetime.utcnow() - timedelta(hours=2)
         
-        recent_messages = self.db.query(ChatMessage).filter(
-            ChatMessage.tenant_id == tenant_id,
+        # Get recent bot responses through ChatSession relationship
+        recent_messages = self.db.query(ChatMessage).join(ChatSession).filter(
+            ChatSession.tenant_id == tenant_id,  # Use session's tenant_id
             ChatMessage.is_from_user == False,
             ChatMessage.created_at >= cutoff_time
         ).all()
@@ -588,6 +593,14 @@ JSON Response:"""
                 if not user_message:
                     continue
                 
+                # Get session to get tenant_id
+                session = self.db.query(ChatSession).filter(
+                    ChatSession.id == message.session_id
+                ).first()
+                
+                if not session or session.tenant_id != tenant_id:
+                    continue
+                
                 # Analyze confidence
                 confidence_analysis = self.confidence_analyzer.score_response_confidence(
                     message.content, 
@@ -595,7 +608,7 @@ JSON Response:"""
                 )
                 
                 # Store confidence analysis
-                self._store_response_confidence(tenant_id, message, confidence_analysis)
+                self._store_response_confidence(session.tenant_id, message, confidence_analysis)
                 
                 # Flag for improvement if low confidence
                 if confidence_analysis['needs_improvement']:
@@ -605,7 +618,7 @@ JSON Response:"""
                     
                     # Update stored confidence record with improvement
                     self._update_confidence_with_improvement(
-                        tenant_id, message.id, improved_response
+                        session.tenant_id, message.id, improved_response
                     )
                     
                     low_confidence_responses.append({
