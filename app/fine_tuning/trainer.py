@@ -318,6 +318,48 @@ class BackgroundTrainer:
         self.is_running = False
         logger.info("🛑 Background training stopped")
     
+    # async def _training_cycle(self):
+    #     """Complete training cycle - analyze, learn, improve"""
+    #     cycle_start = datetime.utcnow()
+    #     logger.info("🔄 Starting training cycle")
+        
+    #     db = self._get_fresh_db()
+    #     try:
+    #         # Get all active tenants
+    #         tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+            
+    #         total_patterns = 0
+    #         total_improvements = 0
+            
+    #         for tenant in tenants:
+    #             try:
+    #                 tenant_patterns, tenant_improvements = await self._train_tenant(tenant, db)
+    #                 total_patterns += tenant_patterns
+    #                 total_improvements += tenant_improvements
+    #             except Exception as e:
+    #                 logger.error(f"❌ Tenant {tenant.id} training failed: {e}")
+    #                 # Rollback any pending transaction
+    #                 try:
+    #                     db.rollback()
+    #                 except:
+    #                     pass
+            
+    #         cycle_time = (datetime.utcnow() - cycle_start).total_seconds()
+    #         logger.info(f"✅ Training cycle complete: {total_patterns} patterns, {total_improvements} improvements, {cycle_time:.2f}s")
+            
+    #     except Exception as e:
+    #         logger.error(f"💥 Training cycle failed: {e}")
+    #         try:
+    #             db.rollback()
+    #         except:
+    #             pass
+    #     finally:
+    #         self._close_db(db)
+
+
+
+
+
     async def _training_cycle(self):
         """Complete training cycle - analyze, learn, improve"""
         cycle_start = datetime.utcnow()
@@ -325,20 +367,29 @@ class BackgroundTrainer:
         
         db = self._get_fresh_db()
         try:
-            # Get all active tenants
+            # Get ALL active tenants INCLUDING super tenants
             tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+            
+            # 🆕 EXPLICIT: Include super tenants in learning
+            super_tenant_ids = [324112833]  # Add your super tenant IDs
+            
+            logger.info(f"🧠 Training {len(tenants)} tenants (including super tenants)")
             
             total_patterns = 0
             total_improvements = 0
             
             for tenant in tenants:
                 try:
+                    # 🆕 Log if processing super tenant
+                    if tenant.id in super_tenant_ids:
+                        logger.info(f"🎯 Processing SUPER TENANT: {tenant.name} (ID: {tenant.id})")
+                    
                     tenant_patterns, tenant_improvements = await self._train_tenant(tenant, db)
                     total_patterns += tenant_patterns
                     total_improvements += tenant_improvements
+                    
                 except Exception as e:
                     logger.error(f"❌ Tenant {tenant.id} training failed: {e}")
-                    # Rollback any pending transaction
                     try:
                         db.rollback()
                     except:
@@ -355,6 +406,7 @@ class BackgroundTrainer:
                 pass
         finally:
             self._close_db(db)
+
 
     async def _train_tenant(self, tenant: Tenant, db: Session) -> Tuple[int, int]:
         """Enhanced tenant training with semantic and confidence analysis"""
@@ -910,7 +962,7 @@ JSON Response:"""
         db = self._get_fresh_db()
         try:
             if tenant_id:
-                # Tenant-specific metrics
+                # Tenant-specific metrics (unchanged)
                 latest_metrics = db.query(TrainingMetrics).filter(
                     TrainingMetrics.tenant_id == tenant_id
                 ).order_by(desc(TrainingMetrics.training_cycle)).first()
@@ -935,14 +987,23 @@ JSON Response:"""
                     'improvements_last_cycle': latest_metrics.responses_improved if latest_metrics else 0
                 }
             else:
-                # Global metrics
+                # 🆕 GLOBAL: Include ALL tenants (including super tenants)
                 total_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
+                
+                # 🆕 Count tenants WITH fine-tuning enabled (including super tenant)
+                tenants_with_fine_tuning = db.query(Tenant).filter(
+                    Tenant.is_active == True,
+                    # Most tenants don't have this column yet, so assume enabled
+                    # Add this column to tenant model if needed: Tenant.fine_tuning_enabled != False
+                ).count()
+                
                 total_patterns = db.query(LearningPattern).filter(LearningPattern.is_active == True).count()
                 total_improvements = db.query(AutoImprovement).filter(AutoImprovement.is_active == True).count()
                 
                 return {
                     'is_running': self.is_running,
                     'total_tenants': total_tenants,
+                    'tenants_with_fine_tuning': tenants_with_fine_tuning,  # Should now include super tenant
                     'total_patterns_learned': total_patterns,
                     'total_improvements_made': total_improvements,
                     'training_interval_minutes': self.training_interval // 60
@@ -953,7 +1014,6 @@ JSON Response:"""
             return {'error': str(e)}
         finally:
             self._close_db(db)
-
 # Global trainer instance
 _global_trainer = None
 
