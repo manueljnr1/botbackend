@@ -29,7 +29,36 @@ class SupabaseStorageService:
         
         # Ensure buckets exist
         self._ensure_buckets_exist()
+        self.live_chat_bucket = "live-chat-files"
+        self._ensure_buckets_exist()
         
+
+    async def upload_chat_file(self, tenant_id: int, conversation_id: int, 
+                            file: UploadFile) -> Tuple[bool, str, Optional[str]]:
+        """Upload chat file and return URL"""
+        try:
+            # Validate file
+            if file.size > 10 * 1024 * 1024:  # 10MB limit
+                return False, "File too large (max 10MB)", None
+            
+            # Generate path
+            file_ext = os.path.splitext(file.filename)[1]
+            filename = f"tenant_{tenant_id}/conv_{conversation_id}/{uuid.uuid4()}{file_ext}"
+            
+            # Upload
+            content = await file.read()
+            self.upload_file(self.live_chat_bucket, filename, content)
+            
+            # Generate signed URL (24hr expiry)
+            url = self.client.storage.from_(self.live_chat_bucket).create_signed_url(
+                filename, 86400  # 24 hours
+            )
+            
+            return True, "File uploaded", url['signedURL']
+        except Exception as e:
+            return False, str(e), None
+    
+
     
     def _ensure_buckets_exist(self):
         """Create storage buckets if they don't exist - ENHANCED"""
@@ -60,6 +89,13 @@ class SupabaseStorageService:
                     logger.info(f"Created bucket: {self.vector_store_bucket}")
                 except Exception as e:
                     logger.warning(f"Could not create {self.vector_store_bucket}: {e}")
+
+            if self.live_chat_bucket not in existing_buckets:
+                try:
+                    self.client.storage.create_bucket(self.live_chat_bucket, {"public": False})
+                    logger.info(f"Created bucket: {self.live_chat_bucket}")
+                except Exception as e:
+                    logger.warning(f"Could not create {self.live_chat_bucket}: {e}")
             
             # Create tenant-logos bucket if not exists
             logo_bucket = getattr(self, 'bucket_name', 'tenant-logos')

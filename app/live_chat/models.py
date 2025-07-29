@@ -292,6 +292,9 @@ class LiveChatMessage(Base):
     conversation = relationship("LiveChatConversation", back_populates="messages")
     agent = relationship("Agent", back_populates="messages")
     reply_to = relationship("LiveChatMessage", remote_side=[id])
+
+    read_by_customer_at = Column(DateTime, nullable=True)
+    delivered_to_customer_at = Column(DateTime, nullable=True)
     
     def __repr__(self):
         return f"<LiveChatMessage {self.id} from {self.sender_type}>"

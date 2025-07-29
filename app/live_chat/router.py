@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from fastapi.security import HTTPBearer
 from fastapi import Security
+from fastapi import File, Form, UploadFile
 
 
 from app.database import get_db
@@ -29,7 +30,7 @@ from app.live_chat.agent_dashboard_service import SharedDashboardService
 from app.pricing.integration_helpers import check_conversation_limit_dependency_with_super_tenant, track_conversation_started_with_super_tenant
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.live_chat.models import AgentSession
-
+from app.services.storage import storage_service
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -2373,3 +2374,74 @@ async def accept_conversation(
         logger.error(f"Error accepting conversation: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to accept conversation")
+    
+
+
+@router.post("/upload-file")
+async def upload_chat_file(
+    file: UploadFile = File(...),
+    conversation_id: int = Form(...),
+    api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Security(bearer_scheme),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Get tenant (same auth pattern as other endpoints)
+        if api_key:
+            tenant = get_tenant_from_api_key(api_key, db)
+        elif token:
+            actual_token = token.credentials if hasattr(token, 'credentials') else token
+            
+            from app.core.security import verify_token
+            payload = verify_token(actual_token)
+            agent_id = payload.get("sub")
+            user_type = payload.get("type")
+            
+            if user_type == "agent":
+                agent = db.query(Agent).filter(
+                    Agent.id == int(agent_id),
+                    Agent.status == AgentStatus.ACTIVE,
+                    Agent.is_active == True
+                ).first()
+                
+                if agent:
+                    tenant = db.query(Tenant).filter(Tenant.id == agent.tenant_id).first()
+                    if not tenant:
+                        raise HTTPException(status_code=404, detail="Agent's tenant not found")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid agent token")
+            else:
+                raise HTTPException(status_code=401, detail="Invalid token type")
+        else:
+            raise HTTPException(status_code=401, detail="API key or agent authentication required")
+        
+        # Verify conversation belongs to tenant
+        conversation = db.query(LiveChatConversation).filter(
+            LiveChatConversation.id == conversation_id,
+            LiveChatConversation.tenant_id == tenant.id
+        ).first()
+        
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Upload file
+        success, message, file_url = await storage_service.upload_chat_file(
+            tenant.id, conversation_id, file
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        return {
+            "success": True,
+            "file_url": file_url,
+            "filename": file.filename,
+            "size": file.size,
+            "message": message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading file: {str(e)}")
+        raise HTTPException(status_code=500, detail="File upload failed")

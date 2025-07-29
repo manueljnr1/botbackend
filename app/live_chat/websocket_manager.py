@@ -440,6 +440,8 @@ class LiveChatMessageHandler:
                 await self._handle_get_history(connection_id, data)
             elif message_type == "ping":
                 await self._handle_ping(connection_id)
+            elif message_type == "message_read":  
+                await self._handle_message_read(connection_id, data)
             
             # ✨ ADD THESE NEW TRANSCRIPT MESSAGE TYPES:
             elif message_type == "send_full_transcript":
@@ -675,36 +677,36 @@ class LiveChatMessageHandler:
             await self.websocket_manager.add_connection_to_conversation(connection_id, conversation_id)
             
             # Send system message about agent joining
-            join_message = LiveChatMessage(
-                conversation_id=conversation_id,
-                content=f"{agent.display_name} has joined the chat",
-                message_type=MessageType.SYSTEM,
-                sender_type=SenderType.SYSTEM,
-                system_event_type="agent_join",
-                system_event_data=json.dumps({
-                    "agent_id": agent_id,
-                    "agent_name": agent.display_name
-                })
-            )
+            # join_message = LiveChatMessage(
+            #     conversation_id=conversation_id,
+            #     content=f"{agent.display_name} has joined the chat",
+            #     message_type=MessageType.SYSTEM,
+            #     sender_type=SenderType.SYSTEM,
+            #     system_event_type="agent_join",
+            #     system_event_data=json.dumps({
+            #         "agent_id": agent_id,
+            #         "agent_name": agent.display_name
+            #     })
+            # )
             
-            self.db.add(join_message)
-            self.db.commit()
+            # self.db.add(join_message)
+            # self.db.commit()
             
-            # Broadcast join notification
-            join_data = {
-                "conversation_id": conversation_id,
-                "agent_id": agent_id,
-                "agent_name": agent.display_name,
-                "message": f"{agent.display_name} has joined the chat"
-            }
+            # # Broadcast join notification
+            # join_data = {
+            #     "conversation_id": conversation_id,
+            #     "agent_id": agent_id,
+            #     "agent_name": agent.display_name,
+            #     "message": f"{agent.display_name} has joined the chat"
+            # }
             
-            join_notification = WebSocketMessage(
-                message_type="agent_joined",
-                data=join_data,
-                conversation_id=conversation_id
-            )
+            # join_notification = WebSocketMessage(
+            #     message_type="agent_joined",
+            #     data=join_data,
+            #     conversation_id=conversation_id
+            # )
             
-            await self.websocket_manager.send_to_conversation(conversation_id, join_notification)
+            # await self.websocket_manager.send_to_conversation(conversation_id, join_notification)
             
             logger.info(f"Agent {agent_id} joined conversation {conversation_id}")
             
@@ -850,6 +852,29 @@ class LiveChatMessageHandler:
                 data={"message": error_message}
             )
             await connection.send_message(error_msg)
+
+
+
+
+    async def _handle_message_read(self, connection_id: str, data: dict):
+        message_id = data.get("message_id")
+        if message_id:
+            message = self.db.query(LiveChatMessage).filter(
+                LiveChatMessage.id == message_id
+            ).first()
+            if message:
+                message.read_by_customer_at = datetime.utcnow()
+                self.db.commit()
+                
+                # Notify agent
+                read_notification = WebSocketMessage(
+                    message_type="message_read_receipt",
+                    data={"message_id": message_id, "read_at": message.read_by_customer_at.isoformat()},
+                    conversation_id=str(message.conversation_id)
+                )
+                await self.websocket_manager.send_to_conversation(
+                    str(message.conversation_id), read_notification
+                )
 
 
 
