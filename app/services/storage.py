@@ -26,11 +26,12 @@ class SupabaseStorageService:
         )
         self.knowledge_base_bucket = "knowledge-base-files"
         self.vector_store_bucket = "vector-stores"
-        
+        self.live_chat_bucket = "live-chat-files"
         # Ensure buckets exist
         self._ensure_buckets_exist()
-        self.live_chat_bucket = "live-chat-files"
-        self._ensure_buckets_exist()
+       
+        
+        
         
 
     async def upload_chat_file(self, tenant_id: int, conversation_id: int, 
@@ -92,7 +93,7 @@ class SupabaseStorageService:
 
             if self.live_chat_bucket not in existing_buckets:
                 try:
-                    self.client.storage.create_bucket(self.live_chat_bucket, {"public": False})
+                    self.client.storage.create_bucket(self.live_chat_bucket)
                     logger.info(f"Created bucket: {self.live_chat_bucket}")
                 except Exception as e:
                     logger.warning(f"Could not create {self.live_chat_bucket}: {e}")

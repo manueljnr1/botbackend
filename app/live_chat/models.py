@@ -380,7 +380,10 @@ class ChatQueue(Base):
     
     # 🔧 FIXED RELATIONSHIPS
     conversation = relationship("LiveChatConversation", back_populates="queue_entry")
-    preferred_agent = relationship("Agent")
+    preferred_agent = relationship("Agent", foreign_keys=[preferred_agent_id])
+
+    suggested_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    suggestion_confidence = Column(Float, nullable=True)
     
     def __repr__(self):
         return f"<ChatQueue position {self.position} for conversation {self.conversation_id}>"

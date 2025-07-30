@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional
 from fastapi.security import HTTPBearer
 from fastapi import Security
 from fastapi import File, Form, UploadFile
+from sqlalchemy import and_, or_, desc, func
 
 
 from app.database import get_db
@@ -2280,6 +2281,21 @@ async def accept_conversation(
                 detail=f"Conversation cannot be accepted. Current status: {conversation.status}"
             )
         
+        # Check if it's available for this agent (waiting or suggested for them)
+        queue_entry = db.query(ChatQueue).filter(
+            ChatQueue.conversation_id == conversation_id,
+            or_(
+                ChatQueue.status == "waiting",
+                and_(
+                    ChatQueue.status == "suggested",
+                    ChatQueue.suggested_agent_id == current_agent.id
+                )
+            )
+        ).first()
+        
+        if not queue_entry:
+            raise HTTPException(status_code=400, detail="Conversation not available for acceptance")
+        
         # Check if agent is available
         agent_session = db.query(AgentSession).filter(
             AgentSession.agent_id == current_agent.id,
@@ -2307,16 +2323,10 @@ async def accept_conversation(
         # Update agent session
         agent_session.active_conversations += 1
         
-        # Remove from queue if exists
-        queue_entry = db.query(ChatQueue).filter(
-            ChatQueue.conversation_id == conversation_id,
-            ChatQueue.status == "waiting"
-        ).first()
-        
-        if queue_entry:
-            queue_entry.status = "assigned"
-            queue_entry.assigned_at = datetime.utcnow()
-            queue_entry.assigned_agent_id = current_agent.id
+        # Update queue entry
+        queue_entry.status = "assigned"
+        queue_entry.assigned_at = datetime.utcnow()
+        queue_entry.assigned_agent_id = current_agent.id
         
         # Add assignment message
         assignment_message = LiveChatMessage(
@@ -2445,3 +2455,49 @@ async def upload_chat_file(
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=500, detail="File upload failed")
+    
+
+
+@router.get("/agents/list")
+async def get_agents_list(
+   current_agent: Agent = Depends(get_current_agent),
+   db: Session = Depends(get_db)
+):
+   """Get list of agents in the same tenant for transfers and assignments"""
+   try:
+       agents = db.query(Agent).filter(
+           and_(
+               Agent.tenant_id == current_agent.tenant_id,
+               Agent.status == AgentStatus.ACTIVE,
+               Agent.is_active == True,
+               Agent.id != current_agent.id  # Exclude current agent
+           )
+       ).order_by(Agent.display_name).all()
+       
+       agent_list = []
+       for agent in agents:
+           # Get current session info
+           session = db.query(AgentSession).filter(
+               AgentSession.agent_id == agent.id,
+               AgentSession.logout_at.is_(None)
+           ).first()
+           
+           agent_list.append({
+               "agent_id": agent.id,
+               "display_name": agent.display_name,
+               "email": agent.email,
+               "is_online": agent.is_online,
+               "current_conversations": session.active_conversations if session else 0,
+               "max_capacity": session.max_concurrent_chats if session else agent.max_concurrent_chats,
+               "is_available": session.is_accepting_chats if session else False
+           })
+       
+       return {
+           "success": True,
+           "agents": agent_list,
+           "total_agents": len(agent_list)
+       }
+       
+   except Exception as e:
+       logger.error(f"Error getting agents list: {str(e)}")
+       raise HTTPException(status_code=500, detail="Failed to get agents list")

@@ -308,38 +308,61 @@ class AgentDashboardService:
     async def get_enhanced_queue_for_agent(self, agent: Agent) -> Dict[str, Any]:
         """Get queue with enhanced customer intelligence for agent dashboard"""
         try:
-            # Get queued conversations for this tenant
-            queued_conversations = self.db.query(LiveChatConversation).filter(
+            # Get conversations suggested for this agent
+            suggested_conversations = self.db.query(LiveChatConversation).join(ChatQueue).filter(
                 and_(
                     LiveChatConversation.tenant_id == agent.tenant_id,
-                    LiveChatConversation.status.in_([
-                        ConversationStatus.QUEUED,
-                        ConversationStatus.ASSIGNED
-                    ])
+                    LiveChatConversation.status == ConversationStatus.QUEUED,
+                    ChatQueue.status == "suggested",
+                    ChatQueue.suggested_agent_id == agent.id
+                )
+            ).order_by(ChatQueue.suggestion_confidence.desc()).all()
+            
+            # Get general queue conversations (not suggested to anyone)
+            general_conversations = self.db.query(LiveChatConversation).join(ChatQueue).filter(
+                and_(
+                    LiveChatConversation.tenant_id == agent.tenant_id,
+                    LiveChatConversation.status == ConversationStatus.QUEUED,
+                    ChatQueue.status == "waiting"
                 )
             ).order_by(LiveChatConversation.queue_position.asc()).all()
             
-            enhanced_queue = []
+            # Get conversations assigned to other agents (for visibility)
+            other_suggestions = self.db.query(LiveChatConversation).join(ChatQueue).filter(
+                and_(
+                    LiveChatConversation.tenant_id == agent.tenant_id,
+                    LiveChatConversation.status == ConversationStatus.QUEUED,
+                    ChatQueue.status == "suggested",
+                    ChatQueue.suggested_agent_id != agent.id
+                )
+            ).order_by(ChatQueue.suggestion_confidence.desc()).all()
             
-            for conversation in queued_conversations:
-                # Get customer intelligence
+            # Get transferred conversations
+            transferred_conversations = self.db.query(LiveChatConversation).filter(
+                and_(
+                    LiveChatConversation.tenant_id == agent.tenant_id,
+                    LiveChatConversation.status == ConversationStatus.TRANSFERRED
+                )
+            ).all()
+            
+            suggested_queue = []
+            general_queue = []
+            others_queue = []
+            transferred_queue = []
+            
+            # Process suggested conversations
+            for conversation in suggested_conversations:
                 customer_intel = await self._get_customer_intelligence(
                     conversation.customer_identifier,
                     agent.tenant_id
                 )
-                
-                # Get enhanced conversation preview with text preview service
                 preview = await self._get_enhanced_conversation_preview(conversation.id)
-                
-                # Calculate urgency score
                 urgency_score = self._calculate_urgency_score(conversation, customer_intel)
-                
-                # Get routing recommendations
                 routing_rec = await self._get_routing_recommendation(
                     conversation, customer_intel, agent
                 )
                 
-                enhanced_queue.append({
+                suggested_queue.append({
                     "conversation_id": conversation.id,
                     "queue_position": conversation.queue_position,
                     "customer_identifier": conversation.customer_identifier,
@@ -347,31 +370,97 @@ class AgentDashboardService:
                     "status": conversation.status,
                     "created_at": conversation.created_at.isoformat(),
                     "wait_time_minutes": self._calculate_wait_time(conversation),
-                    
-                    # Enhanced customer intelligence
+                    "queue_tag": "suggested",
+                    "is_suggested_for_me": True,
                     "customer_intelligence": customer_intel,
                     "conversation_preview": preview,
                     "urgency_score": urgency_score,
                     "routing_recommendation": routing_rec,
-                    
-                    # Visual indicators for agent dashboard
                     "indicators": self._get_visual_indicators(conversation, customer_intel),
-                    
-                    # Suggested actions
-                    "suggested_actions": self._get_suggested_actions(
-                        conversation, customer_intel, agent
-                    )
+                    "suggested_actions": self._get_suggested_actions(conversation, customer_intel, agent)
                 })
             
-            # Sort by urgency and queue position
-            enhanced_queue.sort(key=lambda x: (x.get("urgency_score") or 0, x.get("queue_position") or 0), reverse=True)
+            # Process general queue
+            for conversation in general_conversations:
+                customer_intel = await self._get_customer_intelligence(
+                    conversation.customer_identifier,
+                    agent.tenant_id
+                )
+                preview = await self._get_enhanced_conversation_preview(conversation.id)
+                urgency_score = self._calculate_urgency_score(conversation, customer_intel)
+                routing_rec = await self._get_routing_recommendation(
+                    conversation, customer_intel, agent
+                )
+                
+                general_queue.append({
+                    "conversation_id": conversation.id,
+                    "queue_position": conversation.queue_position,
+                    "customer_identifier": conversation.customer_identifier,
+                    "customer_name": conversation.customer_name,
+                    "status": conversation.status,
+                    "created_at": conversation.created_at.isoformat(),
+                    "wait_time_minutes": self._calculate_wait_time(conversation),
+                    "queue_tag": "general",
+                    "is_suggested_for_me": False,
+                    "customer_intelligence": customer_intel,
+                    "conversation_preview": preview,
+                    "urgency_score": urgency_score,
+                    "routing_recommendation": routing_rec,
+                    "indicators": self._get_visual_indicators(conversation, customer_intel),
+                    "suggested_actions": self._get_suggested_actions(conversation, customer_intel, agent)
+                })
+            
+            # Process others' suggestions (simplified)
+            for conversation in other_suggestions:
+                others_queue.append({
+                    "conversation_id": conversation.id,
+                    "customer_name": conversation.customer_name,
+                    "status": conversation.status,
+                    "queue_tag": "others",
+                    "suggested_for_other_agent": True
+                })
+            
+            # Process transferred conversations
+            for conversation in transferred_conversations:
+                customer_intel = await self._get_customer_intelligence(
+                    conversation.customer_identifier,
+                    agent.tenant_id
+                )
+                preview = await self._get_enhanced_conversation_preview(conversation.id)
+                urgency_score = self._calculate_urgency_score(conversation, customer_intel)
+                routing_rec = await self._get_routing_recommendation(
+                    conversation, customer_intel, agent
+                )
+                
+                transferred_queue.append({
+                    "conversation_id": conversation.id,
+                    "queue_position": conversation.queue_position,
+                    "customer_identifier": conversation.customer_identifier,
+                    "customer_name": conversation.customer_name,
+                    "status": conversation.status,
+                    "created_at": conversation.created_at.isoformat(),
+                    "wait_time_minutes": self._calculate_wait_time(conversation),
+                    "queue_tag": "transferred",
+                    "is_suggested_for_me": False,
+                    "customer_intelligence": customer_intel,
+                    "conversation_preview": preview,
+                    "urgency_score": urgency_score,
+                    "routing_recommendation": routing_rec,
+                    "indicators": self._get_visual_indicators(conversation, customer_intel),
+                    "suggested_actions": self._get_suggested_actions(conversation, customer_intel, agent)
+                })
             
             return {
                 "success": True,
-                "total_in_queue": len(enhanced_queue),
-                "agent_recommendations": self._get_agent_specific_recommendations(agent, enhanced_queue),
-                "queue": enhanced_queue,
-                "queue_statistics": self._get_queue_statistics(enhanced_queue),
+                "suggested_for_me": suggested_queue,
+                "general_queue": general_queue,
+                "others_suggestions": others_queue,
+                "transferred_queue": transferred_queue,
+                "total_suggested": len(suggested_queue),
+                "total_general": len(general_queue),
+                "total_others": len(others_queue),
+                "total_transferred": len(transferred_queue),
+                "agent_recommendations": self._get_agent_specific_recommendations(agent, suggested_queue + general_queue),
                 "timestamp": datetime.utcnow().isoformat()
             }
             
