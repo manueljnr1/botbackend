@@ -837,3 +837,46 @@ class LiveChatQueueService:
             logger.error(f"Error generating recommendations: {str(e)}")
         
         return recommendations
+    
+
+
+    def transfer_conversation(self, conversation_id: int, from_agent_id: int, 
+                            to_agent_id: int, reason: str = "transfer") -> bool:
+        """Transfer conversation from one agent to another"""
+        try:
+            conversation = self.db.query(LiveChatConversation).filter(
+                LiveChatConversation.id == conversation_id
+            ).first()
+            
+            if not conversation:
+                return False
+            
+            # Update conversation
+            conversation.previous_agent_id = from_agent_id
+            conversation.assigned_agent_id = to_agent_id
+            conversation.status = ConversationStatus.TRANSFERRED
+            conversation.assignment_method = "transfer"
+            
+            # Update agent sessions
+            if from_agent_id:
+                from_session = self.db.query(AgentSession).filter(
+                    AgentSession.agent_id == from_agent_id,
+                    AgentSession.logout_at.is_(None)
+                ).first()
+                if from_session:
+                    from_session.active_conversations = max(0, from_session.active_conversations - 1)
+            
+            to_session = self.db.query(AgentSession).filter(
+                AgentSession.agent_id == to_agent_id,
+                AgentSession.logout_at.is_(None)
+            ).first()
+            if to_session:
+                to_session.active_conversations += 1
+            
+            self.db.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error transferring conversation: {str(e)}")
+            self.db.rollback()
+            return False
