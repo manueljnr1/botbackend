@@ -1687,7 +1687,7 @@ Enhanced response:"""
         if (intent_result and intent_result.get('source') == 'tenant_specific_semantic' and 
             intent_result.get('document_id')):
             logger.info(f"🎯 Routing to specific document {intent_result['document_id']}")
-            return self._handle_specific_document(user_message, intent_result['document_id'], tenant)
+            return self._handle_specific_document(user_message, intent_result['document_id'], tenant, session_id)
         
         # Check for FAQ match
         logger.info("📚 Checking FAQ database...")
@@ -1722,7 +1722,7 @@ Enhanced response:"""
 
 
 
-    def _handle_specific_document(self, user_message: str, document_id: int, tenant: Tenant) -> Dict[str, Any]:
+    def _handle_specific_document(self, user_message: str, document_id: int, tenant: Tenant, session_id: str) -> Dict[str, Any]:
         """Handle query routed to specific document - NOW WITH LLM MEDIATOR"""
         try:
             kb = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
@@ -2037,7 +2037,7 @@ Enhanced response:"""
         return "I'd be happy to help with your question. Could you be more specific about what you'd like to know?"
     
 
-    def _handle_smart_troubleshooting(self, user_message: str, kb: KnowledgeBase, tenant: Tenant) -> Dict[str, Any]:
+    def _handle_smart_troubleshooting(self, user_message: str, kb: KnowledgeBase, tenant: Tenant, session_id: str) -> Dict[str, Any]:
         """LLM-powered intelligent troubleshooting conversation"""
         if not self.llm_available:
             return self._generate_custom_response(user_message, tenant, "troubleshooting")
@@ -2051,7 +2051,7 @@ Enhanced response:"""
             context = "\n".join([doc.page_content[:500] for doc in docs])
             
             # Get troubleshooting state from session
-            session_id = self._get_current_session_id(user_message)  # Need to pass this
+            # session_id will be passed as parameter from calling method
             memory = SimpleChatbotMemory(self.db, self.tenant_id)
             troubleshooting_state = memory.get_troubleshooting_state(session_id)
             
