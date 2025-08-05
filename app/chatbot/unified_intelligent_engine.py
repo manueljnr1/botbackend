@@ -171,11 +171,11 @@ class UnifiedIntelligentEngine:
             final_content = fix_response_formatting(response_data['content'])
             
             # 🚨 ESCALATION CHECK
-            escalation_response = self._check_escalation_triggers(user_message, final_content, conversation_history, session_id, user_identifier)
-            if escalation_response:
-                memory.store_message(session_id, user_message, True)
-                memory.store_message(session_id, escalation_response["response"], False)
-                return escalation_response
+            # escalation_response = self._check_escalation_triggers(user_message, final_content, conversation_history, session_id, user_identifier)
+            # if escalation_response:
+            #     memory.store_message(session_id, user_message, True)
+            #     memory.store_message(session_id, escalation_response["response"], False)
+            #     return escalation_response
             
             # Store messages
             memory.store_message(session_id, user_message, True)
