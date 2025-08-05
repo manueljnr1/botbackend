@@ -2227,6 +2227,7 @@ Enhanced response:"""
     - Use document content to provide relevant information
     - Guide naturally toward solutions that fit their needs
     - Acknowledge their responses and build on them
+    - If they want specifics, give specifics, skip protocol and steps
 
     Response (consultative and natural):"""
 
