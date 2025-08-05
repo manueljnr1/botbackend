@@ -1731,7 +1731,7 @@ Enhanced response:"""
             
             # Check if it's troubleshooting document
             if kb.document_type == DocumentType.TROUBLESHOOTING or kb.is_troubleshooting:
-                return self._handle_smart_troubleshooting(user_message, kb, tenant)
+                return self._handle_smart_troubleshooting(user_message, kb, tenant, session_id)
             
             # Get document content
             document_content = {}
