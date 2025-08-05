@@ -757,16 +757,20 @@ class UnifiedIntelligentEngine:
                         best_match = pattern
             
             if best_match and best_score > 0.8:
-                # Apply learned improvement
-                improved_response = best_match.improved_response
-                
-                # Update usage stats
-                best_match.usage_count += 1
-                best_match.last_used = datetime.utcnow()
-                self.db.commit()
-                
-                logger.info(f"🧠 Applied learned pattern: confidence={best_score:.2f}")
-                return improved_response
+                # 🆕 SEMANTIC VALIDATION
+                if self.llm_available and self._validate_pattern_relevance(user_message, best_match.user_message_pattern, best_match.improved_response):
+                    # Apply learned improvement
+                    improved_response = best_match.improved_response
+                    
+                    # Update usage stats
+                    best_match.usage_count += 1
+                    best_match.last_used = datetime.utcnow()
+                    self.db.commit()
+                    
+                    logger.info(f"🧠 Applied learned pattern: confidence={best_score:.2f}")
+                    return improved_response
+                else:
+                    logger.warning(f"🚨 Pattern semantic mismatch - skipping learned pattern")
             
             return None
             
@@ -774,6 +778,18 @@ class UnifiedIntelligentEngine:
             logger.error(f"❌ Failed to apply learned patterns: {e}")
             return None
 
+    def _validate_pattern_relevance(self, current_message: str, pattern_message: str, pattern_response: str) -> bool:
+        """Validate if learned pattern is semantically relevant"""
+        try:
+            prompt = f"""Are these about the same topic?
+        Current: "{current_message}"
+        Pattern: "{pattern_message}"
+        Return: YES or NO"""
+            
+            result = self.llm.invoke(prompt)
+            return result.content.strip().upper() == "YES"
+        except:
+            return False
 
 
     def _privacy_filter_response(
