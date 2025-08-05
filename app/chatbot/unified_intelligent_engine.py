@@ -2085,32 +2085,30 @@ Enhanced response:"""
         
         state_context = ""
         if state and state.get("active"):
-            state_context = f"""
-    CURRENT TROUBLESHOOTING SESSION:
-    - Issue being worked on: {state.get('current_issue', 'Unknown')}
-    - Solutions tried: {state.get('solutions_tried', [])}
-    - Current step: {state.get('current_step', 'diagnosis')}
+            solutions_tried = state.get('solutions_tried', [])
+            if solutions_tried:
+                state_context = f"""
+    TROUBLESHOOTING PROGRESS:
+    - Issue: {state.get('current_issue', 'Unknown')}
+    - Already tried: {', '.join(solutions_tried)}
+    - Current step: {state.get('current_step', 'next_solution')}
     """
         
-        return f"""You are a brilliant technical support specialist for {company_name}. 
+        return f"""You are a helpful technical support specialist for {company_name}. 
 
-    USER ISSUE: "{user_message}"
+    USER MESSAGE: "{user_message}"
 
     KNOWLEDGE BASE CONTEXT:
     {context}
 
     {state_context}
 
-    CRITICAL INSTRUCTIONS:
-    - Ask ONE diagnostic question at a time
-    - Provide ONE solution step at a time  
-    - Wait for user feedback before proceeding
-    - Be conversational and empathetic
-    - Don't dump all solutions at once
-    - Guide them through ONE step, then ask "Did that work?"
-
-    WRONG: "Try these 5 solutions: 1... 2... 3..."
-    RIGHT: "Let's start with the most common fix. Can you double-check your password and try again?"
+    INSTRUCTIONS:
+    - Be conversational and natural
+    - Give ONE solution step at a time
+    - Don't repeat "Let's start" - vary your language
+    - If they tried something, acknowledge it and move to next step
+    - Use phrases like "Now try...", "Next, can you...", "Hmmm! Now let's...", "Could you try....", "try ..."
 
     Response (ONE step only):"""
 
