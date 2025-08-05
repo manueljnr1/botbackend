@@ -2101,15 +2101,18 @@ Enhanced response:"""
 
     {state_context}
 
-    INSTRUCTIONS:
-    CRITIACL!!!  -  Provide step-by-step solutions
-    - Be conversational and empathetic
+    CRITICAL INSTRUCTIONS:
     - Ask ONE diagnostic question at a time
-    - Remember what's been tried
-    - Guide them through solutions methodically
-    
+    - Provide ONE solution step at a time  
+    - Wait for user feedback before proceeding
+    - Be conversational and empathetic
+    - Don't dump all solutions at once
+    - Guide them through ONE step, then ask "Did that work?"
 
-    Response:"""
+    WRONG: "Try these 5 solutions: 1... 2... 3..."
+    RIGHT: "Let's start with the most common fix. Can you double-check your password and try again?"
+
+    Response (ONE step only):"""
 
     def _update_troubleshooting_state(self, session_id: str, user_message: str, 
                                     bot_response: str, memory: SimpleChatbotMemory):
