@@ -401,7 +401,7 @@ class UnifiedIntelligentEngine:
         2. If greeting + question/request = NOT A GREETING, process the question
         3. If user is answering a previous question = NOT A GREETING, process the answer
         4. If continuing existing topic = NOT A GREETING
-        5. If message contains "tell me", "about", "can you", "what", "how", "why", "when", "where" = NOT A GREETING
+        5. If message contains "tell me", "about", "can you", "what", "who" "how", "why", "when", "where" = NOT A GREETING
         6. If message mentions ANY topic, subject, or request = NOT A GREETING     
         7. If message asks for information = NOT A GREETING
 
@@ -425,6 +425,7 @@ class UnifiedIntelligentEngine:
         ✅ "Wagwan" → IS A GREETING
         ✅ "Greetings" → IS A GREETING (pure social)
         ✅ "Hello, just checking in" → IS A GREETING (pure social + no request) 
+
 
         BE EXTREMELY STRICT: If there's ANY additional content beyond pure social greeting, return NOT A GREETING.
 
