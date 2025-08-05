@@ -2132,6 +2132,150 @@ Enhanced response:"""
             logger.error(f"Error updating troubleshooting state: {e}")
 
 
+
+
+    def _handle_smart_sales(self, user_message: str, kb: KnowledgeBase, tenant: Tenant, session_id: str) -> Dict[str, Any]:
+        """LLM-powered consultative sales conversation"""
+        if not self.llm_available:
+            return self._generate_custom_response(user_message, tenant, "sales")
+        
+        try:
+            # Get sales content from document
+            sales_content = kb.sales_content or {}
+            
+            # Get vector content for additional context
+            from app.knowledge_base.processor import DocumentProcessor
+            processor = DocumentProcessor(tenant.id)
+            vector_store = processor.get_vector_store(kb.vector_store_id)
+            docs = vector_store.similarity_search(user_message, k=3)
+            context = "\n".join([doc.page_content[:500] for doc in docs])
+            
+            # Get sales conversation state
+            memory = SimpleChatbotMemory(self.db, self.tenant_id)
+            sales_state = memory.get_sales_conversation_state(session_id)
+            
+            # Build consultative sales prompt
+            prompt = self._build_smart_sales_prompt(
+                user_message, sales_content, context, sales_state, tenant.business_name
+            )
+            
+            result = self.llm.invoke(prompt)
+            response = result.content.strip()
+            
+            # Update sales conversation state
+            self._update_sales_conversation_state(session_id, user_message, response, memory, sales_content)
+            
+            return {
+                "content": response,
+                "source": "Smart_Sales",
+                "confidence": 0.9,
+                "document_id": kb.id
+            }
+            
+        except Exception as e:
+            logger.error(f"Smart sales error: {e}")
+            return self._generate_custom_response(user_message, tenant, "sales")
+
+
+
+    def _build_smart_sales_prompt(self, user_message: str, sales_content: Dict, context: str, 
+                                state: Dict, company_name: str) -> str:
+        """Build consultative sales prompt using extracted document content"""
+        
+        # Extract key sales data from document
+        products = sales_content.get('products', [])
+        pricing = sales_content.get('pricing_structure', {})
+        value_props = sales_content.get('value_propositions', [])
+        
+        sales_context = ""
+        if products:
+            sales_context += f"PRODUCTS: {products}\n"
+        if pricing:
+            sales_context += f"PRICING: {pricing}\n"
+        if value_props:
+            sales_context += f"VALUE PROPOSITIONS: {value_props}\n"
+        
+        state_context = ""
+        if state and state.get("active"):
+            state_context = f"""
+    SALES CONVERSATION PROGRESS:
+    - Flow type: {state.get('flow_type', 'general')}
+    - Current step: {state.get('current_step', 'discovery')}
+    - Information gathered: {state.get('flow_data', {})}
+    """
+        
+        return f"""You are a consultative sales specialist for {company_name}.
+
+    USER MESSAGE: "{user_message}"
+
+    SALES DOCUMENT CONTENT:
+    {sales_context}
+
+    ADDITIONAL CONTEXT:
+    {context}
+
+    {state_context}
+
+    INSTRUCTIONS:
+    - Be consultative, not pushy
+    - Ask ONE qualifying question at a time
+    - Focus on understanding their needs first
+    - Use document content to provide relevant information
+    - Guide naturally toward solutions that fit their needs
+    - Acknowledge their responses and build on them
+
+    Response (consultative and natural):"""
+
+
+
+    def _update_sales_conversation_state(self, session_id: str, user_message: str, 
+                                    bot_response: str, memory: SimpleChatbotMemory, sales_content: Dict):
+        """Update sales conversation state"""
+        try:
+            # Determine conversation flow type from document content
+            flow_type = self._determine_sales_flow_type(user_message, sales_content)
+            
+            state_data = {
+                "flow_type": flow_type,
+                "last_user_message": user_message,
+                "last_bot_response": bot_response,
+                "current_step": "discovery",
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+            memory.store_sales_conversation_state(session_id, 0, flow_type, "active", state_data)
+            
+        except Exception as e:
+            logger.error(f"Error updating sales state: {e}")
+
+
+
+
+    def _determine_sales_flow_type(self, user_message: str, sales_content: Dict) -> str:
+        """Determine sales flow type using extracted conversation flows from document"""
+        try:
+            conversation_flows = sales_content.get('conversation_flows', {})
+            
+            if not conversation_flows:
+                return "general_inquiry"
+            
+            user_lower = user_message.lower()
+            
+            # Check each flow's trigger keywords from the extracted document
+            for flow_name, flow_data in conversation_flows.items():
+                trigger_keywords = flow_data.get('trigger_keywords', [])
+                
+                if any(keyword in user_lower for keyword in trigger_keywords):
+                    return flow_name
+            
+            # Default to first available flow if no match
+            return list(conversation_flows.keys())[0] if conversation_flows else "general_inquiry"
+            
+        except Exception as e:
+            logger.error(f"Error determining sales flow type: {e}")
+            return "general_inquiry"
+
+
 # Factory function
 def get_unified_intelligent_engine(db: Session, tenant_id: int = None) -> UnifiedIntelligentEngine:
     """Factory function to create the enhanced unified engine"""
