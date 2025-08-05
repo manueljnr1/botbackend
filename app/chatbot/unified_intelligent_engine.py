@@ -1723,50 +1723,54 @@ Enhanced response:"""
 
 
     def _handle_specific_document(self, user_message: str, document_id: int, tenant: Tenant, session_id: str) -> Dict[str, Any]:
-        """Handle query routed to specific document - NOW WITH LLM MEDIATOR"""
-        try:
-            kb = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
-            if not kb:
-                return self._generate_custom_response(user_message, tenant, "product_related")
-            
-            # Check if it's troubleshooting document
-            if kb.document_type == DocumentType.TROUBLESHOOTING or kb.is_troubleshooting:
-                return self._handle_smart_troubleshooting(user_message, kb, tenant, session_id)
-            
-            # Get document content
-            document_content = {}
-            
-            # Extract structured content based on type
-            if kb.document_type == DocumentType.SALES and kb.sales_content:
-                document_content = kb.sales_content
-            elif kb.document_type == DocumentType.TROUBLESHOOTING and kb.troubleshooting_flow:
-                document_content = kb.troubleshooting_flow
-            
-            # Add vector content as fallback
-            try:
-                from app.knowledge_base.processor import DocumentProcessor
-                processor = DocumentProcessor(tenant.id)
-                vector_store = processor.get_vector_store(kb.vector_store_id)
-                docs = vector_store.similarity_search(user_message, k=2)
-                document_content['vector_content'] = [doc.page_content[:500] for doc in docs]
-            except:
-                pass
-            
-            # USE LLM MEDIATOR instead of rigid flows
-            response = self._mediate_document_interaction(
-                user_message, document_content, kb.document_type.value
-            )
-            
-            return {
-                "content": response,
-                "source": f"LLM_Mediated_{kb.document_type.value}",
-                "confidence": 0.9,
-                "document_id": document_id
-            }
-            
-        except Exception as e:
-            logger.error(f"Document mediation error: {e}")
-            return self._generate_custom_response(user_message, tenant, "product_related")
+       """Handle query routed to specific document - NOW WITH LLM MEDIATOR"""
+       try:
+           kb = self.db.query(KnowledgeBase).filter(KnowledgeBase.id == document_id).first()
+           if not kb:
+               return self._generate_custom_response(user_message, tenant, "product_related")
+           
+           # Check if it's troubleshooting document
+           if kb.document_type == DocumentType.TROUBLESHOOTING or kb.is_troubleshooting:
+               return self._handle_smart_troubleshooting(user_message, kb, tenant, session_id)
+           
+           # Check if it's sales document  
+           elif kb.document_type == DocumentType.SALES or kb.is_sales:
+               return self._handle_smart_sales(user_message, kb, tenant, session_id)
+           
+           # Get document content
+           document_content = {}
+           
+           # Extract structured content based on type
+           if kb.document_type == DocumentType.SALES and kb.sales_content:
+               document_content = kb.sales_content
+           elif kb.document_type == DocumentType.TROUBLESHOOTING and kb.troubleshooting_flow:
+               document_content = kb.troubleshooting_flow
+           
+           # Add vector content as fallback
+           try:
+               from app.knowledge_base.processor import DocumentProcessor
+               processor = DocumentProcessor(tenant.id)
+               vector_store = processor.get_vector_store(kb.vector_store_id)
+               docs = vector_store.similarity_search(user_message, k=2)
+               document_content['vector_content'] = [doc.page_content[:500] for doc in docs]
+           except:
+               pass
+           
+           # USE LLM MEDIATOR instead of rigid flows
+           response = self._mediate_document_interaction(
+               user_message, document_content, kb.document_type.value
+           )
+           
+           return {
+               "content": response,
+               "source": f"LLM_Mediated_{kb.document_type.value}",
+               "confidence": 0.9,
+               "document_id": document_id
+           }
+           
+       except Exception as e:
+           logger.error(f"Document mediation error: {e}")
+           return self._generate_custom_response(user_message, tenant, "product_related")
 
     
 
