@@ -1729,6 +1729,10 @@ Enhanced response:"""
             if not kb:
                 return self._generate_custom_response(user_message, tenant, "product_related")
             
+            # Check if it's troubleshooting document
+            if kb.document_type == DocumentType.TROUBLESHOOTING or kb.is_troubleshooting:
+                return self._handle_smart_troubleshooting(user_message, kb, tenant)
+            
             # Get document content
             document_content = {}
             
@@ -2031,7 +2035,100 @@ Enhanced response:"""
             return f"I can help with {product.get('name', 'our product')}. {product.get('description', '')}"
         
         return "I'd be happy to help with your question. Could you be more specific about what you'd like to know?"
+    
 
+    def _handle_smart_troubleshooting(self, user_message: str, kb: KnowledgeBase, tenant: Tenant) -> Dict[str, Any]:
+        """LLM-powered intelligent troubleshooting conversation"""
+        if not self.llm_available:
+            return self._generate_custom_response(user_message, tenant, "troubleshooting")
+        
+        try:
+            # Get document content for context
+            from app.knowledge_base.processor import DocumentProcessor
+            processor = DocumentProcessor(tenant.id)
+            vector_store = processor.get_vector_store(kb.vector_store_id)
+            docs = vector_store.similarity_search(user_message, k=3)
+            context = "\n".join([doc.page_content[:500] for doc in docs])
+            
+            # Get troubleshooting state from session
+            session_id = self._get_current_session_id(user_message)  # Need to pass this
+            memory = SimpleChatbotMemory(self.db, self.tenant_id)
+            troubleshooting_state = memory.get_troubleshooting_state(session_id)
+            
+            # Build conversational prompt
+            prompt = self._build_smart_troubleshooting_prompt(
+                user_message, context, troubleshooting_state, tenant.business_name
+            )
+            
+            result = self.llm.invoke(prompt)
+            response = result.content.strip()
+            
+            # Update troubleshooting state based on conversation
+            self._update_troubleshooting_state(session_id, user_message, response, memory)
+            
+            return {
+                "content": response,
+                "source": "Smart_Troubleshooting",
+                "confidence": 0.9,
+                "document_id": kb.id
+            }
+            
+        except Exception as e:
+            logger.error(f"Smart troubleshooting error: {e}")
+            return self._generate_custom_response(user_message, tenant, "troubleshooting")
+
+
+
+    def _build_smart_troubleshooting_prompt(self, user_message: str, context: str, 
+                                        state: Dict, company_name: str) -> str:
+        """Build intelligent troubleshooting prompt"""
+        
+        state_context = ""
+        if state and state.get("active"):
+            state_context = f"""
+    CURRENT TROUBLESHOOTING SESSION:
+    - Issue being worked on: {state.get('current_issue', 'Unknown')}
+    - Solutions tried: {state.get('solutions_tried', [])}
+    - Current step: {state.get('current_step', 'diagnosis')}
+    """
+        
+        return f"""You are a brilliant technical support specialist for {company_name}. 
+
+    USER ISSUE: "{user_message}"
+
+    KNOWLEDGE BASE CONTEXT:
+    {context}
+
+    {state_context}
+
+    INSTRUCTIONS:
+    CRITIACL!!!  -  Provide step-by-step solutions
+    - Be conversational and empathetic
+    - Ask ONE diagnostic question at a time
+    - Remember what's been tried
+    - Guide them through solutions methodically
+    
+
+    Response:"""
+
+    def _update_troubleshooting_state(self, session_id: str, user_message: str, 
+                                    bot_response: str, memory: SimpleChatbotMemory):
+        """Update troubleshooting session state"""
+        try:
+            # Extract key info from conversation
+            current_issue = self._extract_issue_from_message(user_message)
+            
+            state_data = {
+                "current_issue": current_issue,
+                "last_user_message": user_message,
+                "last_bot_response": bot_response,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+            memory.store_troubleshooting_state(session_id, 0, "active", state_data)
+            
+        except Exception as e:
+            logger.error(f"Error updating troubleshooting state: {e}")
 
 
 # Factory function
