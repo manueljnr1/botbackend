@@ -2227,10 +2227,9 @@ Enhanced response:"""
     - Use document content to provide relevant information
     - Guide naturally toward solutions that fit their needs
     - Acknowledge their responses and build on them
-    - If they want specifics, give specifics, skip protocol and steps
+    - CRITICAL: If they use words like "just", "first", "show me", "tell me", "what are", "list", or when you detect that they just  want direct response, - give direct answers immediately, skip consultative questions
 
     Response (consultative and natural):"""
-
 
 
     def _update_sales_conversation_state(self, session_id: str, user_message: str, 
