@@ -102,8 +102,8 @@ app = FastAPI(
     version="1.0.0",
     debug=settings.is_development(),
     openapi_url="/backend/openapi.json",
-    # docs_url="/admin-docs" if settings.is_development() else None,
-    # redoc_url="/admin-redoc" if settings.is_development() else None
+    docs_url="/admin-docs" if settings.is_development() else None,
+    redoc_url="/admin-redoc" if settings.is_development() else None
 )
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
