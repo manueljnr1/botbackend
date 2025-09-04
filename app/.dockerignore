@@ -1,0 +1,131 @@
+# --- ENVIRONMENT / SECRETS ---
+.env
+.env.*
+*.env
+secrets.json
+config/secrets.*
+**/secrets/**
+
+# --- DATABASE FILES ---
+*.db
+*.sqlite
+*.sqlite3
+chatbot.db
+app.db
+*_backup.db
+migrations_backup/
+
+# --- PYTHON CACHE / VENV ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+*.pyc
+*.pyo
+
+# --- LOGS ---
+*.log
+logs/
+*.log.*
+
+# --- PACKAGE & BUILD ---
+*.egg-info/
+build/
+dist/
+pip-log.txt
+pip-delete-this-directory.txt
+*.spec
+*.manifest
+
+# --- TESTS / COVERAGE ---
+testing/
+tests/
+test_*.py
+*_test.py
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.tox/
+.nox/
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# --- EDITOR / IDE ---
+.vscode/
+.idea/
+*.code-workspace
+*.iws
+*.iml
+*.ipr
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# --- OS JUNK ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+Thumbs.db
+*.lnk
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# --- NODE (if frontend exists) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- TEMP / BACKUP / ARCHIVE ---
+*.tmp
+*.temp
+temp/
+tmp/
+*.bak
+*.backup
+*_backup.*
+*.old
+*.zip
+*.tar.gz
+*.rar
+
+# --- PROJECT SPECIFIC ---
+uploads/
+downloads/
+cache/
+*.cache
+docs/
+docs/_build/
+site/
+
+# --- DOCKER / GIT ---
+.git/
+.gitignore
+.dockerignore
+docker-compose.override.yml
+Dockerfile.prod

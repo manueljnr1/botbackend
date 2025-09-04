@@ -176,7 +176,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Include all routers (CLEANED UP - NO DUPLICATES)
+
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(tenants_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(kb_router, prefix="/knowledge-base", tags=["Knowledge Base"])
