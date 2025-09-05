@@ -118,7 +118,50 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+# async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+#     """
+#     Dependency to get current admin user from JWT token
+#     Handles both User admins (is_admin=True) and Admin table entries
+#     """
+#     credentials_exception = HTTPException(
+#         status_code=status.HTTP_401_UNAUTHORIZED,
+#         detail="Could not validate credentials",
+#         headers={"WWW-Authenticate": "Bearer"},
+#     )
+    
+#     try:
+#         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+#         subject: str = payload.get("sub")
+#         is_admin_flag: bool = payload.get("is_admin", False)
+        
+#         if subject is None:
+#             raise credentials_exception
+            
+#     except JWTError:
+#         raise credentials_exception
+    
+#     # Check if this is an admin token (from admin login endpoint)
+#     if is_admin_flag:
+#         # This is an admin token - look up in Admin table
+#         admin_id = int(subject)
+#         admin = db.query(Admin).filter(Admin.id == admin_id, Admin.is_active == True).first()
+#         if admin is None:
+#             raise credentials_exception
+#         return admin
+#     else:
+#         # This is a regular user token - check if user is admin
+#         user = db.query(User).filter(User.username == subject, User.is_active == True).first()
+#         if user is None or not user.is_admin:
+#             raise credentials_exception
+#         return user
+
+
+
+
+async def get_admin_user(
+    token: str = Depends(oauth2_scheme), 
+    db: Session = Depends(get_db)
+):
     """
     Dependency to get current admin user from JWT token
     Handles both User admins (is_admin=True) and Admin table entries
@@ -130,7 +173,11 @@ async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depe
     )
     
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, 
+            settings.JWT_SECRET_KEY, 
+            algorithms=[settings.JWT_ALGORITHM]
+        )
         subject: str = payload.get("sub")
         is_admin_flag: bool = payload.get("is_admin", False)
         
@@ -142,18 +189,35 @@ async def get_admin_user(token: str = Depends(oauth2_scheme), db: Session = Depe
     
     # Check if this is an admin token (from admin login endpoint)
     if is_admin_flag:
-        # This is an admin token - look up in Admin table
-        admin_id = int(subject)
-        admin = db.query(Admin).filter(Admin.id == admin_id, Admin.is_active == True).first()
+        # ✅ convert subject to int safely
+        try:
+            admin_id = int(subject)
+        except ValueError:
+            raise credentials_exception
+        
+        admin = db.query(Admin).filter(
+            Admin.id == admin_id,
+            Admin.is_active == True
+        ).first()
+        
         if admin is None:
             raise credentials_exception
         return admin
+    
     else:
         # This is a regular user token - check if user is admin
-        user = db.query(User).filter(User.username == subject, User.is_active == True).first()
+        user = db.query(User).filter(
+            User.username == subject,
+            User.is_active == True
+        ).first()
+        
         if user is None or not user.is_admin:
             raise credentials_exception
         return user
+
+
+
+
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
