@@ -12,6 +12,9 @@ from pydantic import BaseModel
 from datetime import datetime
 from fastapi import Form, Body
 from app.auth.models import PasswordReset
+import uuid
+from jose import jwt, JWTError
+
 
 
 from app.database import get_db
@@ -164,7 +167,7 @@ async def get_admin_user(
 ):
     """
     Dependency to get current admin user from JWT token
-    Handles both User admins (is_admin=True) and Admin table entries
+    Handles both Admin table entries and User admins
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -183,15 +186,13 @@ async def get_admin_user(
         
         if subject is None:
             raise credentials_exception
-            
     except JWTError:
         raise credentials_exception
     
-    # Check if this is an admin token (from admin login endpoint)
+    # Admin login token
     if is_admin_flag:
-        # ✅ convert subject to int safely
         try:
-            admin_id = int(subject)
+            admin_id = int(subject)  # ✅ cast to int
         except ValueError:
             raise credentials_exception
         
@@ -199,15 +200,19 @@ async def get_admin_user(
             Admin.id == admin_id,
             Admin.is_active == True
         ).first()
-        
         if admin is None:
             raise credentials_exception
         return admin
     
+    # Regular user token → check if user is admin
     else:
-        # This is a regular user token - check if user is admin
+        try:
+            user_uuid = uuid.UUID(subject)  # ✅ parse UUID
+        except ValueError:
+            raise credentials_exception
+        
         user = db.query(User).filter(
-            User.username == subject,
+            User.id == user_uuid,
             User.is_active == True
         ).first()
         
