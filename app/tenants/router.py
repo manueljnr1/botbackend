@@ -387,7 +387,63 @@ async def get_current_user_hybrid(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+# async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+#     """Dependency to get current user (either admin or tenant)"""
+#     credentials_exception = HTTPException(
+#         status_code=status.HTTP_401_UNAUTHORIZED,
+#         detail="Could not validate credentials",
+#         headers={"WWW-Authenticate": "Bearer"},
+#     )
+    
+#     try:
+#         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+#         user_id = payload.get("sub")
+#         is_admin = payload.get("is_admin", False)
+        
+#         if user_id is None:
+#             raise credentials_exception
+            
+#         if is_admin:
+#             admin = db.query(Admin).filter(Admin.id == user_id, Admin.is_active == True).first()
+#             if admin is None:
+#                 raise credentials_exception
+            
+#             class AdminUser:
+#                 def __init__(self, admin):
+#                     self.id = admin.id
+#                     self.username = admin.username
+#                     self.email = admin.email
+#                     self.is_admin = True
+#                     self.tenant_id = None
+#                     self.is_active = True
+#             return AdminUser(admin)
+#         else:
+#             tenant = db.query(Tenant).filter(Tenant.id == user_id, Tenant.is_active == True).first()
+#             if tenant is None:
+#                 raise credentials_exception
+            
+#             user = db.query(User).filter(User.tenant_id == tenant.id, User.is_active == True).first()
+#             if user is None:
+#                 class TenantUser:
+#                     def __init__(self, tenant):
+#                         self.id = f"tenant_{tenant.id}"
+#                         self.username = tenant.name
+#                         self.email = tenant.email
+#                         self.is_admin = False
+#                         self.tenant_id = tenant.id
+#                         self.is_active = tenant.is_active
+#                 return TenantUser(tenant)
+#             return user
+            
+#     except JWTError:
+#         raise credentials_exception
+
+
+
+async def get_current_user_or_admin(
+    token: str = Depends(oauth2_scheme), 
+    db: Session = Depends(get_db)
+):
     """Dependency to get current user (either admin or tenant)"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -404,7 +460,17 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
             raise credentials_exception
             
         if is_admin:
-            admin = db.query(Admin).filter(Admin.id == user_id, Admin.is_active == True).first()
+            # ✅ ensure ID is an integer (to match Admin.id column type)
+            try:
+                admin_id = int(user_id)
+            except ValueError:
+                raise credentials_exception
+            
+            admin = db.query(Admin).filter(
+                Admin.id == admin_id,
+                Admin.is_active == True
+            ).first()
+            
             if admin is None:
                 raise credentials_exception
             
@@ -416,13 +482,23 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
                     self.is_admin = True
                     self.tenant_id = None
                     self.is_active = True
+            
             return AdminUser(admin)
+        
         else:
-            tenant = db.query(Tenant).filter(Tenant.id == user_id, Tenant.is_active == True).first()
+            tenant = db.query(Tenant).filter(
+                Tenant.id == user_id,
+                Tenant.is_active == True
+            ).first()
+            
             if tenant is None:
                 raise credentials_exception
             
-            user = db.query(User).filter(User.tenant_id == tenant.id, User.is_active == True).first()
+            user = db.query(User).filter(
+                User.tenant_id == tenant.id,
+                User.is_active == True
+            ).first()
+            
             if user is None:
                 class TenantUser:
                     def __init__(self, tenant):
@@ -432,11 +508,14 @@ async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Ses
                         self.is_admin = False
                         self.tenant_id = tenant.id
                         self.is_active = tenant.is_active
+                
                 return TenantUser(tenant)
+            
             return user
             
     except JWTError:
         raise credentials_exception
+
 
 
 
