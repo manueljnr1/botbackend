@@ -3,19 +3,20 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from pydantic import EmailStr
-from fastapi import Form
+from fastapi import Form, Request, Query
 from pydantic import Field
 import logging
 import os
 import uuid
 import asyncio
 from datetime import datetime
-from svix import Webhook, WebhookVerificationError  # Add this import for Webhook and WebhookVerificationError
+from svix import Webhook, WebhookVerificationError 
 import random
 import time
 import re
 from app.config import settings
-from fastapi import Request
+from fastapi.responses import Response, FileResponse
+
 
 
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -3687,3 +3688,152 @@ async def submit_escalation_response(
     except Exception as e:
         logger.error(f"Error submitting response: {e}")
         raise HTTPException(status_code=500, detail="Failed to submit response")
+    
+
+
+
+# @router.get("/widget.js")
+# async def serve_embed_script(
+#     api_key: str = Query(...),
+#     tenant_id: str = Query(None),
+#     position: str = Query("bottom-right"),
+#     request: Request,
+#     db: Session = Depends(get_db)
+# ):
+#     """Serve the embeddable widget script"""
+    
+#     # Validate API key
+#     tenant = get_tenant_from_api_key(api_key, db)
+    
+#     # Determine base URL
+#     base_url = str(request.base_url).rstrip('/')
+    
+#     # Generate the embed script
+#     script_content = f"""
+# (function() {{
+#     // Prevent multiple widget loads
+#     if (window.LyraChatbotLoaded) return;
+#     window.LyraChatbotLoaded = true;
+    
+#     // Configuration
+#     const config = {{
+#         apiKey: '{api_key}',
+#         tenantId: '{tenant.id}',
+#         baseUrl: '{base_url}',
+#         position: '{position}',
+#         userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+#     }};
+    
+#     // Inject CSS
+#     const css = document.createElement('link');
+#     css.rel = 'stylesheet';
+#     css.href = config.baseUrl + '/static/chatbot-widget.css';
+#     css.onload = function() {{
+#         console.log('Chatbot CSS loaded');
+#     }};
+#     document.head.appendChild(css);
+    
+#     // Create widget container
+#     const container = document.createElement('div');
+#     container.id = 'lyra-chatbot-widget';
+#     container.style.all = 'initial';
+#     document.body.appendChild(container);
+    
+#     // Load React bundle
+#     const script = document.createElement('script');
+#     script.src = config.baseUrl + '/static/chatbot-bundle.js';
+#     script.async = true;
+#     script.onload = function() {{
+#         if (window.LyraChatbot) {{
+#             window.LyraChatbot.init(config);
+#         }}
+#     }};
+#     script.onerror = function() {{
+#         console.error('Failed to load Lyra chatbot');
+#     }};
+#     document.head.appendChild(script);
+# }})();
+# """
+    
+#     return Response(
+#         content=script_content,
+#         media_type="application/javascript",
+#         headers={
+#             "Cache-Control": "public, max-age=3600",
+#             "Access-Control-Allow-Origin": "*",
+#             "Content-Type": "application/javascript; charset=utf-8"
+#         }
+#     )
+
+
+
+@router.get("/widget.js")
+async def serve_embed_script(
+    request: Request,
+    api_key: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    tenant = get_tenant_from_api_key(api_key, db)
+    base_url = str(request.base_url).rstrip('/')
+    
+    script_content = f"""
+(function() {{
+    if (window.LyraChatbotLoaded) return;
+    window.LyraChatbotLoaded = true;
+    
+    const config = {{
+        apiKey: '{api_key}',
+        tenantId: '{tenant.id}',
+        baseUrl: '{base_url}',
+        userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    }};
+    
+    const container = document.createElement('div');
+    container.id = 'lyra-chatbot-widget';
+    document.body.appendChild(container);
+    
+    const script = document.createElement('script');
+    script.src = config.baseUrl + '/static/chatbot-bundle.js';
+    script.onload = () => window.LyraChatbot.init(config);
+    document.head.appendChild(script);
+}})();
+"""
+    
+    return Response(
+        content=script_content,
+        media_type="application/javascript",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+
+
+@router.get("/widget-config")
+async def get_widget_config(
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get widget configuration for embedding"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    return {
+        "tenant": {
+            "id": tenant.id,
+            "name": tenant.business_name or tenant.name,
+            "branding": {
+                "primary_color": tenant.primary_color,
+                "secondary_color": tenant.secondary_color,
+                "user_bubble_color": tenant.user_bubble_color,
+                "logo_image_url": tenant.logo_image_url,
+                "logo_text": tenant.logo_text,
+                "widget_position": tenant.widget_position or "bottom-right",
+                "border_radius": tenant.border_radius,
+                "font_family": tenant.font_family,
+                "custom_css": tenant.custom_css
+            }
+        },
+        "widget_settings": {
+            "position": tenant.widget_position or "bottom-right",
+            "greeting_message": "Hello! How can I help you today?"
+        }
+    }
