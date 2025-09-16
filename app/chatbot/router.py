@@ -3774,7 +3774,11 @@ async def serve_embed_script(
     db: Session = Depends(get_db)
 ):
     tenant = get_tenant_from_api_key(api_key, db)
+    
+    # Force HTTPS for production
     base_url = str(request.base_url).rstrip('/')
+    if 'railway.app' in base_url or 'agentlyra.com' in base_url:
+        base_url = base_url.replace('http://', 'https://')
     
     script_content = f"""
 (function() {{
