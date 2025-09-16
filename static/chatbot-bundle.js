@@ -548,7 +548,7 @@
       max-width: calc(100% - 60px);
       word-break: break-word;
       font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.7;
       position: relative;
       transition: all 0.2s ease;
     }
@@ -949,12 +949,12 @@
           const container = document.createElement('div');
           container.style.cssText = `
             width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            border-radius:50%;background:rgba(255,255,255,0.1);
+            border-radius:50%;
             box-shadow:0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
           `;
           
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          const svgSize = Math.max(24, size * 0.7); // Make it bigger relative to container
+          const svgSize = Math.max(28, size * 0.85); // Made bigger - was 0.7, now 0.85
           svg.setAttribute('width', svgSize);
           svg.setAttribute('height', svgSize);
           svg.setAttribute('viewBox', '0 0 32 32');
