@@ -151,41 +151,118 @@
 // })();
 
 
-
-
 (function() {
   window.LyraChatbot = {
     init: function(config) {
       try {
-        console.log('Widget init starting...');
-        
         const container = document.getElementById('lyra-chatbot-widget');
-        if (!container) {
-          console.error('No container found');
-          return;
-        }
+        if (!container) return;
         
+        let isOpen = false;
+        let messages = [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
+        
+        // Chat button
         const button = document.createElement('button');
-        button.textContent = 'Chat';
-        button.style.position = 'fixed';
-        button.style.bottom = '20px';
-        button.style.right = '20px';
-        button.style.width = '60px';
-        button.style.height = '60px';
-        button.style.backgroundColor = '#007bff';
-        button.style.color = 'white';
-        button.style.border = 'none';
-        button.style.borderRadius = '50%';
-        button.style.cursor = 'pointer';
-        button.style.zIndex = '9999';
+        button.textContent = '💬';
+        button.style.cssText = 'position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#007bff;border:none;color:white;font-size:24px;cursor:pointer;z-index:9999;';
         
-        button.onclick = () => alert('Widget clicked!');
+        // Chat window
+        const chatWindow = document.createElement('div');
+        chatWindow.style.cssText = 'position:fixed;bottom:20px;right:20px;width:350px;height:500px;background:white;border:1px solid #ccc;border-radius:10px;display:none;flex-direction:column;z-index:9998;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
         
-        container.appendChild(button);
-        console.log('Button added successfully');
+        const header = document.createElement('div');
+        header.style.cssText = 'padding:15px;background:#007bff;color:white;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center;';
+        header.innerHTML = '<span style="font-weight:bold;">Chat Support</span><button onclick="this.closest(\'.chat-window\').style.display=\'none\';this.closest(\'.lyra-widget\').querySelector(\'.chat-button\').style.display=\'block\';" style="background:none;border:none;color:white;font-size:18px;cursor:pointer;">×</button>';
+        
+        const messagesDiv = document.createElement('div');
+        messagesDiv.style.cssText = 'flex:1;padding:15px;overflow-y:auto;';
+        messagesDiv.className = 'messages-area';
+        
+        const inputArea = document.createElement('div');
+        inputArea.style.cssText = 'padding:15px;border-top:1px solid #eee;display:flex;gap:10px;';
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Type your message...';
+        input.style.cssText = 'flex:1;padding:10px;border:1px solid #ddd;border-radius:5px;outline:none;';
+        
+        const sendBtn = document.createElement('button');
+        sendBtn.textContent = 'Send';
+        sendBtn.style.cssText = 'padding:10px 15px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer;';
+        
+        chatWindow.appendChild(header);
+        chatWindow.appendChild(messagesDiv);
+        inputArea.appendChild(input);
+        inputArea.appendChild(sendBtn);
+        chatWindow.appendChild(inputArea);
+        
+        const widget = document.createElement('div');
+        widget.className = 'lyra-widget';
+        button.className = 'chat-button';
+        chatWindow.className = 'chat-window';
+        
+        widget.appendChild(button);
+        widget.appendChild(chatWindow);
+        container.appendChild(widget);
+        
+        const renderMessages = () => {
+          messagesDiv.innerHTML = '';
+          messages.forEach(msg => {
+            const msgDiv = document.createElement('div');
+            msgDiv.style.marginBottom = '10px';
+            msgDiv.style.textAlign = msg.role === 'user' ? 'right' : 'left';
+            
+            const bubble = document.createElement('div');
+            bubble.style.cssText = `display:inline-block;padding:8px 12px;border-radius:15px;max-width:80%;word-wrap:break-word;${msg.role === 'user' ? 'background:#007bff;color:white;' : 'background:#f1f1f1;color:black;'}`;
+            bubble.textContent = msg.content;
+            
+            msgDiv.appendChild(bubble);
+            messagesDiv.appendChild(msgDiv);
+          });
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        };
+        
+        const sendMessage = async (text) => {
+          if (!text.trim()) return;
+          
+          messages.push({ role: 'user', content: text });
+          renderMessages();
+          input.value = '';
+          
+          try {
+            const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              },
+              body: JSON.stringify({
+                message: text,
+                user_identifier: config.userId,
+                max_context: 200
+              })
+            });
+            
+            const data = await response.json();
+            messages.push({ role: 'assistant', content: data.response || 'Sorry, I encountered an error.' });
+            renderMessages();
+          } catch (error) {
+            messages.push({ role: 'assistant', content: 'Sorry, I encountered an error.' });
+            renderMessages();
+          }
+        };
+        
+        button.onclick = () => {
+          button.style.display = 'none';
+          chatWindow.style.display = 'flex';
+          renderMessages();
+        };
+        
+        sendBtn.onclick = () => sendMessage(input.value);
+        input.onkeypress = (e) => e.key === 'Enter' && sendMessage(input.value);
         
       } catch (error) {
-        console.error('Widget init error:', error);
+        console.error('Widget error:', error);
       }
     }
   };
