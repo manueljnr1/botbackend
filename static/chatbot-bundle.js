@@ -152,7 +152,6 @@
 
 
 
-
 (function() {
   // Inject all original CSS styles from the React build
   const style = document.createElement('style');
@@ -946,21 +945,30 @@
           }
         };
 
-        // Create text logo
+        // Create text logo with original SVG shape
         const createTextLogo = (size) => {
-          const { branding } = brandingData;
-          const logoText = branding.logo_text || capitalizeWords(brandingData.business_name.substring(0, 2)).toUpperCase();
-          const fontSize = Math.max(12, size * 0.3);
-          
-          const span = document.createElement('span');
-          span.textContent = logoText;
-          span.style.cssText = `
+          const container = document.createElement('div');
+          container.style.cssText = `
             width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            background:var(--chatbot-primary);color:var(--chatbot-background);border-radius:50%;
-            font-size:${fontSize}px;font-family:var(--chatbot-font);font-weight:600;
-            text-align:center;text-transform:capitalize;line-height:1;
+            border-radius:50%;background:rgba(255,255,255,0.1);
           `;
-          return span;
+          
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          const svgSize = Math.max(24, size * 0.7); // Make it bigger relative to container
+          svg.setAttribute('width', svgSize);
+          svg.setAttribute('height', svgSize);
+          svg.setAttribute('viewBox', '0 0 32 32');
+          svg.setAttribute('fill', 'white');
+          svg.style.display = 'block';
+          
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M0 0 C0.94101562 -0.01675781 1.88203125 -0.03351562 2.8515625 -0.05078125 C5.375 0.3125 5.375 0.3125 7.1875 1.4921875 C8.81620937 3.98882752 8.77412297 5.78689539 8.75 8.75 C8.75773437 9.69746094 8.76546875 10.64492187 8.7734375 11.62109375 C8.31447132 14.72136532 7.5434107 16.07791714 5.375 18.3125 C2.35333856 19.31972048 0.39774409 19.38591677 -2.75 19.3125 C-4.37456329 19.27482897 -6.00066762 19.26592416 -7.625 19.3125 C-7.955 19.6425 -8.285 19.9725 -8.625 20.3125 C-10.62458364 20.35330783 -12.62545254 20.35504356 -14.625 20.3125 C-13.965 18.9925 -13.305 17.6725 -12.625 16.3125 C-13.12 15.961875 -13.615 15.61125 -14.125 15.25 C-15.625 13.3125 -15.625 13.3125 -16.125 9.875 C-15.625 6.3125 -15.625 6.3125 -13.4375 4 C-8.9125767 1.28504602 -5.30278687 0.02191234 0 0 Z');
+          path.setAttribute('transform', 'translate(15.625,1.6875)');
+          
+          svg.appendChild(path);
+          container.appendChild(svg);
+          
+          return container;
         };
 
         // Create widget icon
