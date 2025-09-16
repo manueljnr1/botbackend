@@ -55,6 +55,10 @@
     
     const createWidget = () => {
       const container = document.getElementById('lyra-chatbot-widget');
+      if (!container) {
+          console.error("The target element #lyra-chatbot-widget was not found in the DOM.");
+          return;
+      }
       
       // Floating button
       const button = document.createElement('button');
@@ -73,7 +77,20 @@
       // Header
       const header = document.createElement('div');
       header.style.cssText = 'padding:10px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;';
-      header.innerHTML = '<span>Chat Support</span><button onclick="this.parentElement.parentElement.style.display=\'none\';this.parentElement.parentElement.previousElementSibling.style.display=\'block\'">×</button>';
+      
+      const headerTitle = document.createElement('span');
+      headerTitle.textContent = 'Chat Support';
+      
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '&times;'; // Use innerHTML for the '×' character
+      closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;';
+      closeBtn.onclick = () => {
+        chatWindow.style.display = 'none';
+        button.style.display = 'block';
+      };
+      
+      header.appendChild(headerTitle);
+      header.appendChild(closeBtn);
       
       // Messages area
       const messagesArea = document.createElement('div');
@@ -86,6 +103,7 @@
       
       const input = document.createElement('input');
       input.type = 'text';
+      input.placeholder = 'Type a message...';
       input.style.cssText = 'flex:1;padding:8px;border:1px solid #ccc;border-radius:4px;';
       input.onkeypress = (e) => {
         if (e.key === 'Enter' && input.value.trim()) {
@@ -120,9 +138,14 @@
     createWidget();
   }
   
+  // Expose the init function to the global scope
   window.LyraChatbot = {
     init: function(config) {
-      createChatWidget(config);
+      // **MODIFICATION HERE**
+      // Wait for the document to be fully loaded before creating the widget
+      document.addEventListener('DOMContentLoaded', function() {
+        createChatWidget(config);
+      });
     }
   };
 })();
