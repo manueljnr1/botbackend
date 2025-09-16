@@ -1,151 +1,192 @@
-(function() {
-  function createChatWidget(config) {
-    let isOpen = false;
-    let messages = [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
+// (function() {
+//   function createChatWidget(config) {
+//     let isOpen = false;
+//     let messages = [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
     
-    const sendMessage = async (messageText) => {
-      messages.push({ role: 'user', content: messageText });
-      renderMessages();
+//     const sendMessage = async (messageText) => {
+//       messages.push({ role: 'user', content: messageText });
+//       renderMessages();
       
-      try {
-        const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': config.apiKey
-          },
-          body: JSON.stringify({
-            message: messageText,
-            user_identifier: config.userId,
-            max_context: 200
-          })
-        });
+//       try {
+//         const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
+//           method: 'POST',
+//           headers: {
+//             'Content-Type': 'application/json',
+//             'X-API-Key': config.apiKey
+//           },
+//           body: JSON.stringify({
+//             message: messageText,
+//             user_identifier: config.userId,
+//             max_context: 200
+//           })
+//         });
         
-        const data = await response.json();
-        messages.push({ role: 'assistant', content: data.response || 'Error occurred' });
-        renderMessages();
-      } catch (error) {
-        messages.push({ role: 'assistant', content: 'Error occurred' });
-        renderMessages();
-      }
-    };
+//         const data = await response.json();
+//         messages.push({ role: 'assistant', content: data.response || 'Error occurred' });
+//         renderMessages();
+//       } catch (error) {
+//         messages.push({ role: 'assistant', content: 'Error occurred' });
+//         renderMessages();
+//       }
+//     };
     
-    const renderMessages = () => {
-      const messagesDiv = document.getElementById('chat-messages');
-      if (!messagesDiv) return;
+//     const renderMessages = () => {
+//       const messagesDiv = document.getElementById('chat-messages');
+//       if (!messagesDiv) return;
       
-      messagesDiv.innerHTML = '';
-      messages.forEach(msg => {
-        const msgDiv = document.createElement('div');
-        msgDiv.style.marginBottom = '10px';
-        msgDiv.style.textAlign = msg.role === 'user' ? 'right' : 'left';
+//       messagesDiv.innerHTML = '';
+//       messages.forEach(msg => {
+//         const msgDiv = document.createElement('div');
+//         msgDiv.style.marginBottom = '10px';
+//         msgDiv.style.textAlign = msg.role === 'user' ? 'right' : 'left';
         
-        const bubble = document.createElement('div');
-        bubble.style.display = 'inline-block';
-        bubble.style.padding = '8px 12px';
-        bubble.style.borderRadius = '10px';
-        bubble.style.backgroundColor = msg.role === 'user' ? '#007bff' : '#f1f1f1';
-        bubble.style.color = msg.role === 'user' ? 'white' : 'black';
-        bubble.textContent = msg.content;
+//         const bubble = document.createElement('div');
+//         bubble.style.display = 'inline-block';
+//         bubble.style.padding = '8px 12px';
+//         bubble.style.borderRadius = '10px';
+//         bubble.style.backgroundColor = msg.role === 'user' ? '#007bff' : '#f1f1f1';
+//         bubble.style.color = msg.role === 'user' ? 'white' : 'black';
+//         bubble.textContent = msg.content;
         
-        msgDiv.appendChild(bubble);
-        messagesDiv.appendChild(msgDiv);
-      });
-    };
+//         msgDiv.appendChild(bubble);
+//         messagesDiv.appendChild(msgDiv);
+//       });
+//     };
     
-    const createWidget = () => {
-      const container = document.getElementById('lyra-chatbot-widget');
-      if (!container) {
-          console.error("The target element #lyra-chatbot-widget was not found in the DOM.");
-          return;
-      }
+//     const createWidget = () => {
+//       const container = document.getElementById('lyra-chatbot-widget');
+//       if (!container) {
+//           console.error("The target element #lyra-chatbot-widget was not found in the DOM.");
+//           return;
+//       }
       
-      // Floating button
-      const button = document.createElement('button');
-      button.textContent = '💬';
-      button.style.cssText = 'position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#007bff;border:none;color:white;font-size:24px;cursor:pointer;z-index:1000;';
-      button.onclick = () => {
-        isOpen = true;
-        button.style.display = 'none';
-        chatWindow.style.display = 'flex';
-      };
+//       // Floating button
+//       const button = document.createElement('button');
+//       button.textContent = '💬';
+//       button.style.cssText = 'position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#007bff;border:none;color:white;font-size:24px;cursor:pointer;z-index:1000;';
+//       button.onclick = () => {
+//         isOpen = true;
+//         button.style.display = 'none';
+//         chatWindow.style.display = 'flex';
+//       };
       
-      // Chat window
-      const chatWindow = document.createElement('div');
-      chatWindow.style.cssText = 'position:fixed;bottom:20px;right:20px;width:350px;height:500px;background:white;border:1px solid #ccc;border-radius:10px;display:none;flex-direction:column;z-index:1000;';
+//       // Chat window
+//       const chatWindow = document.createElement('div');
+//       chatWindow.style.cssText = 'position:fixed;bottom:20px;right:20px;width:350px;height:500px;background:white;border:1px solid #ccc;border-radius:10px;display:none;flex-direction:column;z-index:1000;';
       
-      // Header
-      const header = document.createElement('div');
-      header.style.cssText = 'padding:10px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;';
+//       // Header
+//       const header = document.createElement('div');
+//       header.style.cssText = 'padding:10px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;';
       
-      const headerTitle = document.createElement('span');
-      headerTitle.textContent = 'Chat Support';
+//       const headerTitle = document.createElement('span');
+//       headerTitle.textContent = 'Chat Support';
       
-      const closeBtn = document.createElement('button');
-      closeBtn.innerHTML = '&times;'; // Use innerHTML for the '×' character
-      closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;';
-      closeBtn.onclick = () => {
-        chatWindow.style.display = 'none';
-        button.style.display = 'block';
-      };
+//       const closeBtn = document.createElement('button');
+//       closeBtn.innerHTML = '&times;'; // Use innerHTML for the '×' character
+//       closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;';
+//       closeBtn.onclick = () => {
+//         chatWindow.style.display = 'none';
+//         button.style.display = 'block';
+//       };
       
-      header.appendChild(headerTitle);
-      header.appendChild(closeBtn);
+//       header.appendChild(headerTitle);
+//       header.appendChild(closeBtn);
       
-      // Messages area
-      const messagesArea = document.createElement('div');
-      messagesArea.id = 'chat-messages';
-      messagesArea.style.cssText = 'flex:1;padding:10px;overflow-y:scroll;';
+//       // Messages area
+//       const messagesArea = document.createElement('div');
+//       messagesArea.id = 'chat-messages';
+//       messagesArea.style.cssText = 'flex:1;padding:10px;overflow-y:scroll;';
       
-      // Input area
-      const inputArea = document.createElement('div');
-      inputArea.style.cssText = 'padding:10px;border-top:1px solid #eee;display:flex;';
+//       // Input area
+//       const inputArea = document.createElement('div');
+//       inputArea.style.cssText = 'padding:10px;border-top:1px solid #eee;display:flex;';
       
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = 'Type a message...';
-      input.style.cssText = 'flex:1;padding:8px;border:1px solid #ccc;border-radius:4px;';
-      input.onkeypress = (e) => {
-        if (e.key === 'Enter' && input.value.trim()) {
-          sendMessage(input.value.trim());
-          input.value = '';
-        }
-      };
+//       const input = document.createElement('input');
+//       input.type = 'text';
+//       input.placeholder = 'Type a message...';
+//       input.style.cssText = 'flex:1;padding:8px;border:1px solid #ccc;border-radius:4px;';
+//       input.onkeypress = (e) => {
+//         if (e.key === 'Enter' && input.value.trim()) {
+//           sendMessage(input.value.trim());
+//           input.value = '';
+//         }
+//       };
       
-      const sendBtn = document.createElement('button');
-      sendBtn.textContent = 'Send';
-      sendBtn.style.cssText = 'margin-left:10px;padding:8px 16px;background:#007bff;color:white;border:none;border-radius:4px;cursor:pointer;';
-      sendBtn.onclick = () => {
-        if (input.value.trim()) {
-          sendMessage(input.value.trim());
-          input.value = '';
-        }
-      };
+//       const sendBtn = document.createElement('button');
+//       sendBtn.textContent = 'Send';
+//       sendBtn.style.cssText = 'margin-left:10px;padding:8px 16px;background:#007bff;color:white;border:none;border-radius:4px;cursor:pointer;';
+//       sendBtn.onclick = () => {
+//         if (input.value.trim()) {
+//           sendMessage(input.value.trim());
+//           input.value = '';
+//         }
+//       };
       
-      inputArea.appendChild(input);
-      inputArea.appendChild(sendBtn);
+//       inputArea.appendChild(input);
+//       inputArea.appendChild(sendBtn);
       
-      chatWindow.appendChild(header);
-      chatWindow.appendChild(messagesArea);
-      chatWindow.appendChild(inputArea);
+//       chatWindow.appendChild(header);
+//       chatWindow.appendChild(messagesArea);
+//       chatWindow.appendChild(inputArea);
       
-      container.appendChild(button);
-      container.appendChild(chatWindow);
+//       container.appendChild(button);
+//       container.appendChild(chatWindow);
       
-      renderMessages();
-    };
+//       renderMessages();
+//     };
     
-    createWidget();
-  }
+//     createWidget();
+//   }
   
-  // Expose the init function to the global scope
+//   // Expose the init function to the global scope
+//   window.LyraChatbot = {
+//     init: function(config) {
+//       // **MODIFICATION HERE**
+//       // Wait for the document to be fully loaded before creating the widget
+//       document.addEventListener('DOMContentLoaded', function() {
+//         createChatWidget(config);
+//       });
+//     }
+//   };
+// })();
+
+
+
+
+(function() {
   window.LyraChatbot = {
     init: function(config) {
-      // **MODIFICATION HERE**
-      // Wait for the document to be fully loaded before creating the widget
-      document.addEventListener('DOMContentLoaded', function() {
-        createChatWidget(config);
-      });
+      try {
+        console.log('Widget init starting...');
+        
+        const container = document.getElementById('lyra-chatbot-widget');
+        if (!container) {
+          console.error('No container found');
+          return;
+        }
+        
+        const button = document.createElement('button');
+        button.textContent = 'Chat';
+        button.style.position = 'fixed';
+        button.style.bottom = '20px';
+        button.style.right = '20px';
+        button.style.width = '60px';
+        button.style.height = '60px';
+        button.style.backgroundColor = '#007bff';
+        button.style.color = 'white';
+        button.style.border = 'none';
+        button.style.borderRadius = '50%';
+        button.style.cursor = 'pointer';
+        button.style.zIndex = '9999';
+        
+        button.onclick = () => alert('Widget clicked!');
+        
+        container.appendChild(button);
+        console.log('Button added successfully');
+        
+      } catch (error) {
+        console.error('Widget init error:', error);
+      }
     }
   };
 })();
