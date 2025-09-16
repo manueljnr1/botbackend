@@ -3799,11 +3799,13 @@ async def serve_embed_script(
     const script = document.createElement('script');
     script.src = config.baseUrl + '/static/chatbot-bundle.js';
     script.onload = () => {{
-        if (window.LyraChatbot && window.LyraChatbot.init) {{
-            window.LyraChatbot.init(config);
-        }} else {{
-            console.error('LyraChatbot not found in bundle');
-        }}
+        setTimeout(() => {{
+            if (window.LyraChatbot && window.LyraChatbot.init) {{
+                window.LyraChatbot.init(config);
+            }} else {{
+                console.error('LyraChatbot still not found after delay');
+            }}
+        }}, 100);
     }};
     script.onerror = () => console.error('Failed to load chatbot bundle');
     document.head.appendChild(script);
