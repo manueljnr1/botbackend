@@ -749,11 +749,42 @@
                   }
                 };
                 updateBrandingCSS();
+                updateWidgetAfterBranding();
               }
             }
           } catch (error) {
             console.warn('Failed to fetch branding', error);
           }
+        };
+
+        // Update widget after branding is fetched
+        const updateWidgetAfterBranding = () => {
+          // Update widget positioning
+          const newPositionClass = getPositionClass();
+          openButton.className = `chatbot-open-btn ${newPositionClass}`;
+          chatWidget.className = `chatbot-widget ${newPositionClass}${isOpen ? ' chatbot-widget-open' : ''}${isExpanded ? ' chatbot-widget-expanded' : ''}`;
+          
+          // Update all logos
+          const headerLogo = header.querySelector('.chatbot-logo-container');
+          headerLogo.innerHTML = '';
+          headerLogo.appendChild(createLogo(32));
+          
+          const brandLogo = brandSection.querySelector('.chatbot-brand-logo-wrapper');
+          brandLogo.innerHTML = '';
+          brandLogo.appendChild(createLogo(56));
+          const glow = document.createElement('div');
+          glow.className = 'chatbot-brand-glow';
+          brandLogo.appendChild(glow);
+          
+          const openButtonIcon = openButton.querySelector(':first-child');
+          const newIcon = createWidgetIcon(24);
+          openButton.replaceChild(newIcon, openButtonIcon);
+          
+          // Update business name
+          const titleElement = header.querySelector('.chatbot-title');
+          titleElement.textContent = capitalizeWords(brandingData.business_name);
+          const brandNameElement = brandSection.querySelector('.chatbot-brand-name');
+          brandNameElement.textContent = capitalizeWords(brandingData.business_name);
         };
 
         // Update CSS variables
