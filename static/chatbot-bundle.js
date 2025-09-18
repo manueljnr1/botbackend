@@ -1227,41 +1227,53 @@
           return { inputArea, input };
         };
 
-        // Create main elements
-        const particles = createParticles();
-        const openButton = createOpenButton();
-        
-        const chatWidget = document.createElement('div');
-        chatWidget.className = `chatbot-widget ${getPositionClass()}`;
-        chatWidget.style.display = 'none';
-        
-        const header = createHeader();
-        
-        const chatBody = document.createElement('div');
-        chatBody.className = 'chatbot-body';
-        
-        const brandSection = createBrandSection();
-        const messagesContainer = document.createElement('div');
-        
-        chatBody.appendChild(brandSection);
-        chatBody.appendChild(messagesContainer);
-        
-        const { inputArea, input } = createInputArea();
-        
-        chatWidget.appendChild(header);
-        chatWidget.appendChild(chatBody);
-        chatWidget.appendChild(inputArea);
-        
-        // Add to DOM
-        const widget = document.createElement('div');
-        widget.appendChild(particles);
-        widget.appendChild(openButton);
-        widget.appendChild(chatWidget);
-        container.appendChild(widget);
+        // Initialize - fetch branding first, then build widget
+        const initialize = async () => {
+          await fetchBranding();
+          
+          // Create main elements after branding is loaded
+          const particles = createParticles();
+          const openButton = createOpenButton();
+          
+          const chatWidget = document.createElement('div');
+          chatWidget.className = `chatbot-widget ${getPositionClass()}`;
+          chatWidget.style.display = 'none';
+          
+          const header = createHeader();
+          
+          const chatBody = document.createElement('div');
+          chatBody.className = 'chatbot-body';
+          
+          const brandSection = createBrandSection();
+          const messagesContainer = document.createElement('div');
+          
+          chatBody.appendChild(brandSection);
+          chatBody.appendChild(messagesContainer);
+          
+          const { inputArea, input } = createInputArea();
+          
+          chatWidget.appendChild(header);
+          chatWidget.appendChild(chatBody);
+          chatWidget.appendChild(inputArea);
+          
+          // Add to DOM
+          const widget = document.createElement('div');
+          widget.appendChild(particles);
+          widget.appendChild(openButton);
+          widget.appendChild(chatWidget);
+          container.appendChild(widget);
 
-        // Initialize
-        fetchBranding();
-        renderMessages();
+          renderMessages();
+          
+          // Store references for later use
+          window.chatWidget = chatWidget;
+          window.openButton = openButton;
+          window.messagesContainer = messagesContainer;
+          window.chatBody = chatBody;
+          window.input = input;
+        };
+
+        initialize();
 
       } catch (error) {
         console.error('Widget initialization error:', error);
