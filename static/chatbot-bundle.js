@@ -635,7 +635,7 @@
   window.LyraChatbot = {
     init: async function(config) {
       try {
-        const container = document.getElementById(config.containerId || 'chatbot-widget-container');
+        const container = document.getElementById('lyra-chatbot-widget');
         if (!container) {
           console.error('Container element not found');
           return;
