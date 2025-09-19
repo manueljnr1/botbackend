@@ -1146,7 +1146,7 @@
             container.appendChild(createParticles());
             container.appendChild(createOpenButton());
           } else {
-            container.appendChild(createWidget());
+            container.appendChild(createChatWidget());
             // Auto-focus input when opened
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
