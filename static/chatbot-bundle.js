@@ -357,6 +357,7 @@
       align-items: flex-start;
       opacity: 0;
       transform: translateY(20px);
+      margin-bottom: 16px;
     }
 
     .chatbot-message-animate {

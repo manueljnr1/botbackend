@@ -1229,7 +1229,8 @@ async def get_tenant_info_for_frontend(
             "success": True,
             "business_name": tenant.business_name,
             "tenant_id": tenant.id,
-            "chatbot_widget_icon": settings.CHATBOT_WIDGET_ICON_URL,
+            # "chatbot_widget_icon": settings.CHATBOT_WIDGET_ICON_URL,
+            "chatbot_widget_icon": "",
             "branding": {
                 # Colors
                 "primary_color": tenant.primary_color or "#007bff",
@@ -1259,7 +1260,8 @@ async def get_tenant_info_for_frontend(
             "success": False,
             "tenant_id": tenant.id,
             "business_name": "Chatbot",
-            "chatbot_widget_icon": settings.CHATBOT_WIDGET_ICON_URL,
+            # "chatbot_widget_icon": settings.CHATBOT_WIDGET_ICON_URL,
+            "chatbot_widget_icon": "",
             "branding": {
                 "primary_color": "#007bff",
                 "secondary_color": "#f0f4ff",
