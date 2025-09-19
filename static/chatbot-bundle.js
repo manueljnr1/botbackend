@@ -736,17 +736,29 @@
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
         };
 
-        const createLogo = (size = 32) => {
-          const { branding } = tenantInfo;
-          if (branding.logo_image) {
-            const img = document.createElement('img');
-            img.src = branding.logo_image;
-            img.alt = 'Logo';
-            img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;display:block;`;
-            return img;
-          }
-          return createTextLogo(size);
-        };
+        // const createTextLogo = (size) => {
+        //   // Remove everything inside here and replace with:
+        //   const container = document.createElement('div');
+        //   container.style.cssText = `
+        //     width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
+        //     background:var(--chatbot-secondary);border-radius:50%;
+        //     box-shadow:0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
+        //   `;
+          
+        //   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        //   const svgSize = Math.max(16, size * 0.6);
+        //   svg.setAttribute('width', svgSize);
+        //   svg.setAttribute('height', svgSize);
+        //   svg.setAttribute('viewBox', '0 0 24 24');
+        //   svg.setAttribute('fill', 'white');
+          
+        //   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        //   path.setAttribute('d', 'M12,2c-4.97056,0 -9,4.02944 -9,9c0,4.97056 4.02944,9 9,9v2.5c0,0.381 0.41219,0.62459 0.74219,0.43359c1.93936,-1.12274 7.06688,-4.82624 8.07227,-10.12305c0.00536,-0.02992 0.01057,-0.05987 0.01563,-0.08984c0.04363,-0.24189 0.0857,-0.48402 0.11133,-0.73242c0.03765,-0.3281 0.05721,-0.65803 0.05859,-0.98828c0,-4.97056 -4.02944,-9 -9,-9z');
+          
+        //   svg.appendChild(path);
+        //   container.appendChild(svg);
+        //   return container;
+        // };
 
         // const createCompanyLogo = (size = 32) => {
         //   const { chatbot_widget_icon } = tenantInfo;
@@ -765,19 +777,26 @@
         };
 
         const createTextLogo = (size) => {
-          const { branding } = tenantInfo;
-          const text = branding.logo_text || capitalizeWords(tenantInfo.business_name.substring(0, 2)).toUpperCase();
-          const fontSize = Math.max(12, size * 0.3);
-          
-          const span = document.createElement('span');
-          span.style.cssText = `
+          const container = document.createElement('div');
+          container.style.cssText = `
             width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            background:var(--chatbot-secondary);color:white;border-radius:50%;
-            font-size:${fontSize}px;font-family:var(--chatbot-font);font-weight:600;
-            text-align:center;text-transform:capitalize;line-height:1;
+            background:var(--chatbot-secondary);border-radius:50%;
+            box-shadow:0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
           `;
-          span.textContent = text;
-          return span;
+          
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          const svgSize = Math.max(16, size * 0.6);
+          svg.setAttribute('width', svgSize);
+          svg.setAttribute('height', svgSize);
+          svg.setAttribute('viewBox', '0 0 24 24');
+          svg.setAttribute('fill', 'white');
+          
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', 'M12,2c-4.97056,0 -9,4.02944 -9,9c0,4.97056 4.02944,9 9,9v2.5c0,0.381 0.41219,0.62459 0.74219,0.43359c1.93936,-1.12274 7.06688,-4.82624 8.07227,-10.12305c0.00536,-0.02992 0.01057,-0.05987 0.01563,-0.08984c0.04363,-0.24189 0.0857,-0.48402 0.11133,-0.73242c0.03765,-0.3281 0.05721,-0.65803 0.05859,-0.98828c0,-4.97056 -4.02944,-9 -9,-9z');
+          
+          svg.appendChild(path);
+          container.appendChild(svg);
+          return container;
         };
 
         const sendMessage = async () => {
