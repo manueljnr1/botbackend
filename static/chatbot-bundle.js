@@ -632,7 +632,7 @@
   `;
   document.head.appendChild(style);
 
-  window.ChatbotWidget = {
+  window.LyraChatbot = {
     init: async function(config) {
       try {
         const container = document.getElementById(config.containerId || 'chatbot-widget-container');
