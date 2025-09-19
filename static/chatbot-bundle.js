@@ -780,12 +780,11 @@
           const container = document.createElement('div');
           container.style.cssText = `
             width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            background:var(--chatbot-secondary);border-radius:50%;
             box-shadow:0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
           `;
           
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          const svgSize = Math.max(16, size * 0.6);
+          const svgSize = Math.max(20, size * 0.8);
           svg.setAttribute('width', svgSize);
           svg.setAttribute('height', svgSize);
           svg.setAttribute('viewBox', '0 0 24 24');
@@ -797,6 +796,26 @@
           svg.appendChild(path);
           container.appendChild(svg);
           return container;
+        };
+
+
+        const createChatWidget = () => {
+          const chatWidget = document.createElement('div');
+          chatWidget.className = `chatbot-widget ${getPositionClass()}`;
+          chatWidget.style.display = 'flex';
+        
+          const header = createHeader();
+          
+          const messageBody = document.createElement('div');
+          messageBody.className = 'chatbot-body';
+        
+          const inputArea = createInputArea();
+        
+          chatWidget.appendChild(header);
+          chatWidget.appendChild(messageBody);
+          chatWidget.appendChild(inputArea);
+        
+          return chatWidget;
         };
 
         const sendMessage = async () => {
