@@ -760,12 +760,20 @@
         //   return container;
         // };
 
-        const createCompanyLogo = (size = 32) => {
-          const logoImage = tenantInfo.branding?.logo_image || tenantInfo.chatbot_widget_icon;
+        const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
+          if (useWidgetIcon && tenantInfo.chatbot_widget_icon) {
+            const img = document.createElement('img');
+            img.src = tenantInfo.chatbot_widget_icon;
+            img.alt = 'Widget Icon';
+            img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;display:block;`;
+            return img;
+          }
+          
+          const logoImage = tenantInfo.branding?.logo_image;
           if (logoImage) {
             const img = document.createElement('img');
             img.src = logoImage;
-            img.alt = 'Logo';
+            img.alt = 'Company Logo';
             img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;display:block;`;
             return img;
           }
@@ -931,7 +939,7 @@
           openButton.className = `chatbot-open-btn ${getPositionClass()}`;
           openButton.style.display = isOpen ? 'none' : 'flex';
 
-          openButton.appendChild(createCompanyLogo(24));
+          openButton.appendChild(createCompanyLogo(24, true));
           
           const ring1 = document.createElement('div');
           ring1.className = 'chatbot-pulse-ring';
