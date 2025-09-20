@@ -761,12 +761,8 @@
         // };
 
         const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
-          if (useWidgetIcon && tenantInfo.chatbot_widget_icon) {
-            const img = document.createElement('img');
-            img.src = tenantInfo.chatbot_widget_icon;
-            img.alt = 'Widget Icon';
-            img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;display:block;`;
-            return img;
+          if (useWidgetIcon) {
+            return createTextLogo(size);
           }
           
           const logoImage = tenantInfo.branding?.logo_image;
