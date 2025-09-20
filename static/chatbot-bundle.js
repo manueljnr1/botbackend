@@ -799,24 +799,7 @@
         };
 
 
-        const createChatWidget = () => {
-          const chatWidget = document.createElement('div');
-          chatWidget.className = `chatbot-widget ${getPositionClass()}`;
-          chatWidget.style.display = 'flex';
-        
-          const header = createHeader();
-          
-          const messageBody = document.createElement('div');
-          messageBody.className = 'chatbot-body';
-        
-          const inputArea = createInputArea();
-        
-          chatWidget.appendChild(header);
-          chatWidget.appendChild(messageBody);
-          chatWidget.appendChild(inputArea);
-        
-          return chatWidget;
-        };
+      
 
         const sendMessage = async () => {
           if (!inputValue.trim()) return;
@@ -977,7 +960,7 @@
 
           const logoContainer = document.createElement('div');
           logoContainer.className = 'chatbot-logo-container';
-          logoContainer.appendChild(createLogo(32));
+          logoContainer.appendChild(createCompanyLogo(32));
 
           const headerInfo = document.createElement('div');
           headerInfo.className = 'chatbot-header-info';
@@ -1023,7 +1006,7 @@
 
           const brandLogoWrapper = document.createElement('div');
           brandLogoWrapper.className = 'chatbot-brand-logo-wrapper';
-          brandLogoWrapper.appendChild(createLogo(56));
+          brandLogoWrapper.appendChild(createCompanyLogo(56));
 
           const brandGlow = document.createElement('div');
           brandGlow.className = 'chatbot-brand-glow';
@@ -1109,6 +1092,7 @@
           
           input.addEventListener('input', (e) => {
             inputValue = e.target.value;
+            sendBtn.disabled = !inputValue.trim();
           });
           
           input.addEventListener('keypress', (e) => {
@@ -1160,16 +1144,20 @@
 
         const render = () => {
           container.innerHTML = '';
-
+        
           if (!isOpen) {
             container.appendChild(createParticles());
             container.appendChild(createOpenButton());
           } else {
-            container.appendChild(createChatWidget());
-            // Auto-focus input when opened
+            // Fix: Use createWidget() instead of createChatWidget()
+            container.appendChild(createWidget());
+            
+            // Auto-focus input when opened and scroll to bottom
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
+              const chatBody = container.querySelector('.chatbot-body');
               if (input) input.focus();
+              if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
             }, 100);
           }
         };
