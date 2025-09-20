@@ -732,33 +732,32 @@
         await loadBranding();
         updateBrandingCSS();
 
+
+        const loadMessages = () => {
+          try {
+            const stored = localStorage.getItem(`chatbot_messages_${userId}`);
+            if (stored) {
+              messages = JSON.parse(stored);
+            }
+          } catch (error) {
+            console.warn('Failed to load messages:', error);
+          }
+        };
+
+        const saveMessages = () => {
+          try {
+            localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
+          } catch (error) {
+            console.warn('Failed to save messages:', error);
+          }
+        };
+
+
         const capitalizeWords = (str) => {
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
         };
 
-        // const createTextLogo = (size) => {
-        //   // Remove everything inside here and replace with:
-        //   const container = document.createElement('div');
-        //   container.style.cssText = `
-        //     width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-        //     background:var(--chatbot-secondary);border-radius:50%;
-        //     box-shadow:0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
-        //   `;
-          
-        //   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        //   const svgSize = Math.max(16, size * 0.6);
-        //   svg.setAttribute('width', svgSize);
-        //   svg.setAttribute('height', svgSize);
-        //   svg.setAttribute('viewBox', '0 0 24 24');
-        //   svg.setAttribute('fill', 'white');
-          
-        //   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        //   path.setAttribute('d', 'M12,2c-4.97056,0 -9,4.02944 -9,9c0,4.97056 4.02944,9 9,9v2.5c0,0.381 0.41219,0.62459 0.74219,0.43359c1.93936,-1.12274 7.06688,-4.82624 8.07227,-10.12305c0.00536,-0.02992 0.01057,-0.05987 0.01563,-0.08984c0.04363,-0.24189 0.0857,-0.48402 0.11133,-0.73242c0.03765,-0.3281 0.05721,-0.65803 0.05859,-0.98828c0,-4.97056 -4.02944,-9 -9,-9z');
-          
-        //   svg.appendChild(path);
-        //   container.appendChild(svg);
-        //   return container;
-        // };
+       
 
         const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
           if (useWidgetIcon) {
@@ -808,6 +807,7 @@
 
           const newMessage = { role: 'user', content: inputValue.trim() };
           messages.push(newMessage);
+          saveMessages();
           inputValue = '';
           isTyping = true;
           render();
@@ -877,6 +877,7 @@
                         messages[messages.length - 1] = { ...lastMessage, content: formattedContent };
                       } else {
                         messages.push({ role: 'assistant', content: formattedContent });
+                        saveMessages();
                       }
                       render();
                       break;
@@ -892,6 +893,7 @@
                         role: 'assistant',
                         content: 'Error responding, please try again.'
                       });
+                      saveMessages();
                       isTyping = false;
                       render();
                       break;
@@ -910,6 +912,7 @@
               role: 'assistant',
               content: 'Error responding, please try again.'
             });
+            saveMessages();
             isTyping = false;
             render();
           }
