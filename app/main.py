@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -15,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import uvicorn
 import logging
+
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from datetime import datetime
@@ -52,6 +54,7 @@ from app.chatbot.admin_router import router as enhanced_admin_router
 from app.admin import intent_training_router
 from app.analytics.router import router as analytics_router
 from app.fine_tuning.router import router as fine_tuning_router
+from app.analytics.analytics_service import AnalyticsService
 
 
 from app.config import settings
@@ -158,7 +161,22 @@ if settings.requires_security_validation():
     
 #     return response
 
-
+@app.middleware("http")
+async def web_tracking_middleware(request: Request, call_next):
+    start_time = time.time()
+    
+    if not request.url.path.startswith("/api/"):
+        try:
+            db = next(get_db())
+            service = AnalyticsService(db)
+            service.track_web_visit(request)
+            db.close()
+        except:
+            pass
+    
+    response = await call_next(request)
+    response.headers["X-Duration"] = str(time.time() - start_time)
+    return response
 
 
 

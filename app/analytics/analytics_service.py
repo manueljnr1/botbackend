@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc
 from collections import Counter
 
-from app.analytics.models import ConversationAnalytics
+from app.analytics.models import ConversationAnalytics, WebVisit
 from app.chatbot.models import ChatSession, ChatMessage
 from app.live_chat.customer_detection_service import CustomerDetectionService
 from app.config import settings
@@ -437,3 +437,60 @@ Analysis:"""
             
         except Exception as e:
             logger.error(f"Batch analysis error: {e}")
+
+
+
+
+
+
+    def track_web_visit(self, request, session_id: str = None):
+        """Track website visit"""
+        try:
+            import user_agents
+            
+            ip = request.client.host
+            user_agent = request.headers.get("user-agent", "")
+            path = request.url.path
+            referrer = request.headers.get("referer")
+            
+            ua = user_agents.parse(user_agent)
+            device_type = "mobile" if ua.is_mobile else "tablet" if ua.is_tablet else "desktop"
+            
+            visit = WebVisit(
+                session_id=session_id or f"web_{ip}_{int(datetime.now().timestamp())}",
+                ip_address=ip,
+                user_agent=user_agent,
+                path=path,
+                referrer=referrer,
+                device_type=device_type,
+                browser=ua.browser.family
+            )
+            
+            self.db.add(visit)
+            self.db.commit()
+            return visit
+        except Exception as e:
+            logger.error(f"Web tracking error: {e}")
+            return None
+
+    def get_web_analytics(self, days: int = 30) -> Dict[str, Any]:
+        """Get website analytics"""
+        from app.analytics.models import WebVisit
+        
+        start_date = datetime.utcnow() - timedelta(days=days)
+        
+        visits = self.db.query(WebVisit).filter(
+            WebVisit.timestamp >= start_date
+        ).all()
+        
+        page_views = Counter(visit.path for visit in visits)
+        exit_pages = Counter(visit.exit_page for visit in visits if visit.exit_page)
+        devices = Counter(visit.device_type for visit in visits)
+        
+        return {
+            "total_visits": len(visits),
+            "unique_visitors": len(set(visit.session_id for visit in visits)),
+            "top_pages": [{"path": path, "views": count} for path, count in page_views.most_common(10)],
+            "exit_pages": [{"path": path, "exits": count} for path, count in exit_pages.most_common(5)],
+            "device_breakdown": [{"device": device, "count": count} for device, count in devices.items()]
+        }

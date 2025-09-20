@@ -1,18 +1,5 @@
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 from collections import Counter
 
 
@@ -39,7 +26,7 @@ from app.database import get_db
 from app.tenants.router import get_tenant_from_api_key
 from app.analytics.analytics_service import AnalyticsService
 from app.analytics.schemas import *
-
+from app.auth.router import get_admin_user
 router = APIRouter()
 
 
@@ -569,4 +556,21 @@ async def get_session_details(
         "bot_message_count": bot_message_count,
         "duration": duration,
         "messages": formatted_messages
+    }
+
+
+@router.get("/web-analytics")
+async def get_web_analytics(
+    days: int = Query(30, ge=1, le=365),
+    current_admin = Depends(get_admin_user),  # Replace api_key with admin auth
+    db: Session = Depends(get_db)
+):
+    """Get website visit analytics - Admin only"""
+    service = AnalyticsService(db)
+    analytics = service.get_web_analytics(days)
+    
+    return {
+        "success": True,
+        "period_days": days,
+        "web_analytics": analytics
     }

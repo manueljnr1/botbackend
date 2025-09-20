@@ -28,3 +28,18 @@ class ConversationAnalytics(Base):
     # Relationships
     session = relationship("ChatSession", foreign_keys=[session_id])
     tenant = relationship("Tenant", foreign_keys=[tenant_id])
+
+class WebVisit(Base):
+    __tablename__ = "web_visits"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
+    ip_address = Column(String)
+    user_agent = Column(Text)
+    path = Column(String, index=True)
+    referrer = Column(String)
+    device_type = Column(String)
+    browser = Column(String)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    duration = Column(Float)
+    exit_page = Column(String)
