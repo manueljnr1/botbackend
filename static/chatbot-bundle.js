@@ -804,14 +804,14 @@
 
         const sendMessage = async () => {
           if (!inputValue.trim()) return;
-
+        
           const newMessage = { role: 'user', content: inputValue.trim() };
           messages.push(newMessage);
           saveMessages();
           inputValue = '';
           isTyping = true;
           render();
-
+        
           if (!config.baseUrl || !config.apiKey) {
             setTimeout(() => {
               messages.push({ role: 'assistant', content: 'Demo mode: Please configure your API settings.' });
@@ -820,7 +820,7 @@
             }, 1000);
             return;
           }
-
+        
           try {
             const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
               method: 'POST',
@@ -834,76 +834,18 @@
                 max_context: 200
               })
             });
-
+        
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
             }
-
-            const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error('Response body is not readable');
-            }
-
-            const decoder = new TextDecoder();
-            let currentMessage = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              const chunk = decoder.decode(value, { stream: true });
-              const lines = (currentMessage + chunk).split('\n');
-              currentMessage = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.trim()) continue;
-
-                try {
-                  const data = JSON.parse(line);
-
-                  switch (data.type) {
-                    case 'main_response':
-                      let formattedContent = data.content;
-                      if (typeof formattedContent === 'string') {
-                        formattedContent = formattedContent
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter((line) => line.length > 0)
-                          .join('\n');
-                      }
-
-                      const lastMessage = messages[messages.length - 1];
-                      if (lastMessage?.role === 'assistant' && lastMessage.content === '') {
-                        messages[messages.length - 1] = { ...lastMessage, content: formattedContent };
-                      } else {
-                        messages.push({ role: 'assistant', content: formattedContent });
-                        saveMessages();
-                      }
-                      render();
-                      break;
-
-                    case 'complete':
-                      isTyping = false;
-                      render();
-                      break;
-
-                    case 'error':
-                      console.error('Chat error:', data.error);
-                      messages.push({
-                        role: 'assistant',
-                        content: 'Error responding, please try again.'
-                      });
-                      saveMessages();
-                      isTyping = false;
-                      render();
-                      break;
-                  }
-                } catch (error) {
-                  console.error('Failed to parse JSON:', error, 'Line:', line);
-                }
-              }
-            }
-
+        
+            const data = await response.json();
+        
+            messages.push({ 
+              role: 'assistant', 
+              content: data.response 
+            });
+            saveMessages();
             isTyping = false;
             render();
           } catch (error) {
