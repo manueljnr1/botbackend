@@ -267,5 +267,4 @@ def reset_connection_pool():
 from app.auth.models import User, PasswordReset
 from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ
-from app.integrations.booking_models import BookingRequest
 from app.chatbot.models import ChatSession, ChatMessage

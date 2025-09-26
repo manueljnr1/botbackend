@@ -11,7 +11,6 @@ from app.tenants.models import Tenant
 from app.knowledge_base.models import KnowledgeBase, FAQ, ProcessingStatus
 from app.chatbot.models import ChatSession, ChatMessage
 from app.config import settings
-from app.utils.language_service import language_service
 from app.chatbot.response_simulator import SimpleHumanDelaySimulator
 from app.chatbot.simple_memory import SimpleChatbotMemory
 from datetime import datetime
