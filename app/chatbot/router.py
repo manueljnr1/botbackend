@@ -2875,6 +2875,321 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #======= New bad boys EDPTs
 
 
+# @router.post("/chat/smart")
+# async def smart_chat_with_followup_streaming(
+#     request: SmartChatRequest,
+#     http_request: Request,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Smart chat with unified intelligent engine + streaming + smart feedback + conversation memory------- The Ultimate Web Beast !!!!
+#     """
+    
+#     async def stream_with_followups():
+#         try:
+#             logger.info(f"🚀 Unified smart chat with memory for: {request.user_identifier}")
+            
+#             # Get tenant and check limits
+#             tenant = get_tenant_from_api_key(api_key, db)
+#             tenant_name = tenant.name  # 🔧 FIX: Get tenant name early
+#             tenant_business_name = tenant.business_name or tenant_name or "Our Company"  # 🔧 FIX: Get business name early
+#             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
+            
+#             # ⭐ NEW: Initialize unified intelligent engine
+#             engine = get_unified_intelligent_engine(db, tenant.id)
+            
+#             # 🔔 NEW: Initialize smart feedback manager
+#             from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
+#             feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
+            
+#             # 🧠 NEW: Initialize simple memory for conversation context
+#             from app.chatbot.simple_memory import SimpleChatbotMemory
+#             memory = SimpleChatbotMemory(db, tenant.id)
+            
+#             # Auto-generate user ID if needed
+#             user_id = request.user_identifier
+#             auto_generated = False
+            
+#             if not user_id or user_id.startswith('temp_') or user_id.startswith('session_'):
+#                 user_id = f"auto_{str(uuid.uuid4())}"
+#                 auto_generated = True
+            
+#             session_id, is_new_session = memory.get_or_create_session(user_id, "web")
+
+#             # ⭐ ADD LOCATION DETECTION HERE (before email check)
+#             if is_new_session:
+#                 await engine._detect_and_store_location(http_request, tenant.id, session_id, user_id)
+
+#             conversation_history = memory.get_conversation_history(user_id, min(7, request.max_context))
+            
+#             # Send initial metadata with memory info
+#             yield f"{json.dumps({
+#                 'type': 'metadata', 
+#                 'user_id': user_id, 
+#                 'auto_generated': auto_generated, 
+#                 'engine': 'unified_intelligent',
+#                 'session_id': session_id,
+#                 'is_new_session': is_new_session,
+#                 'conversation_history_length': len(conversation_history),
+#                 'memory_enabled': True
+#             })}\n"
+            
+#             # 🔔 NEW: Check if user is providing email (BEFORE processing main message)
+#             extracted_email = feedback_manager.extract_email_from_message(request.message)
+#             if extracted_email:
+#                 logger.info(f"📧 Extracted email from message: {extracted_email}")
+                
+#                 # Store email and acknowledge
+#                 if feedback_manager.store_user_email(session_id, extracted_email):
+#                     acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                    
+#                     # 🧠 Store both user message and bot response in memory
+#                     memory.store_message(session_id, request.message, True)
+#                     memory.store_message(session_id, acknowledgment, False)
+                    
+#                     # Send immediate response for email capture
+#                     main_response = {
+#                         'type': 'main_response',
+#                         'content': acknowledgment,
+#                         'session_id': session_id,
+#                         'answered_by': 'EMAIL_CAPTURE',
+#                         'email_captured': True,
+#                         'user_email': extracted_email,
+#                         'engine': 'unified_intelligent',
+#                         'memory_updated': True
+#                     }
+#                     yield f"{json.dumps(main_response)}\n"
+                    
+#                     # Track conversation
+#                     track_conversation_started_with_super_tenant(
+#                         tenant_id=tenant.id,
+#                         user_identifier=user_id,
+#                         platform="web",
+#                         db=db
+#                     )
+                    
+#                     # Send completion
+#                     yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_captured': True})}\n"
+#                     return
+            
+#             # 🔔 NEW: Check if we should ask for email (new conversations without email)
+#             if feedback_manager.should_request_email(session_id, user_id):
+#                 business_name = tenant_business_name  # 🔧 FIX: Use cached value
+#                 email_request = feedback_manager.generate_email_request_message(business_name)
+                
+#                 # 🧠 Store the email request as bot message in memory
+#                 memory.store_message(session_id, email_request, False)
+                
+#                 main_response = {
+#                     'type': 'main_response',
+#                     'content': email_request,
+#                     'session_id': session_id,
+#                     'answered_by': 'EMAIL_REQUEST',
+#                     'email_requested': True,
+#                     'engine': 'unified_intelligent',
+#                     'memory_updated': True
+#                 }
+#                 yield f"{json.dumps(main_response)}\n"
+                
+#                 # Send completion
+#                 yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_requested': True})}\n"
+#                 return
+            
+#             # 🧠 Store user message in memory before processing
+#             memory.store_message(session_id, request.message, True)
+            
+            
+            
+#             # ⭐ SIMPLIFIED: Process with unified engine (single call)
+#             start_time = time.time()
+            
+#             result = await engine.process_message(
+#                 api_key=api_key,
+#                 user_message=request.message,  # 🧠 Use context-enhanced message
+#                 user_identifier=user_id,
+#                 platform="web",
+#                 request=http_request
+#             )
+            
+#             if not result.get("success"):
+#                 logger.error(f"❌ Unified smart chat failed: {result.get('error')}")
+#                 yield f"{json.dumps({'type': 'error', 'error': result.get('error')})}\n"
+#                 return
+            
+#             logger.info("✅ Unified engine response received successfully")
+            
+#             # ⭐ INTELLIGENT DELAY: Based on response complexity
+#             response_delay = 0
+#             processing_time = time.time() - start_time
+            
+#             # Simple delay calculation based on response length and intent
+#             response_length = len(result.get("response", ""))
+#             intent = result.get("intent", "general")
+            
+#             # Base delay calculation
+#             if intent == "casual":
+#                 base_delay = 0.5 + (response_length / 200)  # Quick for casual
+#             elif intent in ["functional", "support"]:
+#                 base_delay = 1.0 + (response_length / 150)  # Thoughtful for complex
+#             else:
+#                 base_delay = 0.8 + (response_length / 180)  # Standard
+            
+#             # Add some natural variation
+#             import random
+#             actual_delay = max(0.3, (base_delay * random.uniform(0.8, 1.2)) - processing_time)
+            
+#             logger.info(f"⏱️ Calculated delay: {actual_delay:.2f}s for {intent} intent")
+#             await asyncio.sleep(actual_delay)
+            
+#             # Track conversation
+#             track_conversation_started_with_super_tenant(
+#                 tenant_id=tenant.id,
+#                 user_identifier=user_id,
+#                 platform="web",
+#                 db=db
+#             )
+            
+#             # 🧠 Store bot response in memory
+#             bot_response = result["response"]
+#             memory.store_message(session_id, bot_response, False)
+            
+#             # 🔔 NEW: Check for inadequate responses and trigger feedback
+#             feedback_triggered = False
+#             feedback_id = None
+            
+#             try:
+#                 is_inadequate = feedback_manager.detect_inadequate_response(bot_response)
+#                 logger.info(f"🔍 Inadequate response detection result: {is_inadequate}")
+                
+#                 if is_inadequate:
+#                     logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                    
+#                     # 🧠 Use memory's conversation history for feedback context
+#                     feedback_context = memory.get_conversation_history(user_id, 10)
+                    
+#                     # Create feedback request
+#                     feedback_id = feedback_manager.create_feedback_request(
+#                         session_id=session_id,
+#                         user_question=request.message,
+#                         bot_response=bot_response,
+#                         conversation_context=feedback_context
+#                     )
+                    
+#                     if feedback_id:
+#                         logger.info(f"✅ Created feedback request {feedback_id} with memory context")
+#                         feedback_triggered = True
+#                     else:
+#                         logger.error(f"❌ Failed to create feedback request")
+#                 else:
+#                     logger.info(f"✅ Response appears adequate, no feedback needed")
+                    
+#             except Exception as e:
+#                 logger.error(f"💥 Error in feedback detection: {e}")
+            
+#             # Send main response with unified engine data + feedback info + memory info
+#             main_response = {
+#                 'type': 'main_response',
+#                 'content': result["response"],
+#                 'session_id': session_id,
+#                 'answered_by': result.get('answered_by'),
+#                 'intent': result.get('intent'),
+#                 'context': result.get('context'),
+#                 'token_efficiency': result.get('token_efficiency'),
+#                 'architecture': result.get('architecture'),
+#                 'response_delay': actual_delay,
+#                 'processing_time': processing_time,
+#                 # 🔔 Feedback information
+#                 'feedback_triggered': feedback_triggered,
+#                 'feedback_id': feedback_id,
+#                 'feedback_system': 'advanced',
+#                 # 🧠 Memory information
+#                 'conversation_context_used': len(conversation_history),
+#                 'memory_updated': True,
+#                 'is_new_session': is_new_session
+#             }
+#             yield f"{json.dumps(main_response)}\n"
+            
+#             # ⭐ SMART FOLLOW-UP GENERATION with memory context
+#             base_followup_delay = 1.5 + random.uniform(0.3, 0.8)
+#             await asyncio.sleep(base_followup_delay)
+            
+#             # Generate contextual follow-ups based on intent and response
+#             followups = generate_intelligent_followups(
+#                 request.message, 
+#                 result["response"], 
+#                 result.get("intent", "general"),
+#                 result.get("context", "unknown"),
+#                 tenant_name  # 🔧 FIX: Use cached value
+#             )
+            
+#             # 🧠 Enhanced follow-ups could consider conversation history
+#             # For future enhancement: analyze conversation_history for better follow-ups
+            
+#             if followups:
+#                 for i, followup in enumerate(followups):
+#                     if i > 0:
+#                         inter_followup_delay = 0.8 + random.uniform(0.2, 0.5)
+#                         await asyncio.sleep(inter_followup_delay)
+                    
+#                     followup_data = {
+#                         'type': 'followup',
+#                         'content': followup,
+#                         'index': i,
+#                         'is_last': i == len(followups) - 1,
+#                         'intelligent': True,
+#                         'memory_aware': True  # 🧠 Indicates memory-aware follow-ups
+#                     }
+#                     yield f"{json.dumps(followup_data)}\n"
+            
+#             # Send completion signal with full feature summary
+#             yield f"{json.dumps({
+#                 'type': 'complete', 
+#                 'total_followups': len(followups) if followups else 0, 
+#                 'engine': 'unified_intelligent',
+#                 'token_efficiency': result.get('token_efficiency', '~80% reduction'),
+#                 'feedback_enhanced': True,
+#                 'memory_enhanced': True,
+#                 'conversation_continuity': True,
+#                 'features_enabled': [
+#                     'unified_intelligent_engine',
+#                     'smart_feedback_system', 
+#                     'conversation_memory',
+#                     'email_capture',
+#                     'inadequate_response_detection',
+#                     'intelligent_delays',
+#                     'contextual_followups',
+#                     'streaming_responses'
+#                 ]
+#             })}\n"
+            
+#             logger.info(f"✅ Unified smart chat with memory completed with {len(followups) if followups else 0} follow-ups")
+            
+#         except HTTPException as e:
+#             logger.error(f"🚫 HTTP error in unified smart chat: {e.detail}")
+#             yield f"{json.dumps({'type': 'error', 'error': e.detail, 'status_code': e.status_code})}\n"
+#         except Exception as e:
+#             logger.error(f"💥 Error in unified smart chat: {str(e)}")
+#             import traceback
+#             logger.error(traceback.format_exc())
+#             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
+
+
+    
+#     return StreamingResponse(
+#         stream_with_followups(),
+#         media_type="application/x-ndjson",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
+
+
+
+
+
 @router.post("/chat/smart")
 async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
@@ -2887,13 +3202,17 @@ async def smart_chat_with_followup_streaming(
     """
     
     async def stream_with_followups():
+        final_response = ""  # Track final response for auto-save
+        user_message = request.message
+        user_identifier = request.user_identifier
+        
         try:
             logger.info(f"🚀 Unified smart chat with memory for: {request.user_identifier}")
             
             # Get tenant and check limits
             tenant = get_tenant_from_api_key(api_key, db)
-            tenant_name = tenant.name  # 🔧 FIX: Get tenant name early
-            tenant_business_name = tenant.business_name or tenant_name or "Our Company"  # 🔧 FIX: Get business name early
+            tenant_name = tenant.name
+            tenant_business_name = tenant.business_name or tenant_name or "Our Company"
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
             # ⭐ NEW: Initialize unified intelligent engine
@@ -2943,6 +3262,7 @@ async def smart_chat_with_followup_streaming(
                 # Store email and acknowledge
                 if feedback_manager.store_user_email(session_id, extracted_email):
                     acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                    final_response = acknowledgment
                     
                     # 🧠 Store both user message and bot response in memory
                     memory.store_message(session_id, request.message, True)
@@ -2971,12 +3291,19 @@ async def smart_chat_with_followup_streaming(
                     
                     # Send completion
                     yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_captured': True})}\n"
+                    
+                    # Auto-save conversation
+                    try:
+                        await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+                    except:
+                        pass
                     return
             
             # 🔔 NEW: Check if we should ask for email (new conversations without email)
             if feedback_manager.should_request_email(session_id, user_id):
-                business_name = tenant_business_name  # 🔧 FIX: Use cached value
+                business_name = tenant_business_name
                 email_request = feedback_manager.generate_email_request_message(business_name)
+                final_response = email_request
                 
                 # 🧠 Store the email request as bot message in memory
                 memory.store_message(session_id, email_request, False)
@@ -2994,19 +3321,23 @@ async def smart_chat_with_followup_streaming(
                 
                 # Send completion
                 yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_requested': True})}\n"
+                
+                # Auto-save conversation
+                try:
+                    await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+                except:
+                    pass
                 return
             
             # 🧠 Store user message in memory before processing
             memory.store_message(session_id, request.message, True)
-            
-            
             
             # ⭐ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
             
             result = await engine.process_message(
                 api_key=api_key,
-                user_message=request.message,  # 🧠 Use context-enhanced message
+                user_message=request.message,
                 user_identifier=user_id,
                 platform="web",
                 request=http_request
@@ -3029,11 +3360,11 @@ async def smart_chat_with_followup_streaming(
             
             # Base delay calculation
             if intent == "casual":
-                base_delay = 0.5 + (response_length / 200)  # Quick for casual
+                base_delay = 0.5 + (response_length / 200)
             elif intent in ["functional", "support"]:
-                base_delay = 1.0 + (response_length / 150)  # Thoughtful for complex
+                base_delay = 1.0 + (response_length / 150)
             else:
-                base_delay = 0.8 + (response_length / 180)  # Standard
+                base_delay = 0.8 + (response_length / 180)
             
             # Add some natural variation
             import random
@@ -3052,6 +3383,7 @@ async def smart_chat_with_followup_streaming(
             
             # 🧠 Store bot response in memory
             bot_response = result["response"]
+            final_response = bot_response
             memory.store_message(session_id, bot_response, False)
             
             # 🔔 NEW: Check for inadequate responses and trigger feedback
@@ -3120,11 +3452,8 @@ async def smart_chat_with_followup_streaming(
                 result["response"], 
                 result.get("intent", "general"),
                 result.get("context", "unknown"),
-                tenant_name  # 🔧 FIX: Use cached value
+                tenant_name
             )
-            
-            # 🧠 Enhanced follow-ups could consider conversation history
-            # For future enhancement: analyze conversation_history for better follow-ups
             
             if followups:
                 for i, followup in enumerate(followups):
@@ -3138,7 +3467,7 @@ async def smart_chat_with_followup_streaming(
                         'index': i,
                         'is_last': i == len(followups) - 1,
                         'intelligent': True,
-                        'memory_aware': True  # 🧠 Indicates memory-aware follow-ups
+                        'memory_aware': True
                     }
                     yield f"{json.dumps(followup_data)}\n"
             
@@ -3163,6 +3492,12 @@ async def smart_chat_with_followup_streaming(
                 ]
             })}\n"
             
+            # Auto-save conversation at the end
+            try:
+                await auto_save_conversation(user_identifier, user_message, final_response, tenant.id, db)
+            except:
+                pass
+            
             logger.info(f"✅ Unified smart chat with memory completed with {len(followups) if followups else 0} follow-ups")
             
         except HTTPException as e:
@@ -3173,7 +3508,7 @@ async def smart_chat_with_followup_streaming(
             import traceback
             logger.error(traceback.format_exc())
             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
-    
+
     return StreamingResponse(
         stream_with_followups(),
         media_type="application/x-ndjson",
@@ -3184,7 +3519,36 @@ async def smart_chat_with_followup_streaming(
         }
     )
 
-
+# Add this helper function
+async def auto_save_conversation(user_id: str, user_message: str, bot_response: str, tenant_id: int, db: Session):
+    try:
+        chat_session = db.query(ChatSession).filter(
+            ChatSession.user_identifier == user_id,
+            ChatSession.tenant_id == tenant_id
+        ).first()
+        
+        if not chat_session:
+            chat_session = ChatSession(
+                user_identifier=user_id,
+                tenant_id=tenant_id,
+                session_id=f"session_{user_id}_{int(time.time())}"
+            )
+            db.add(chat_session)
+            db.flush()
+        
+        for is_user, content in [(True, user_message), (False, bot_response)]:
+            if content and content.strip():
+                chat_msg = ChatMessage(
+                    session_id=chat_session.id,
+                    content=content,
+                    is_from_user=is_user
+                )
+                db.add(chat_msg)
+        
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to auto-save conversation: {e}")
+        db.rollback()
 
 
 
@@ -3771,6 +4135,60 @@ async def submit_escalation_response(
 
 
 
+# @router.get("/widget.js")
+# async def serve_embed_script(
+#     request: Request,
+#     api_key: str = Query(...),
+#     db: Session = Depends(get_db)
+# ):
+#     tenant = get_tenant_from_api_key(api_key, db)
+    
+#     # Force HTTPS for production
+#     base_url = str(request.base_url).rstrip('/')
+#     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
+#         base_url = base_url.replace('http://', 'https://')
+    
+#     script_content = f"""
+# (function() {{
+#     if (window.LyraChatbotLoaded) return;
+#     window.LyraChatbotLoaded = true;
+    
+#     const config = {{
+#         apiKey: '{api_key}',
+#         tenantId: '{tenant.id}',
+#         baseUrl: '{base_url}',
+#         userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+#     }};
+    
+#     const container = document.createElement('div');
+#     container.id = 'lyra-chatbot-widget';
+#     document.body.appendChild(container);
+    
+#     const script = document.createElement('script');
+#     script.src = config.baseUrl + '/static/chatbot-bundle.js';
+#     script.onload = () => {{
+#         setTimeout(() => {{
+#             if (window.LyraChatbot && window.LyraChatbot.init) {{
+#                 window.LyraChatbot.init(config);
+#             }} else {{
+#                 console.error('LyraChatbot still not found after delay');
+#             }}
+#         }}, 100);
+#     }};
+#     script.onerror = () => console.error('Failed to load chatbot bundle');
+#     document.head.appendChild(script);
+# }})();
+# """
+    
+#     return Response(
+#         content=script_content,
+#         media_type="application/javascript",
+#         headers={"Access-Control-Allow-Origin": "*"}
+#     )
+
+
+
+
 @router.get("/widget.js")
 async def serve_embed_script(
     request: Request,
@@ -3789,11 +4207,22 @@ async def serve_embed_script(
     if (window.LyraChatbotLoaded) return;
     window.LyraChatbotLoaded = true;
     
+    // Enhanced user ID management with persistence
+    const getUserId = () => {{
+        let storedUserId = localStorage.getItem('lyra_chatbot_user_id_{tenant.id}');
+        if (!storedUserId) {{
+            storedUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('lyra_chatbot_user_id_{tenant.id}', storedUserId);
+        }}
+        return storedUserId;
+    }};
+    
     const config = {{
         apiKey: '{api_key}',
         tenantId: '{tenant.id}',
         baseUrl: '{base_url}',
-        userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+        userId: getUserId(),
+        enableServerStorage: true  // Enable server-side message storage
     }};
     
     const container = document.createElement('div');
@@ -3821,7 +4250,6 @@ async def serve_embed_script(
         media_type="application/javascript",
         headers={"Access-Control-Allow-Origin": "*"}
     )
-
 
 
 
@@ -3854,3 +4282,72 @@ async def get_widget_config(
             "greeting_message": "Hello! How can I help you today?"
         }
     }
+
+
+
+
+@router.get("/messages/{user_id}")
+async def get_chat_history(
+    user_id: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    chat_session = db.query(ChatSession).filter(
+        ChatSession.user_identifier == user_id,
+        ChatSession.tenant_id == tenant.id
+    ).first()
+    
+    if not chat_session:
+        return {"messages": [{"role": "assistant", "content": "Hello! How can I help you today?"}]}
+    
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == chat_session.id
+    ).order_by(ChatMessage.created_at).all()
+    
+    return {
+        "messages": [
+            {"role": "user" if msg.is_from_user else "assistant", "content": msg.content} 
+            for msg in messages
+        ]
+    }
+
+@router.post("/messages/{user_id}")
+async def save_chat_history(
+    user_id: str,
+    request: dict,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    tenant = get_tenant_from_api_key(api_key, db)
+    messages = request.get("messages", [])
+    
+    chat_session = db.query(ChatSession).filter(
+        ChatSession.user_identifier == user_id,
+        ChatSession.tenant_id == tenant.id
+    ).first()
+    
+    if not chat_session:
+        chat_session = ChatSession(
+            user_identifier=user_id,
+            tenant_id=tenant.id,
+            session_id=f"session_{user_id}_{int(time.time())}"
+        )
+        db.add(chat_session)
+        db.flush()
+    
+    # Clear and save new messages
+    db.query(ChatMessage).filter(ChatMessage.session_id == chat_session.id).delete()
+    
+    for msg in messages:
+        if msg.get("content"):
+            chat_msg = ChatMessage(
+                session_id=chat_session.id,
+                content=msg["content"],
+                is_from_user=(msg["role"] == "user")
+            )
+            db.add(chat_msg)
+    
+    db.commit()
+    return {"status": "saved"}

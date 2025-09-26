@@ -731,24 +731,64 @@
 
         await loadBranding();
         updateBrandingCSS();
+        await loadMessages();
 
 
-        const loadMessages = () => {
+        const loadMessages = async () => {
+          if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
+            // Fallback to localStorage
+            try {
+              const stored = localStorage.getItem(`chatbot_messages_${userId}`);
+              if (stored) {
+                messages = JSON.parse(stored);
+              }
+            } catch (error) {
+              console.warn('Failed to load local messages:', error);
+            }
+            return;
+          }
+        
+          // Load from server
           try {
-            const stored = localStorage.getItem(`chatbot_messages_${userId}`);
-            if (stored) {
-              messages = JSON.parse(stored);
+            const response = await fetch(`${config.baseUrl}/chatbot/messages/${userId}`, {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              }
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              messages = data.messages || [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
             }
           } catch (error) {
-            console.warn('Failed to load messages:', error);
+            console.warn('Failed to load server messages:', error);
           }
         };
-
-        const saveMessages = () => {
+        
+        const saveMessages = async () => {
+          if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
+            // Fallback to localStorage
+            try {
+              localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
+            } catch (error) {
+              console.warn('Failed to save local messages:', error);
+            }
+            return;
+          }
+        
+          // Save to server
           try {
-            localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
+            await fetch(`${config.baseUrl}/chatbot/messages/${userId}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              },
+              body: JSON.stringify({ messages })
+            });
           } catch (error) {
-            console.warn('Failed to save messages:', error);
+            console.warn('Failed to save server messages:', error);
           }
         };
 
@@ -863,17 +903,23 @@
 
                   switch (data.type) {
                     case 'main_response':
-                      messages.push({ role: 'assistant', content: '' });
+                      let formattedContent = data.content;
+                      if (typeof formattedContent === 'string') {
+                        formattedContent = formattedContent
+                          .split('\n')
+                          .map((line) => line.trim())
+                          .filter((line) => line.length > 0)
+                          .join('\n');
+                      }
+
+                      const lastMessage = messages[messages.length - 1];
+                      if (lastMessage?.role === 'assistant' && lastMessage.content === '') {
+                        messages[messages.length - 1] = { ...lastMessage, content: formattedContent };
+                      } else {
+                        messages.push({ role: 'assistant', content: formattedContent });
+                        saveMessages();
+                      }
                       render();
-                      
-                      // Typewriter effect
-                      let i = 0;
-                      const interval = setInterval(() => {
-                        messages[messages.length - 1].content = data.content.slice(0, i);
-                        render();
-                        i++;
-                        if (i > data.content.length) clearInterval(interval);
-                      }, 20);
                       break;
 
                     case 'complete':
