@@ -144,52 +144,47 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px;
-      background: var(--chatbot-secondary);
-      background: linear-gradient(135deg, var(--chatbot-secondary), color-mix(in srgb, var(--chatbot-secondary) 80%, #000));
-      color: white;
+      padding: 12px 16px;
+      background: white;
+      color: #1f2937;
       position: relative;
-      overflow: hidden;
-    }
-
-    .chatbot-header::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
-      animation: shimmer 3s ease-in-out infinite;
-    }
-
-    @keyframes shimmer {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
+      border-bottom: 1px solid #e5e7eb;
     }
 
     .chatbot-header-left {
       display: flex;
       align-items: center;
+      gap: 12px;
       z-index: 1;
+    }
+
+    .chatbot-back-btn {
+      background: transparent;
+      border: none;
+      color: #1f2937;
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .chatbot-back-btn:hover {
+      transform: translateX(-2px);
     }
 
     .chatbot-logo-container {
       position: relative;
-      margin-right: 12px;
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
     .chatbot-title {
-      font-size: 1.125rem;
+      font-size: 1rem;
       font-weight: 600;
-      color: white;
+      color: #1f2937;
       margin: 0;
     }
 
@@ -199,13 +194,11 @@
       align-items: center;
     }
 
-    .chatbot-close-btn,
-    .chatbot-expand-btn {
-      background: rgba(255, 255, 255, 0.2);
-      padding: 8px;
-      border-radius: 8px;
+    .chatbot-close-btn {
+      background: transparent;
+      padding: 4px;
       border: none;
-      color: white;
+      color: #1f2937;
       cursor: pointer;
       transition: all 0.2s ease;
       z-index: 1;
@@ -214,23 +207,8 @@
       justify-content: center;
     }
 
-    .chatbot-close-btn:hover,
-    .chatbot-expand-btn:hover {
-      background: rgba(255, 255, 255, 0.3);
-    }
-
     .chatbot-close-btn:hover {
       transform: rotate(90deg);
-    }
-
-    .chatbot-expand-btn:hover {
-      transform: scale(1.1);
-    }
-
-    .chatbot-widget-expanded {
-      height: 90vh !important;
-      max-width: 600px;
-      transition: all 0.3s ease-in-out;
     }
 
     .chatbot-body {
@@ -250,7 +228,7 @@
       align-items: center;
       padding: 40px 24px;
       text-align: center;
-      background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
+      background: linear-gradient(to bottom, var(--chatbot-secondary) 0%, var(--chatbot-secondary) 40%, #ffffff 40%, #ffffff 100%);
       height: 100%;
       overflow-y: auto;
     }
@@ -258,29 +236,16 @@
     .chatbot-welcome-logo {
       width: 80px;
       height: 80px;
-      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 24px;
-      position: relative;
-      background: linear-gradient(135deg, var(--chatbot-secondary), color-mix(in srgb, var(--chatbot-secondary) 80%, #000));
-    }
-
-    .chatbot-welcome-logo::after {
-      content: '';
-      position: absolute;
-      inset: -20px;
-      background: radial-gradient(circle, var(--chatbot-secondary) 0%, transparent 70%);
-      opacity: 0.15;
-      animation: glow-pulse 3s ease-in-out infinite;
-      border-radius: 50%;
     }
 
     .chatbot-welcome-heading {
       font-size: 24px;
       font-weight: 700;
-      color: #1f2937;
+      color: #ffffff;
       margin-bottom: 8px;
       line-height: 1.3;
     }
@@ -288,7 +253,7 @@
     .chatbot-welcome-subheading {
       font-size: 24px;
       font-weight: 700;
-      color: #1f2937;
+      color: #ffffff;
       margin-bottom: 24px;
       line-height: 1.3;
     }
@@ -413,96 +378,6 @@
       color: #9ca3af;
     }
 
-    .chatbot-bottom-nav {
-      display: flex;
-      border-top: 1px solid #dee2e6;
-      background: white;
-      padding: 8px 0;
-    }
-
-    .chatbot-nav-tab {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      padding: 8px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: #6b7280;
-      transition: all 0.2s ease;
-    }
-
-    .chatbot-nav-tab:hover {
-      background: #f9fafb;
-    }
-
-    .chatbot-nav-tab.active {
-      color: var(--chatbot-secondary);
-    }
-
-    .chatbot-nav-tab svg {
-      width: 24px;
-      height: 24px;
-    }
-
-    .chatbot-nav-label {
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    .chatbot-messages-list {
-      padding: 16px;
-    }
-
-    .chatbot-conversation-item {
-      padding: 16px;
-      border-bottom: 1px solid #e5e7eb;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .chatbot-conversation-item:hover {
-      background: #f9fafb;
-    }
-
-    .chatbot-conversation-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: var(--chatbot-secondary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-
-    .chatbot-conversation-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .chatbot-conversation-preview {
-      font-size: 14px;
-      color: #1f2937;
-      font-weight: 500;
-      margin-bottom: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .chatbot-conversation-time {
-      font-size: 12px;
-      color: #6b7280;
-    }
-
     .chatbot-body::before {
       content: '';
       position: absolute;
@@ -540,31 +415,11 @@
     .chatbot-brand-logo-wrapper {
       position: relative;
       margin-bottom: 12px;
-      background-color: var(--chatbot-secondary);
-      border-radius: 50%;
       width: 80px;
       height: 80px;
       display: flex;
       align-items: center;
       justify-content: center;
-    }
-
-    .chatbot-brand-glow {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 80px;
-      height: 80px;
-      background: radial-gradient(circle, var(--chatbot-secondary) 0%, transparent 70%);
-      opacity: 0.2;
-      border-radius: 50%;
-      animation: glow-pulse 3s ease-in-out infinite;
-    }
-
-    @keyframes glow-pulse {
-      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.2; }
-      50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.1; }
     }
 
     .chatbot-brand-name {
@@ -930,9 +785,6 @@
         height: calc(100dvh - 140px);
         overflow-y: auto;
       }
-      .chatbot-expand-btn {
-        display: none;
-      }
       .chatbot-body {
         -webkit-overflow-scrolling: touch;
       }
@@ -960,7 +812,7 @@
 
   window.LyraChatbot = {
     init: async function(config) {
-      console.log('🚀 NEW CHATBOT VERSION - 420px x 75vh WITH WELCOME SCREEN');
+      console.log('🚀 MODIFIED CHATBOT VERSION - Clean Welcome + White Header');
       try {
         const container = document.getElementById('lyra-chatbot-widget');
         if (!container) {
@@ -969,13 +821,10 @@
         }
 
         let isOpen = false;
-        let isExpanded = false;
         let isTyping = false;
         let messages = [];
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
-        let activeTab = 'home';
-        let conversations = [];
         let showWelcome = true;
         
         let videoPlayer = {
@@ -1016,10 +865,6 @@
                   showWelcome = false;
                 }
               }
-              const storedConvs = localStorage.getItem(`chatbot_conversations_${userId}`);
-              if (storedConvs) {
-                conversations = JSON.parse(storedConvs);
-              }
             } catch (error) {
               console.warn('Failed to load local messages:', error);
             }
@@ -1050,7 +895,6 @@
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
             try {
               localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
-              localStorage.setItem(`chatbot_conversations_${userId}`, JSON.stringify(conversations));
             } catch (error) {
               console.warn('Failed to save local messages:', error);
             }
@@ -1068,35 +912,6 @@
             });
           } catch (error) {
             console.warn('Failed to save server messages:', error);
-          }
-        };
-
-        const saveConversation = () => {
-          if (messages.length > 0) {
-            const preview = messages.find(m => m.role === 'user')?.content || 'New conversation';
-            const existingIndex = conversations.findIndex(c => c.id === userId);
-            
-            if (existingIndex >= 0) {
-              conversations[existingIndex] = {
-                id: userId,
-                preview: preview.substring(0, 50),
-                timestamp: new Date().toISOString(),
-                messages: [...messages]
-              };
-            } else {
-              conversations.unshift({
-                id: userId,
-                preview: preview.substring(0, 50),
-                timestamp: new Date().toISOString(),
-                messages: [...messages]
-              });
-            }
-            
-            try {
-              localStorage.setItem(`chatbot_conversations_${userId}`, JSON.stringify(conversations));
-            } catch (error) {
-              console.warn('Failed to save conversation:', error);
-            }
           }
         };
 
@@ -1204,11 +1019,7 @@
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
         };
 
-        const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
-          if (useWidgetIcon) {
-            return createTextLogo(size);
-          }
-          
+        const createCompanyLogo = (size = 32) => {
           const logoImage = tenantInfo.branding?.logo_image;
           if (logoImage) {
             const img = document.createElement('img');
@@ -1331,7 +1142,6 @@
           const newMessage = { role: 'user', content: inputValue.trim() };
           messages.push(newMessage);
           saveMessages();
-          saveConversation();
           inputValue = '';
           isTyping = true;
           showWelcome = false;
@@ -1463,7 +1273,7 @@
           openButton.className = `chatbot-open-btn ${getPositionClass()}`;
           openButton.style.display = isOpen ? 'none' : 'flex';
 
-          openButton.appendChild(createCompanyLogo(24, true));
+          openButton.appendChild(createCompanyLogo(24));
           
           const ring1 = document.createElement('div');
           ring1.className = 'chatbot-pulse-ring';
@@ -1488,41 +1298,37 @@
           const headerLeft = document.createElement('div');
           headerLeft.className = 'chatbot-header-left';
 
+          const backBtn = document.createElement('button');
+          backBtn.className = 'chatbot-back-btn';
+          backBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>`;
+          backBtn.addEventListener('click', () => {
+            showWelcome = true;
+            render();
+          });
+
           const logoContainer = document.createElement('div');
           logoContainer.className = 'chatbot-logo-container';
           logoContainer.appendChild(createCompanyLogo(32));
 
-          const headerInfo = document.createElement('div');
-          headerInfo.className = 'chatbot-header-info';
-          
           const title = document.createElement('span');
           title.className = 'chatbot-title';
           title.textContent = capitalizeWords(tenantInfo.business_name);
 
-          headerInfo.appendChild(title);
+          headerLeft.appendChild(backBtn);
           headerLeft.appendChild(logoContainer);
-          headerLeft.appendChild(headerInfo);
+          headerLeft.appendChild(title);
 
           const headerActions = document.createElement('div');
           headerActions.className = 'chatbot-header-actions';
 
-          const expandBtn = document.createElement('button');
-          expandBtn.className = 'chatbot-expand-btn';
-          expandBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M14 10l6.1-6.1M9 21H3v-6M10 14l-6.1 6.1"/></svg>`;
-          expandBtn.addEventListener('click', () => {
-            isExpanded = !isExpanded;
-            render();
-          });
-
           const closeBtn = document.createElement('button');
           closeBtn.className = 'chatbot-close-btn';
-          closeBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
           closeBtn.addEventListener('click', () => {
             isOpen = false;
             render();
           });
 
-          headerActions.appendChild(expandBtn);
           headerActions.appendChild(closeBtn);
           header.appendChild(headerLeft);
           header.appendChild(headerActions);
@@ -1536,7 +1342,7 @@
 
           const logo = document.createElement('div');
           logo.className = 'chatbot-welcome-logo';
-          logo.appendChild(createCompanyLogo(48));
+          logo.appendChild(createCompanyLogo(80));
 
           const heading = document.createElement('div');
           heading.className = 'chatbot-welcome-heading';
@@ -1644,11 +1450,7 @@
 
           const brandLogoWrapper = document.createElement('div');
           brandLogoWrapper.className = 'chatbot-brand-logo-wrapper';
-          brandLogoWrapper.appendChild(createCompanyLogo(56));
-
-          const brandGlow = document.createElement('div');
-          brandGlow.className = 'chatbot-brand-glow';
-          brandLogoWrapper.appendChild(brandGlow);
+          brandLogoWrapper.appendChild(createCompanyLogo(80));
 
           const brandName = document.createElement('div');
           brandName.className = 'chatbot-brand-name';
@@ -1725,7 +1527,6 @@
         const createInputArea = () => {
           const inputArea = document.createElement('div');
           inputArea.className = 'chatbot-input-area';
-          inputArea.style.display = activeTab === 'home' && !showWelcome ? 'block' : 'none';
 
           const inputWrapper = document.createElement('div');
           inputWrapper.className = 'chatbot-input-wrapper';
@@ -1767,128 +1568,29 @@
           return inputArea;
         };
 
-        const createBottomNav = () => {
-          const nav = document.createElement('div');
-          nav.className = 'chatbot-bottom-nav';
-
-          const homeTab = document.createElement('button');
-          homeTab.className = `chatbot-nav-tab ${activeTab === 'home' ? 'active' : ''}`;
-          homeTab.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-              <polyline points="9 22 9 12 15 12 15 22"></polyline>
-            </svg>
-            <span class="chatbot-nav-label">Home</span>
-          `;
-          homeTab.addEventListener('click', () => {
-            activeTab = 'home';
-            showWelcome = true;
-            render();
-          });
-
-          const messagesTab = document.createElement('button');
-          messagesTab.className = `chatbot-nav-tab ${activeTab === 'messages' ? 'active' : ''}`;
-          messagesTab.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-            </svg>
-            <span class="chatbot-nav-label">Messages</span>
-          `;
-          messagesTab.addEventListener('click', () => {
-            activeTab = 'messages';
-            render();
-          });
-
-          nav.appendChild(homeTab);
-          nav.appendChild(messagesTab);
-          
-          return nav;
-        };
-
-        const createMessagesList = () => {
-          const listContainer = document.createElement('div');
-          listContainer.className = 'chatbot-messages-list';
-
-          if (conversations.length === 0) {
-            const emptyState = document.createElement('div');
-            emptyState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
-            emptyState.innerHTML = '<p>No past conversations yet.</p>';
-            listContainer.appendChild(emptyState);
-            return listContainer;
-          }
-
-          conversations.forEach((conv) => {
-            const item = document.createElement('div');
-            item.className = 'chatbot-conversation-item';
-            
-            const avatar = document.createElement('div');
-            avatar.className = 'chatbot-conversation-avatar';
-            avatar.textContent = conv.preview.charAt(0).toUpperCase();
-
-            const content = document.createElement('div');
-            content.className = 'chatbot-conversation-content';
-            
-            const preview = document.createElement('div');
-            preview.className = 'chatbot-conversation-preview';
-            preview.textContent = conv.preview;
-            
-            const time = document.createElement('div');
-            time.className = 'chatbot-conversation-time';
-            const date = new Date(conv.timestamp);
-            time.textContent = date.toLocaleString('en-US', { 
-              month: 'short', 
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-
-            content.appendChild(preview);
-            content.appendChild(time);
-            item.appendChild(avatar);
-            item.appendChild(content);
-
-            item.addEventListener('click', () => {
-              messages = [...conv.messages];
-              activeTab = 'home';
-              showWelcome = false;
-              render();
-            });
-
-            listContainer.appendChild(item);
-          });
-
-          return listContainer;
-        };
-
         const createWidget = () => {
           const widget = document.createElement('div');
-          widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''} ${isExpanded ? 'chatbot-widget-expanded' : ''}`;
+          widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''}`;
           widget.style.display = isOpen ? 'flex' : 'none';
 
-          const header = createHeader();
           const body = document.createElement('div');
           body.className = 'chatbot-body';
           
-          if (activeTab === 'home') {
-            if (showWelcome) {
-              const welcomeView = createWelcomeView();
-              body.appendChild(welcomeView);
-            } else {
-              const messagesView = createMessages();
-              body.appendChild(messagesView);
-            }
+          if (showWelcome) {
+            const welcomeView = createWelcomeView();
+            body.appendChild(welcomeView);
           } else {
-            const messagesList = createMessagesList();
-            body.appendChild(messagesList);
+            const header = createHeader();
+            widget.appendChild(header);
+            
+            const messagesView = createMessages();
+            body.appendChild(messagesView);
+            
+            const inputArea = createInputArea();
+            widget.appendChild(inputArea);
           }
           
-          const inputArea = createInputArea();
-          const bottomNav = createBottomNav();
-
-          widget.appendChild(header);
           widget.appendChild(body);
-          widget.appendChild(inputArea);
-          widget.appendChild(bottomNav);
 
           return widget;
         };
@@ -1913,7 +1615,7 @@
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
               const chatBody = container.querySelector('.chatbot-body');
-              if (input && activeTab === 'home' && !showWelcome) input.focus();
+              if (input && !showWelcome) input.focus();
               if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
             }, 100);
           }
