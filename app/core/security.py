@@ -13,7 +13,7 @@ except ImportError:
     JWT_AVAILABLE = False
     print("Warning: python-jose not installed. JWT functionality will be limited.")
 
-# Try to get settings
+
 try:
     from app.config import settings
     SECRET_KEY = getattr(settings, 'SECRET_KEY', 'your-secret-key-change-in-production')
