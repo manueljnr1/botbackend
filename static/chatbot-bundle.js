@@ -228,8 +228,8 @@
     }
 
     .chatbot-widget-expanded {
-      height: 85vh !important;
-      max-width: 420px;
+      height: 90vh !important;
+      max-width: 600px;
       transition: all 0.3s ease-in-out;
     }
 
@@ -1071,7 +1071,7 @@
         };
 
         const saveConversation = () => {
-          if (messages.length > 1) {
+          if (messages.length > 0) {
             const preview = messages.find(m => m.role === 'user')?.content || 'New conversation';
             const existingIndex = conversations.findIndex(c => c.id === userId);
             
@@ -1872,8 +1872,8 @@
               const welcomeView = createWelcomeView();
               body.appendChild(welcomeView);
             } else {
-              const messages = createMessages();
-              body.appendChild(messages);
+              const messagesView = createMessages();
+              body.appendChild(messagesView);
             }
           } else {
             const messagesList = createMessagesList();
