@@ -1867,12 +1867,14 @@
 
         const createWidget = () => {
           const widget = document.createElement('div');
-          widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''} ${isExpanded ? 'chatbot-widget-expanded' : ''}`;
+          widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''}`;
           widget.style.display = isOpen ? 'flex' : 'none';
-
-          const header = createHeader();
+        
           const body = document.createElement('div');
           body.className = 'chatbot-body';
+          if (showWelcome) {
+            body.style.padding = '0';
+          }
           
           if (activeTab === 'home') {
             if (showWelcome) {
