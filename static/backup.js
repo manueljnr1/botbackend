@@ -774,6 +774,8 @@
     .chatbot-welcome-view .chatbot-quick-links {
       max-width: 100%;
       width: 100%;
+      margin-left: 0;
+      margin-right: 0;
     }
 
     .chatbot-send-btn:disabled {
@@ -1919,7 +1921,7 @@
           const inputArea = createInputArea();
           const bottomNav = createBottomNav();
 
-          widget.appendChild(header);
+          
           widget.appendChild(body);
           widget.appendChild(inputArea);
           widget.appendChild(bottomNav);
