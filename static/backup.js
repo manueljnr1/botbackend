@@ -243,6 +243,9 @@
       background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
       position: relative;
     }
+    .chatbot-body:has(.chatbot-welcome-view) {
+      padding: 0;
+    }
 
     .chatbot-welcome-view {
       display: flex;
