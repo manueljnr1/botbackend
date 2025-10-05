@@ -667,6 +667,60 @@
           }
         };
 
+        const loadMessages = async () => {
+          if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
+            try {
+              const stored = localStorage.getItem(`chatbot_messages_${userId}`);
+              if (stored) {
+                messages = JSON.parse(stored);
+              }
+            } catch (error) {
+              console.warn('Failed to load local messages:', error);
+            }
+            return;
+          }
+        
+          try {
+            const response = await fetch(`${config.baseUrl}/chatbot/messages/${userId}`, {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              }
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              messages = data.messages || [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
+            }
+          } catch (error) {
+            console.warn('Failed to load server messages:', error);
+          }
+        };
+        
+        const saveMessages = async () => {
+          if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
+            try {
+              localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
+            } catch (error) {
+              console.warn('Failed to save local messages:', error);
+            }
+            return;
+          }
+        
+          try {
+            await fetch(`${config.baseUrl}/chatbot/messages/${userId}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              },
+              body: JSON.stringify({ messages })
+            });
+          } catch (error) {
+            console.warn('Failed to save server messages:', error);
+          }
+        };
+
         const formatBotMessage = (content) => {
           let formatted = content.trim()
             .replace(/^[•·]\s*(.*$)/gm, (_, text) => `<li>${text.trim()}</li>`)
@@ -731,27 +785,7 @@
 
         await loadBranding();
         updateBrandingCSS();
-
-
-        const loadMessages = () => {
-          try {
-            const stored = localStorage.getItem(`chatbot_messages_${userId}`);
-            if (stored) {
-              messages = JSON.parse(stored);
-            }
-          } catch (error) {
-            console.warn('Failed to load messages:', error);
-          }
-        };
-
-        const saveMessages = () => {
-          try {
-            localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
-          } catch (error) {
-            console.warn('Failed to save messages:', error);
-          }
-        };
-
+        await loadMessages();
 
         const capitalizeWords = (str) => {
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
