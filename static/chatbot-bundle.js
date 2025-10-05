@@ -1,5 +1,4 @@
 (function() {
-  // Inject CSS styles
   const style = document.createElement('style');
   style.textContent = `
     :root {
@@ -11,7 +10,6 @@
       --chatbot-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
     }
 
-    /* Enhanced floating particles background */
     .chatbot-particles {
       position: fixed;
       inset: 0;
@@ -39,7 +37,6 @@
       50% { transform: translateY(-20px); opacity: 0.8; }
     }
 
-    /* Enhanced Floating Action Button */
     .chatbot-open-btn {
       position: fixed;
       width: 56px;
@@ -68,7 +65,6 @@
       transform: scale(0.95);
     }
 
-    /* Pulse rings */
     .chatbot-pulse-ring,
     .chatbot-pulse-ring-2 {
       position: absolute;
@@ -82,19 +78,10 @@
     }
 
     @keyframes pulse-ring {
-      0% {
-        width: 56px;
-        height: 56px;
-        opacity: 1;
-      }
-      100% {
-        width: 80px;
-        height: 80px;
-        opacity: 0;
-      }
+      0% { width: 56px; height: 56px; opacity: 1; }
+      100% { width: 80px; height: 80px; opacity: 0; }
     }
 
-    /* Enhanced Widget Container */
     .chatbot-widget {
       position: fixed;
       z-index: 10000;
@@ -124,7 +111,6 @@
       opacity: 1;
     }
 
-    /* Position Classes */
     .chatbot-bottom-right { bottom: 24px; right: 24px; }
     .chatbot-bottom-left { bottom: 24px; left: 24px; }
     .chatbot-top-right { top: 24px; right: 24px; }
@@ -154,7 +140,6 @@
       transform: translateY(-50%);
     }
 
-    /* Enhanced Header */
     .chatbot-header {
       display: flex;
       align-items: center;
@@ -248,7 +233,6 @@
       transition: all 0.3s ease-in-out;
     }
 
-    /* Enhanced Chat Body */
     .chatbot-body {
       flex: 1;
       overflow-y: auto;
@@ -260,7 +244,6 @@
       position: relative;
     }
 
-    /* Bottom Navigation */
     .chatbot-bottom-nav {
       display: flex;
       border-top: 1px solid #dee2e6;
@@ -300,7 +283,6 @@
       font-weight: 500;
     }
 
-    /* Messages List */
     .chatbot-messages-list {
       padding: 16px;
     }
@@ -377,7 +359,6 @@
       border-radius: 3px;
     }
 
-    /* Enhanced Brand Section */
     .chatbot-brand-section {
       display: flex;
       flex-direction: column;
@@ -413,14 +394,8 @@
     }
 
     @keyframes glow-pulse {
-      0%, 100% {
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.2;
-      }
-      50% {
-        transform: translate(-50%, -50%) scale(1.2);
-        opacity: 0.1;
-      }
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.2; }
+      50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.1; }
     }
 
     .chatbot-brand-name {
@@ -442,7 +417,6 @@
       opacity: 0.8;
     }
 
-    /* Enhanced Messages */
     .chatbot-message {
       display: flex;
       gap: 12px;
@@ -457,10 +431,7 @@
     }
 
     @keyframes slideInMessage {
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .chatbot-message.user {
@@ -540,7 +511,6 @@
       100% { background-position: 200% 0; }
     }
 
-    /* Enhanced Input Area */
     .chatbot-input-area {
       border-top: 1px solid #dee2e6;
       padding: 16px;
@@ -620,16 +590,9 @@
       transform: translateX(2px);
     }
 
-    /* Enhanced Typing Animation */
     @keyframes pulse-dot {
-      0%, 80%, 100% {
-        opacity: 0.3;
-        transform: scale(1);
-      }
-      40% {
-        opacity: 1;
-        transform: scale(1.4);
-      }
+      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+      40% { opacity: 1; transform: scale(1.4); }
     }
 
     .chatbot-typing {
@@ -656,7 +619,101 @@
       animation-delay: 0.4s;
     }
 
-    /* Mobile Responsive */
+    .chatbot-video-player {
+      position: fixed;
+      width: 400px;
+      height: 225px;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      z-index: 10001;
+      transition: all 0.3s ease;
+      display: none;
+    }
+
+    .chatbot-video-player.active {
+      display: block;
+    }
+
+    .chatbot-video-player.expanded {
+      width: 800px;
+      height: 450px;
+    }
+
+    .chatbot-video-player.minimized {
+      width: 300px;
+      height: 60px;
+    }
+
+    .chatbot-video-player-header {
+      background: rgba(0, 0, 0, 0.9);
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: move;
+    }
+
+    .chatbot-video-player-title {
+      color: white;
+      font-size: 13px;
+      font-weight: 500;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chatbot-video-player-controls {
+      display: flex;
+      gap: 4px;
+    }
+
+    .chatbot-video-player-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    .chatbot-video-player-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .chatbot-video-player-content {
+      width: 100%;
+      height: calc(100% - 40px);
+      background: #000;
+    }
+
+    .chatbot-video-player.minimized .chatbot-video-player-content {
+      display: none;
+    }
+
+    .chatbot-video-player iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .chatbot-message a {
+      color: var(--chatbot-secondary);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .chatbot-message a:hover {
+      text-decoration: none;
+    }
+
     @media (max-width: 768px) {
       .chatbot-widget {
         width: 70vw;
@@ -676,6 +733,13 @@
       }
       .chatbot-input {
         font-size: 16px;
+      }
+      .chatbot-video-player {
+        width: 90vw !important;
+        height: calc(90vw * 0.5625) !important;
+        left: 5vw !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
       }
     }
 
@@ -743,6 +807,15 @@
         let activeTab = 'home';
         let conversations = [];
         
+        let videoPlayer = {
+          active: false,
+          minimized: false,
+          expanded: false,
+          url: '',
+          x: window.innerWidth - 450,
+          y: 100
+        };
+
         let tenantInfo = {
           business_name: config.businessName || 'Your Support Bot',
           chatbot_widget_icon: config.widgetIcon || '',
@@ -849,6 +922,40 @@
           }
         };
 
+        const extractVideoId = (url) => {
+          let match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s]+)/);
+          if (match) return { type: 'youtube', id: match[1] };
+          
+          match = url.match(/vimeo\.com\/(\d+)/);
+          if (match) return { type: 'vimeo', id: match[1] };
+          
+          return null;
+        };
+
+        const openVideoPlayer = (url) => {
+          const video = extractVideoId(url);
+          if (!video) return;
+
+          videoPlayer.active = true;
+          videoPlayer.minimized = false;
+          videoPlayer.url = video.type === 'youtube' 
+            ? `https://www.youtube.com/embed/${video.id}?autoplay=1`
+            : `https://player.vimeo.com/video/${video.id}?autoplay=1`;
+          
+          render();
+        };
+
+        const linkifyMessage = (content) => {
+          const urlRegex = /(https?:\/\/[^\s]+)/g;
+          return content.replace(urlRegex, (url) => {
+            const video = extractVideoId(url);
+            if (video) {
+              return `<a href="#" data-video-url="${url}">${url}</a>`;
+            }
+            return `<a href="${url}" target="_blank">${url}</a>`;
+          });
+        };
+
         const formatBotMessage = (content) => {
           let formatted = content.trim()
             .replace(/^[•·]\s*(.*$)/gm, (_, text) => `<li>${text.trim()}</li>`)
@@ -937,10 +1044,7 @@
 
         const createTextLogo = (size) => {
           const container = document.createElement('div');
-          container.style.cssText = `
-            width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            
-          `;
+          container.style.cssText = `width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;`;
           
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           const svgSize = Math.max(24, size * 0.9);
@@ -955,6 +1059,92 @@
           svg.appendChild(path);
           container.appendChild(svg);
           return container;
+        };
+
+        const createVideoPlayer = () => {
+          if (!videoPlayer.active) return null;
+
+          const player = document.createElement('div');
+          player.className = `chatbot-video-player active ${videoPlayer.expanded ? 'expanded' : ''} ${videoPlayer.minimized ? 'minimized' : ''}`;
+          player.style.left = videoPlayer.x + 'px';
+          player.style.top = videoPlayer.y + 'px';
+
+          const header = document.createElement('div');
+          header.className = 'chatbot-video-player-header';
+
+          const title = document.createElement('div');
+          title.className = 'chatbot-video-player-title';
+          title.textContent = 'Video Player';
+
+          const controls = document.createElement('div');
+          controls.className = 'chatbot-video-player-controls';
+
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'chatbot-video-player-btn';
+          minimizeBtn.innerHTML = videoPlayer.minimized ? '▢' : '—';
+          minimizeBtn.addEventListener('click', () => {
+            videoPlayer.minimized = !videoPlayer.minimized;
+            render();
+          });
+
+          const expandBtn = document.createElement('button');
+          expandBtn.className = 'chatbot-video-player-btn';
+          expandBtn.innerHTML = videoPlayer.expanded ? '◱' : '⛶';
+          expandBtn.addEventListener('click', () => {
+            videoPlayer.expanded = !videoPlayer.expanded;
+            render();
+          });
+
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-video-player-btn';
+          closeBtn.innerHTML = '✕';
+          closeBtn.addEventListener('click', () => {
+            videoPlayer.active = false;
+            render();
+          });
+
+          controls.appendChild(minimizeBtn);
+          controls.appendChild(expandBtn);
+          controls.appendChild(closeBtn);
+
+          header.appendChild(title);
+          header.appendChild(controls);
+
+          const content = document.createElement('div');
+          content.className = 'chatbot-video-player-content';
+          
+          const iframe = document.createElement('iframe');
+          iframe.src = videoPlayer.url;
+          iframe.allow = 'autoplay; fullscreen';
+          iframe.allowFullscreen = true;
+          
+          content.appendChild(iframe);
+          player.appendChild(header);
+          player.appendChild(content);
+
+          let isDragging = false;
+          let offsetX, offsetY;
+
+          header.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offsetX = e.clientX - videoPlayer.x;
+            offsetY = e.clientY - videoPlayer.y;
+          });
+
+          document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+              videoPlayer.x = e.clientX - offsetX;
+              videoPlayer.y = e.clientY - offsetY;
+              player.style.left = videoPlayer.x + 'px';
+              player.style.top = videoPlayer.y + 'px';
+            }
+          });
+
+          document.addEventListener('mouseup', () => {
+            isDragging = false;
+          });
+
+          return player;
         };
 
         const sendMessage = async () => {
@@ -1202,10 +1392,17 @@
             bubble.className = `chatbot-bubble ${message.role} chatbot-bubble-enhanced`;
 
             if (message.role === 'assistant') {
-              bubble.innerHTML = formatBotMessage(message.content);
+              bubble.innerHTML = linkifyMessage(formatBotMessage(message.content));
             } else {
-              bubble.innerHTML = message.content.split('\n').map(line => line).join('<br>');
+              bubble.innerHTML = linkifyMessage(message.content.split('\n').map(line => line).join('<br>'));
             }
+
+            bubble.querySelectorAll('a[data-video-url]').forEach(link => {
+              link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openVideoPlayer(link.getAttribute('data-video-url'));
+              });
+            });
 
             const tail = document.createElement('div');
             tail.className = 'chatbot-bubble-tail';
@@ -1410,6 +1607,14 @@
             container.appendChild(createOpenButton());
           } else {
             container.appendChild(createWidget());
+            
+            const existingPlayer = document.querySelector('.chatbot-video-player');
+            if (existingPlayer) existingPlayer.remove();
+            
+            const player = createVideoPlayer();
+            if (player) {
+              document.body.appendChild(player);
+            }
             
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
