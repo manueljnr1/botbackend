@@ -243,18 +243,18 @@
       background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
       position: relative;
     }
-    .chatbot-body:has(.chatbot-welcome-view) {
-      padding: 0;
-    }
+   
 
     .chatbot-welcome-view {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 40px 24px;
+      padding: 0;
+      margin: -20px;
+      width: calc(100% + 40px);
       text-align: center;
-      background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
-      height: 100%;
+      background: linear-gradient(to bottom, var(--chatbot-secondary) 0%, var(--chatbot-secondary) 40%, #ffffff 40%, #ffffff 100%);
+      height: calc(100% + 40px);
       overflow-y: auto;
     }
 
