@@ -236,7 +236,7 @@
     .chatbot-body {
       flex: 1;
       overflow-y: auto;
-      padding: 20px;
+      padding: 0px;
       display: flex;
       flex-direction: column;
       gap: 16px;
@@ -595,7 +595,7 @@
       align-items: flex-start;
       opacity: 0;
       transform: translateY(20px);
-      margin-bottom: 16px;
+      margin: 0 20px 16px 20px;
     }
 
     .chatbot-message-animate {
