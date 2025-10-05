@@ -1782,6 +1782,7 @@
           `;
           homeTab.addEventListener('click', () => {
             activeTab = 'home';
+            showWelcome = true;
             render();
           });
 
