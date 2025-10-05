@@ -250,11 +250,11 @@
       flex-direction: column;
       align-items: center;
       padding: 0;
-      margin: -20px;
-      width: calc(100% + 40px);
+      margin: 0;
+      width: 100%;
       text-align: center;
       background: linear-gradient(to bottom, var(--chatbot-secondary) 0%, var(--chatbot-secondary) 40%, #ffffff 40%, #ffffff 100%);
-      height: calc(100% + 40px);
+      height: 100%;
       overflow-y: auto;
     }
 
