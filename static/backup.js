@@ -755,6 +755,23 @@
       transform: scale(0.95);
     }
 
+    .chatbot-welcome-view > *:first-child {
+      margin-top: 0;
+    }
+
+    .chatbot-welcome-view {
+      justify-content: flex-start;
+      padding-top: 0;
+    }
+
+
+    .chatbot-welcome-view .chatbot-status-card,
+    .chatbot-welcome-view .chatbot-action-buttons,
+    .chatbot-welcome-view .chatbot-quick-links {
+      max-width: 100%;
+      width: 100%;
+    }
+
     .chatbot-send-btn:disabled {
       background: #d1d5db;
       cursor: not-allowed;
