@@ -87,7 +87,7 @@
       z-index: 10000;
       width: 100%;
       max-width: 420px;
-      height: 600px;
+      height: 75vh;
       background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.85));
       border-radius: var(--chatbot-radius);
       box-shadow: 0 4px 60px 20px rgba(0, 0, 0, 0.1), 0 2px 20px rgba(0, 0, 0, 0.1), 
