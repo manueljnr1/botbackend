@@ -960,6 +960,7 @@
 
   window.LyraChatbot = {
     init: async function(config) {
+      console.log('🚀 NEW CHATBOT VERSION - 420px x 75vh WITH WELCOME SCREEN');
       try {
         const container = document.getElementById('lyra-chatbot-widget');
         if (!container) {
