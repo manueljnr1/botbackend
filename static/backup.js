@@ -520,6 +520,11 @@
       z-index: 1;
     }
 
+
+    .chatbot-body.welcome-view::before {
+      display: none;
+    }
+
     .chatbot-body::-webkit-scrollbar {
       width: 6px;
     }
@@ -1874,6 +1879,7 @@
           body.className = 'chatbot-body';
           if (showWelcome) {
             body.style.padding = '0';
+            body.classList.add('welcome-view');
           }
           
           if (activeTab === 'home') {
