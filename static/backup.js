@@ -521,6 +521,10 @@
     }
 
 
+    .chatbot-body.welcome-view {
+      padding: 0;
+    }
+
     .chatbot-body.welcome-view::before {
       display: none;
     }
@@ -543,7 +547,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px 0;
+      padding: 0;
       position: relative;
     }
 
