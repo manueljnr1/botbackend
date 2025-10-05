@@ -1,5 +1,4 @@
 (function() {
-  // Inject CSS styles
   const style = document.createElement('style');
   style.textContent = `
     :root {
@@ -11,7 +10,6 @@
       --chatbot-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
     }
 
-    /* Enhanced floating particles background */
     .chatbot-particles {
       position: fixed;
       inset: 0;
@@ -39,7 +37,6 @@
       50% { transform: translateY(-20px); opacity: 0.8; }
     }
 
-    /* Enhanced Floating Action Button */
     .chatbot-open-btn {
       position: fixed;
       width: 56px;
@@ -68,7 +65,6 @@
       transform: scale(0.95);
     }
 
-    /* Pulse rings */
     .chatbot-pulse-ring,
     .chatbot-pulse-ring-2 {
       position: absolute;
@@ -82,25 +78,16 @@
     }
 
     @keyframes pulse-ring {
-      0% {
-        width: 56px;
-        height: 56px;
-        opacity: 1;
-      }
-      100% {
-        width: 80px;
-        height: 80px;
-        opacity: 0;
-      }
+      0% { width: 56px; height: 56px; opacity: 1; }
+      100% { width: 80px; height: 80px; opacity: 0; }
     }
 
-    /* Enhanced Widget Container */
     .chatbot-widget {
       position: fixed;
       z-index: 10000;
       width: 100%;
-      max-width: 500px;
-      height: 70vh;
+      max-width: 420px;
+      height: 75vh;
       background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.85));
       border-radius: var(--chatbot-radius);
       box-shadow: 0 4px 60px 20px rgba(0, 0, 0, 0.1), 0 2px 20px rgba(0, 0, 0, 0.1), 
@@ -124,7 +111,6 @@
       opacity: 1;
     }
 
-    /* Position Classes */
     .chatbot-bottom-right { bottom: 24px; right: 24px; }
     .chatbot-bottom-left { bottom: 24px; left: 24px; }
     .chatbot-top-right { top: 24px; right: 24px; }
@@ -154,7 +140,6 @@
       transform: translateY(-50%);
     }
 
-    /* Enhanced Header */
     .chatbot-header {
       display: flex;
       align-items: center;
@@ -248,7 +233,6 @@
       transition: all 0.3s ease-in-out;
     }
 
-    /* Enhanced Chat Body */
     .chatbot-body {
       flex: 1;
       overflow-y: auto;
@@ -258,6 +242,265 @@
       gap: 16px;
       background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
       position: relative;
+    }
+
+    .chatbot-welcome-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 24px;
+      text-align: center;
+      background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    .chatbot-welcome-logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      position: relative;
+      background: linear-gradient(135deg, var(--chatbot-secondary), color-mix(in srgb, var(--chatbot-secondary) 80%, #000));
+    }
+
+    .chatbot-welcome-logo::after {
+      content: '';
+      position: absolute;
+      inset: -20px;
+      background: radial-gradient(circle, var(--chatbot-secondary) 0%, transparent 70%);
+      opacity: 0.15;
+      animation: glow-pulse 3s ease-in-out infinite;
+      border-radius: 50%;
+    }
+
+    .chatbot-welcome-heading {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-bottom: 8px;
+      line-height: 1.3;
+    }
+
+    .chatbot-welcome-subheading {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-bottom: 24px;
+      line-height: 1.3;
+    }
+
+    .chatbot-status-card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .chatbot-status-icon {
+      width: 40px;
+      height: 40px;
+      background: #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .chatbot-status-content {
+      flex: 1;
+      text-align: left;
+    }
+
+    .chatbot-status-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 2px;
+    }
+
+    .chatbot-status-time {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .chatbot-action-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 24px;
+    }
+
+    .chatbot-action-btn {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #1f2937;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+    }
+
+    .chatbot-action-btn:hover {
+      background: #f9fafb;
+      border-color: var(--chatbot-secondary);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .chatbot-action-btn svg {
+      width: 18px;
+      height: 18px;
+      color: var(--chatbot-secondary);
+    }
+
+    .chatbot-quick-links {
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .chatbot-quick-links-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7280;
+      margin-bottom: 12px;
+      text-align: left;
+    }
+
+    .chatbot-quick-link {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #1f2937;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+      margin-bottom: 8px;
+    }
+
+    .chatbot-quick-link:hover {
+      background: #f9fafb;
+      border-color: #d1d5db;
+    }
+
+    .chatbot-quick-link svg {
+      width: 16px;
+      height: 16px;
+      color: #9ca3af;
+    }
+
+    .chatbot-bottom-nav {
+      display: flex;
+      border-top: 1px solid #dee2e6;
+      background: white;
+      padding: 8px 0;
+    }
+
+    .chatbot-nav-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #6b7280;
+      transition: all 0.2s ease;
+    }
+
+    .chatbot-nav-tab:hover {
+      background: #f9fafb;
+    }
+
+    .chatbot-nav-tab.active {
+      color: var(--chatbot-secondary);
+    }
+
+    .chatbot-nav-tab svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .chatbot-nav-label {
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .chatbot-messages-list {
+      padding: 16px;
+    }
+
+    .chatbot-conversation-item {
+      padding: 16px;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chatbot-conversation-item:hover {
+      background: #f9fafb;
+    }
+
+    .chatbot-conversation-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--chatbot-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .chatbot-conversation-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chatbot-conversation-preview {
+      font-size: 14px;
+      color: #1f2937;
+      font-weight: 500;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chatbot-conversation-time {
+      font-size: 12px;
+      color: #6b7280;
     }
 
     .chatbot-body::before {
@@ -285,7 +528,6 @@
       border-radius: 3px;
     }
 
-    /* Enhanced Brand Section */
     .chatbot-brand-section {
       display: flex;
       flex-direction: column;
@@ -321,14 +563,8 @@
     }
 
     @keyframes glow-pulse {
-      0%, 100% {
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.2;
-      }
-      50% {
-        transform: translate(-50%, -50%) scale(1.2);
-        opacity: 0.1;
-      }
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.2; }
+      50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.1; }
     }
 
     .chatbot-brand-name {
@@ -350,7 +586,6 @@
       opacity: 0.8;
     }
 
-    /* Enhanced Messages */
     .chatbot-message {
       display: flex;
       gap: 12px;
@@ -365,10 +600,7 @@
     }
 
     @keyframes slideInMessage {
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .chatbot-message.user {
@@ -448,7 +680,6 @@
       100% { background-position: 200% 0; }
     }
 
-    /* Enhanced Input Area */
     .chatbot-input-area {
       border-top: 1px solid #dee2e6;
       padding: 16px;
@@ -528,16 +759,9 @@
       transform: translateX(2px);
     }
 
-    /* Enhanced Typing Animation */
     @keyframes pulse-dot {
-      0%, 80%, 100% {
-        opacity: 0.3;
-        transform: scale(1);
-      }
-      40% {
-        opacity: 1;
-        transform: scale(1.4);
-      }
+      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+      40% { opacity: 1; transform: scale(1.4); }
     }
 
     .chatbot-typing {
@@ -564,7 +788,101 @@
       animation-delay: 0.4s;
     }
 
-    /* Mobile Responsive */
+    .chatbot-video-player {
+      position: fixed;
+      width: 400px;
+      height: 225px;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      z-index: 10001;
+      transition: all 0.3s ease;
+      display: none;
+    }
+
+    .chatbot-video-player.active {
+      display: block;
+    }
+
+    .chatbot-video-player.expanded {
+      width: 800px;
+      height: 450px;
+    }
+
+    .chatbot-video-player.minimized {
+      width: 300px;
+      height: 60px;
+    }
+
+    .chatbot-video-player-header {
+      background: rgba(0, 0, 0, 0.9);
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: move;
+    }
+
+    .chatbot-video-player-title {
+      color: white;
+      font-size: 13px;
+      font-weight: 500;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chatbot-video-player-controls {
+      display: flex;
+      gap: 4px;
+    }
+
+    .chatbot-video-player-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+
+    .chatbot-video-player-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .chatbot-video-player-content {
+      width: 100%;
+      height: calc(100% - 40px);
+      background: #000;
+    }
+
+    .chatbot-video-player.minimized .chatbot-video-player-content {
+      display: none;
+    }
+
+    .chatbot-video-player iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .chatbot-message a {
+      color: var(--chatbot-secondary);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .chatbot-message a:hover {
+      text-decoration: none;
+    }
+
     @media (max-width: 768px) {
       .chatbot-widget {
         width: 70vw;
@@ -584,6 +902,13 @@
       }
       .chatbot-input {
         font-size: 16px;
+      }
+      .chatbot-video-player {
+        width: 90vw !important;
+        height: calc(90vw * 0.5625) !important;
+        left: 5vw !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
       }
     }
 
@@ -635,6 +960,7 @@
 
   window.LyraChatbot = {
     init: async function(config) {
+      console.log('🚀 NEW CHATBOT VERSION - 420px x 75vh WITH WELCOME SCREEN');
       try {
         const container = document.getElementById('lyra-chatbot-widget');
         if (!container) {
@@ -645,10 +971,22 @@
         let isOpen = false;
         let isExpanded = false;
         let isTyping = false;
-        let messages = [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
+        let messages = [];
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
+        let activeTab = 'home';
+        let conversations = [];
+        let showWelcome = true;
         
+        let videoPlayer = {
+          active: false,
+          minimized: false,
+          expanded: false,
+          url: '',
+          x: window.innerWidth - 450,
+          y: 100
+        };
+
         let tenantInfo = {
           business_name: config.businessName || 'Your Support Bot',
           chatbot_widget_icon: config.widgetIcon || '',
@@ -672,7 +1010,15 @@
             try {
               const stored = localStorage.getItem(`chatbot_messages_${userId}`);
               if (stored) {
-                messages = JSON.parse(stored);
+                const loadedMessages = JSON.parse(stored);
+                if (loadedMessages.length > 0) {
+                  messages = loadedMessages;
+                  showWelcome = false;
+                }
+              }
+              const storedConvs = localStorage.getItem(`chatbot_conversations_${userId}`);
+              if (storedConvs) {
+                conversations = JSON.parse(storedConvs);
               }
             } catch (error) {
               console.warn('Failed to load local messages:', error);
@@ -690,7 +1036,10 @@
             
             if (response.ok) {
               const data = await response.json();
-              messages = data.messages || [{ role: 'assistant', content: 'Hello! How can I help you today?' }];
+              if (data.messages && data.messages.length > 0) {
+                messages = data.messages;
+                showWelcome = false;
+              }
             }
           } catch (error) {
             console.warn('Failed to load server messages:', error);
@@ -701,6 +1050,7 @@
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
             try {
               localStorage.setItem(`chatbot_messages_${userId}`, JSON.stringify(messages));
+              localStorage.setItem(`chatbot_conversations_${userId}`, JSON.stringify(conversations));
             } catch (error) {
               console.warn('Failed to save local messages:', error);
             }
@@ -719,6 +1069,69 @@
           } catch (error) {
             console.warn('Failed to save server messages:', error);
           }
+        };
+
+        const saveConversation = () => {
+          if (messages.length > 0) {
+            const preview = messages.find(m => m.role === 'user')?.content || 'New conversation';
+            const existingIndex = conversations.findIndex(c => c.id === userId);
+            
+            if (existingIndex >= 0) {
+              conversations[existingIndex] = {
+                id: userId,
+                preview: preview.substring(0, 50),
+                timestamp: new Date().toISOString(),
+                messages: [...messages]
+              };
+            } else {
+              conversations.unshift({
+                id: userId,
+                preview: preview.substring(0, 50),
+                timestamp: new Date().toISOString(),
+                messages: [...messages]
+              });
+            }
+            
+            try {
+              localStorage.setItem(`chatbot_conversations_${userId}`, JSON.stringify(conversations));
+            } catch (error) {
+              console.warn('Failed to save conversation:', error);
+            }
+          }
+        };
+
+        const extractVideoId = (url) => {
+          let match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s]+)/);
+          if (match) return { type: 'youtube', id: match[1] };
+          
+          match = url.match(/vimeo\.com\/(\d+)/);
+          if (match) return { type: 'vimeo', id: match[1] };
+          
+          return null;
+        };
+
+        const openVideoPlayer = (url) => {
+          const video = extractVideoId(url);
+          if (!video) return;
+
+          videoPlayer.active = true;
+          videoPlayer.minimized = false;
+          videoPlayer.url = video.type === 'youtube' 
+            ? `https://www.youtube.com/embed/${video.id}?autoplay=1`
+            : `https://player.vimeo.com/video/${video.id}?autoplay=1`;
+          
+          render();
+        };
+
+        const linkifyMessage = (content) => {
+          const urlRegex = /(https?:\/\/[^\s]+)/g;
+          return content.replace(urlRegex, (url) => {
+            const video = extractVideoId(url);
+            if (video) {
+              return `<a href="#" data-video-url="${url}">${url}</a>`;
+            }
+            return `<a href="${url}" target="_blank">${url}</a>`;
+          });
         };
 
         const formatBotMessage = (content) => {
@@ -791,8 +1204,6 @@
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
         };
 
-       
-
         const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
           if (useWidgetIcon) {
             return createTextLogo(size);
@@ -809,14 +1220,9 @@
           return createTextLogo(size);
         };
 
-       
-
         const createTextLogo = (size) => {
           const container = document.createElement('div');
-          container.style.cssText = `
-            width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;
-            
-          `;
+          container.style.cssText = `width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;`;
           
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           const svgSize = Math.max(24, size * 0.9);
@@ -833,8 +1239,91 @@
           return container;
         };
 
+        const createVideoPlayer = () => {
+          if (!videoPlayer.active) return null;
 
-      
+          const player = document.createElement('div');
+          player.className = `chatbot-video-player active ${videoPlayer.expanded ? 'expanded' : ''} ${videoPlayer.minimized ? 'minimized' : ''}`;
+          player.style.left = videoPlayer.x + 'px';
+          player.style.top = videoPlayer.y + 'px';
+
+          const header = document.createElement('div');
+          header.className = 'chatbot-video-player-header';
+
+          const title = document.createElement('div');
+          title.className = 'chatbot-video-player-title';
+          title.textContent = 'Video Player';
+
+          const controls = document.createElement('div');
+          controls.className = 'chatbot-video-player-controls';
+
+          const minimizeBtn = document.createElement('button');
+          minimizeBtn.className = 'chatbot-video-player-btn';
+          minimizeBtn.innerHTML = videoPlayer.minimized ? '▢' : '—';
+          minimizeBtn.addEventListener('click', () => {
+            videoPlayer.minimized = !videoPlayer.minimized;
+            render();
+          });
+
+          const expandBtn = document.createElement('button');
+          expandBtn.className = 'chatbot-video-player-btn';
+          expandBtn.innerHTML = videoPlayer.expanded ? '◱' : '⛶';
+          expandBtn.addEventListener('click', () => {
+            videoPlayer.expanded = !videoPlayer.expanded;
+            render();
+          });
+
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-video-player-btn';
+          closeBtn.innerHTML = '✕';
+          closeBtn.addEventListener('click', () => {
+            videoPlayer.active = false;
+            render();
+          });
+
+          controls.appendChild(minimizeBtn);
+          controls.appendChild(expandBtn);
+          controls.appendChild(closeBtn);
+
+          header.appendChild(title);
+          header.appendChild(controls);
+
+          const content = document.createElement('div');
+          content.className = 'chatbot-video-player-content';
+          
+          const iframe = document.createElement('iframe');
+          iframe.src = videoPlayer.url;
+          iframe.allow = 'autoplay; fullscreen';
+          iframe.allowFullscreen = true;
+          
+          content.appendChild(iframe);
+          player.appendChild(header);
+          player.appendChild(content);
+
+          let isDragging = false;
+          let offsetX, offsetY;
+
+          header.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offsetX = e.clientX - videoPlayer.x;
+            offsetY = e.clientY - videoPlayer.y;
+          });
+
+          document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+              videoPlayer.x = e.clientX - offsetX;
+              videoPlayer.y = e.clientY - offsetY;
+              player.style.left = videoPlayer.x + 'px';
+              player.style.top = videoPlayer.y + 'px';
+            }
+          });
+
+          document.addEventListener('mouseup', () => {
+            isDragging = false;
+          });
+
+          return player;
+        };
 
         const sendMessage = async () => {
           if (!inputValue.trim()) return;
@@ -842,8 +1331,10 @@
           const newMessage = { role: 'user', content: inputValue.trim() };
           messages.push(newMessage);
           saveMessages();
+          saveConversation();
           inputValue = '';
           isTyping = true;
+          showWelcome = false;
           render();
 
           if (!config.baseUrl || !config.apiKey) {
@@ -1039,6 +1530,114 @@
           return header;
         };
 
+        const createWelcomeView = () => {
+          const welcomeView = document.createElement('div');
+          welcomeView.className = 'chatbot-welcome-view';
+
+          const logo = document.createElement('div');
+          logo.className = 'chatbot-welcome-logo';
+          logo.appendChild(createCompanyLogo(48));
+
+          const heading = document.createElement('div');
+          heading.className = 'chatbot-welcome-heading';
+          heading.textContent = 'Need support?';
+
+          const subheading = document.createElement('div');
+          subheading.className = 'chatbot-welcome-subheading';
+          subheading.textContent = 'How can we help?';
+
+          const statusCard = document.createElement('div');
+          statusCard.className = 'chatbot-status-card';
+          statusCard.innerHTML = `
+            <div class="chatbot-status-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+            <div class="chatbot-status-content">
+              <div class="chatbot-status-title">Status: All Systems Operational</div>
+              <div class="chatbot-status-time">Updated Oct 5, 08:55 UTC</div>
+            </div>
+          `;
+
+          const actionButtons = document.createElement('div');
+          actionButtons.className = 'chatbot-action-buttons';
+
+          const sendMessageBtn = document.createElement('button');
+          sendMessageBtn.className = 'chatbot-action-btn';
+          sendMessageBtn.innerHTML = `
+            Send us a message
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          `;
+          sendMessageBtn.addEventListener('click', () => {
+            showWelcome = false;
+            render();
+            setTimeout(() => {
+              const input = container.querySelector('.chatbot-input');
+              if (input) input.focus();
+            }, 100);
+          });
+
+          const searchBtn = document.createElement('button');
+          searchBtn.className = 'chatbot-action-btn';
+          searchBtn.innerHTML = `
+            Search for help
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+          `;
+          searchBtn.addEventListener('click', () => {
+            console.log('Search functionality - coming soon');
+          });
+
+          actionButtons.appendChild(sendMessageBtn);
+          actionButtons.appendChild(searchBtn);
+
+          const quickLinks = document.createElement('div');
+          quickLinks.className = 'chatbot-quick-links';
+
+          const quickLinksTitle = document.createElement('div');
+          quickLinksTitle.className = 'chatbot-quick-links-title';
+          quickLinksTitle.textContent = 'Quick help';
+
+          const links = [
+            'How to Get Support',
+            'Getting Started Guide',
+            'Common Questions'
+          ];
+
+          const linksContainer = document.createElement('div');
+          links.forEach(linkText => {
+            const link = document.createElement('button');
+            link.className = 'chatbot-quick-link';
+            link.innerHTML = `
+              ${linkText}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            `;
+            link.addEventListener('click', () => {
+              console.log('Quick link clicked:', linkText);
+            });
+            linksContainer.appendChild(link);
+          });
+
+          quickLinks.appendChild(quickLinksTitle);
+          quickLinks.appendChild(linksContainer);
+
+          welcomeView.appendChild(logo);
+          welcomeView.appendChild(heading);
+          welcomeView.appendChild(subheading);
+          welcomeView.appendChild(statusCard);
+          welcomeView.appendChild(actionButtons);
+          welcomeView.appendChild(quickLinks);
+
+          return welcomeView;
+        };
+
         const createBrandSection = () => {
           const brandSection = document.createElement('div');
           brandSection.className = 'chatbot-brand-section';
@@ -1080,10 +1679,17 @@
             bubble.className = `chatbot-bubble ${message.role} chatbot-bubble-enhanced`;
 
             if (message.role === 'assistant') {
-              bubble.innerHTML = formatBotMessage(message.content);
+              bubble.innerHTML = linkifyMessage(formatBotMessage(message.content));
             } else {
-              bubble.innerHTML = message.content.split('\n').map(line => line).join('<br>');
+              bubble.innerHTML = linkifyMessage(message.content.split('\n').map(line => line).join('<br>'));
             }
+
+            bubble.querySelectorAll('a[data-video-url]').forEach(link => {
+              link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openVideoPlayer(link.getAttribute('data-video-url'));
+              });
+            });
 
             const tail = document.createElement('div');
             tail.className = 'chatbot-bubble-tail';
@@ -1119,6 +1725,7 @@
         const createInputArea = () => {
           const inputArea = document.createElement('div');
           inputArea.className = 'chatbot-input-area';
+          inputArea.style.display = activeTab === 'home' && !showWelcome ? 'block' : 'none';
 
           const inputWrapper = document.createElement('div');
           inputWrapper.className = 'chatbot-input-wrapper';
@@ -1160,6 +1767,99 @@
           return inputArea;
         };
 
+        const createBottomNav = () => {
+          const nav = document.createElement('div');
+          nav.className = 'chatbot-bottom-nav';
+
+          const homeTab = document.createElement('button');
+          homeTab.className = `chatbot-nav-tab ${activeTab === 'home' ? 'active' : ''}`;
+          homeTab.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span class="chatbot-nav-label">Home</span>
+          `;
+          homeTab.addEventListener('click', () => {
+            activeTab = 'home';
+            showWelcome = true;
+            render();
+          });
+
+          const messagesTab = document.createElement('button');
+          messagesTab.className = `chatbot-nav-tab ${activeTab === 'messages' ? 'active' : ''}`;
+          messagesTab.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="chatbot-nav-label">Messages</span>
+          `;
+          messagesTab.addEventListener('click', () => {
+            activeTab = 'messages';
+            render();
+          });
+
+          nav.appendChild(homeTab);
+          nav.appendChild(messagesTab);
+          
+          return nav;
+        };
+
+        const createMessagesList = () => {
+          const listContainer = document.createElement('div');
+          listContainer.className = 'chatbot-messages-list';
+
+          if (conversations.length === 0) {
+            const emptyState = document.createElement('div');
+            emptyState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
+            emptyState.innerHTML = '<p>No past conversations yet.</p>';
+            listContainer.appendChild(emptyState);
+            return listContainer;
+          }
+
+          conversations.forEach((conv) => {
+            const item = document.createElement('div');
+            item.className = 'chatbot-conversation-item';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'chatbot-conversation-avatar';
+            avatar.textContent = conv.preview.charAt(0).toUpperCase();
+
+            const content = document.createElement('div');
+            content.className = 'chatbot-conversation-content';
+            
+            const preview = document.createElement('div');
+            preview.className = 'chatbot-conversation-preview';
+            preview.textContent = conv.preview;
+            
+            const time = document.createElement('div');
+            time.className = 'chatbot-conversation-time';
+            const date = new Date(conv.timestamp);
+            time.textContent = date.toLocaleString('en-US', { 
+              month: 'short', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+
+            content.appendChild(preview);
+            content.appendChild(time);
+            item.appendChild(avatar);
+            item.appendChild(content);
+
+            item.addEventListener('click', () => {
+              messages = [...conv.messages];
+              activeTab = 'home';
+              showWelcome = false;
+              render();
+            });
+
+            listContainer.appendChild(item);
+          });
+
+          return listContainer;
+        };
+
         const createWidget = () => {
           const widget = document.createElement('div');
           widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''} ${isExpanded ? 'chatbot-widget-expanded' : ''}`;
@@ -1169,14 +1869,26 @@
           const body = document.createElement('div');
           body.className = 'chatbot-body';
           
-          const messages = createMessages();
-          body.appendChild(messages);
+          if (activeTab === 'home') {
+            if (showWelcome) {
+              const welcomeView = createWelcomeView();
+              body.appendChild(welcomeView);
+            } else {
+              const messagesView = createMessages();
+              body.appendChild(messagesView);
+            }
+          } else {
+            const messagesList = createMessagesList();
+            body.appendChild(messagesList);
+          }
           
           const inputArea = createInputArea();
+          const bottomNav = createBottomNav();
 
           widget.appendChild(header);
           widget.appendChild(body);
           widget.appendChild(inputArea);
+          widget.appendChild(bottomNav);
 
           return widget;
         };
@@ -1188,20 +1900,25 @@
             container.appendChild(createParticles());
             container.appendChild(createOpenButton());
           } else {
-            // Fix: Use createWidget() instead of createChatWidget()
             container.appendChild(createWidget());
             
-            // Auto-focus input when opened and scroll to bottom
+            const existingPlayer = document.querySelector('.chatbot-video-player');
+            if (existingPlayer) existingPlayer.remove();
+            
+            const player = createVideoPlayer();
+            if (player) {
+              document.body.appendChild(player);
+            }
+            
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
               const chatBody = container.querySelector('.chatbot-body');
-              if (input) input.focus();
+              if (input && activeTab === 'home' && !showWelcome) input.focus();
               if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
             }, 100);
           }
         };
 
-        // Initial render
         render();
 
       } catch (error) {

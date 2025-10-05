@@ -226,11 +226,19 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 40px 24px;
+      padding: 0;
       text-align: center;
       background: linear-gradient(to bottom, var(--chatbot-secondary) 0%, var(--chatbot-secondary) 40%, #ffffff 40%, #ffffff 100%);
       height: 100%;
       overflow-y: auto;
+    }
+
+    .chatbot-welcome-content {
+      padding: 40px 24px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
     .chatbot-welcome-logo {
@@ -812,7 +820,7 @@
 
   window.LyraChatbot = {
     init: async function(config) {
-      console.log('🚀 MODIFIED CHATBOT VERSION - Clean Welcome + White Header');
+      console.log('🚀 COMPLETE MODIFIED CHATBOT VERSION');
       try {
         const container = document.getElementById('lyra-chatbot-widget');
         if (!container) {
@@ -1019,7 +1027,11 @@
           return str.replace(/\b\w/g, (c) => c.toUpperCase());
         };
 
-        const createCompanyLogo = (size = 32) => {
+        const createCompanyLogo = (size = 32, useWidgetIcon = false) => {
+          if (useWidgetIcon) {
+            return createTextLogo(size);
+          }
+          
           const logoImage = tenantInfo.branding?.logo_image;
           if (logoImage) {
             const img = document.createElement('img');
@@ -1273,7 +1285,7 @@
           openButton.className = `chatbot-open-btn ${getPositionClass()}`;
           openButton.style.display = isOpen ? 'none' : 'flex';
 
-          openButton.appendChild(createCompanyLogo(24));
+          openButton.appendChild(createCompanyLogo(24, true));
           
           const ring1 = document.createElement('div');
           ring1.className = 'chatbot-pulse-ring';
@@ -1339,6 +1351,9 @@
         const createWelcomeView = () => {
           const welcomeView = document.createElement('div');
           welcomeView.className = 'chatbot-welcome-view';
+
+          const content = document.createElement('div');
+          content.className = 'chatbot-welcome-content';
 
           const logo = document.createElement('div');
           logo.className = 'chatbot-welcome-logo';
@@ -1434,12 +1449,14 @@
           quickLinks.appendChild(quickLinksTitle);
           quickLinks.appendChild(linksContainer);
 
-          welcomeView.appendChild(logo);
-          welcomeView.appendChild(heading);
-          welcomeView.appendChild(subheading);
-          welcomeView.appendChild(statusCard);
-          welcomeView.appendChild(actionButtons);
-          welcomeView.appendChild(quickLinks);
+          content.appendChild(logo);
+          content.appendChild(heading);
+          content.appendChild(subheading);
+          content.appendChild(statusCard);
+          content.appendChild(actionButtons);
+          content.appendChild(quickLinks);
+
+          welcomeView.appendChild(content);
 
           return welcomeView;
         };
@@ -1579,18 +1596,18 @@
           if (showWelcome) {
             const welcomeView = createWelcomeView();
             body.appendChild(welcomeView);
+            widget.appendChild(body);
           } else {
             const header = createHeader();
             widget.appendChild(header);
             
             const messagesView = createMessages();
             body.appendChild(messagesView);
+            widget.appendChild(body);
             
             const inputArea = createInputArea();
             widget.appendChild(inputArea);
           }
-          
-          widget.appendChild(body);
 
           return widget;
         };
