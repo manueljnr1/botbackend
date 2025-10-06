@@ -93,7 +93,7 @@
       box-shadow: 0 4px 60px 20px rgba(0, 0, 0, 0.1), 0 2px 20px rgba(0, 0, 0, 0.1), 
           0 0 0 1px rgba(0, 0, 0, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.15), 
           inset 0 0 20px rgba(255, 255, 255, 0.5);
-      border: 1px solid rgba(209, 213, 219, 0.3);
+      border: none;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -246,7 +246,7 @@
         linear-gradient(-45deg, transparent 48%, var(--chatbot-secondary) 48%, var(--chatbot-secondary) 52%, transparent 52%);
       background-size: 40px 40px;
       background-position: 0 0, 20px 0;
-      opacity: 0.5;
+      opacity: 0.2;
       pointer-events: none;
       z-index: 0;
     }
@@ -405,6 +405,39 @@
       height: 16px;
       color: #9ca3af;
     }
+
+
+
+    .chatbot-footer {
+      display: flex;
+      border-top: 1px solid #e5e7eb;
+      background: white;
+      padding: 8px 16px;
+    }
+
+    .chatbot-footer-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      padding: 8px;
+      cursor: pointer;
+      color: #6b7280;
+      font-size: 11px;
+      transition: color 0.2s;
+    }
+
+    .chatbot-footer-btn.active {
+      color: var(--chatbot-secondary);
+    }
+
+    .chatbot-footer-btn:hover {
+      color: var(--chatbot-secondary);
+    }
+
 
    
     .chatbot-welcome-close-btn {
@@ -868,6 +901,7 @@
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
         let showWelcome = true;
+        let currentView = 'welcome';
         
         let videoPlayer = {
           active: false,
@@ -1631,11 +1665,42 @@
           return inputArea;
         };
 
+
+
+        const createFooter = () => {
+          const footer = document.createElement('div');
+          footer.className = 'chatbot-footer';
+        
+          const homeBtn = document.createElement('button');
+          homeBtn.className = `chatbot-footer-btn ${currentView === 'welcome' ? 'active' : ''}`;
+          homeBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span>Home</span>`;
+          homeBtn.addEventListener('click', () => {
+            currentView = 'welcome';
+            showWelcome = true;
+            render();
+          });
+        
+          const messagesBtn = document.createElement('button');
+          messagesBtn.className = `chatbot-footer-btn ${currentView === 'messages' ? 'active' : ''}`;
+          messagesBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>Messages</span>`;
+          messagesBtn.addEventListener('click', () => {
+            currentView = 'messages';
+            showWelcome = false;
+            render();
+          });
+        
+          footer.appendChild(homeBtn);
+          footer.appendChild(messagesBtn);
+          return footer;
+        };
+        
+        
+
         const createWidget = () => {
           const widget = document.createElement('div');
           widget.className = `chatbot-widget ${getPositionClass()} ${isOpen ? 'chatbot-widget-open' : ''}`;
           widget.style.display = isOpen ? 'flex' : 'none';
-
+        
           const body = document.createElement('div');
           body.className = 'chatbot-body';
           
@@ -1644,7 +1709,9 @@
             const welcomeView = createWelcomeView();
             body.appendChild(welcomeView);
             widget.appendChild(body);
+            widget.appendChild(createFooter());
           } else {
+            currentView = 'chat';
             const header = createHeader();
             widget.appendChild(header);
             
@@ -1655,7 +1722,7 @@
             const inputArea = createInputArea();
             widget.appendChild(inputArea);
           }
-
+        
           return widget;
         };
 
