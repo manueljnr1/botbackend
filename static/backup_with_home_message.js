@@ -788,6 +788,9 @@
       animation-delay: 0.4s;
     }
 
+
+    
+
     .chatbot-video-player {
       position: fixed;
       width: 400px;

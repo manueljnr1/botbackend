@@ -246,7 +246,7 @@
         linear-gradient(-45deg, transparent 48%, var(--chatbot-secondary) 48%, var(--chatbot-secondary) 52%, transparent 52%);
       background-size: 40px 40px;
       background-position: 0 0, 20px 0;
-      opacity: 0.2;
+      opacity: 0.08;
       pointer-events: none;
       z-index: 0;
     }
@@ -718,6 +718,81 @@
       animation-delay: 0.4s;
     }
 
+
+    .chatbot-messages-list-view {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: white;
+    }
+
+    .chatbot-messages-list-header {
+      padding: 20px;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chatbot-messages-list-header h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .chatbot-messages-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+
+    .chatbot-conversation-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .chatbot-conversation-item:hover {
+      background: #f9fafb;
+    }
+
+    .chatbot-conversation-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--chatbot-secondary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-weight: 600;
+    }
+
+    .chatbot-conversation-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chatbot-conversation-preview {
+      font-size: 14px;
+      color: #1f2937;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chatbot-conversation-time {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+
     .chatbot-video-player {
       position: fixed;
       width: 400px;
@@ -902,6 +977,7 @@
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
         let showWelcome = true;
         let currentView = 'welcome';
+        let conversations = [];
         
         let videoPlayer = {
           active: false,
@@ -1694,6 +1770,90 @@
           return footer;
         };
         
+
+
+        const createMessagesList = () => {
+          const listContainer = document.createElement('div');
+          listContainer.className = 'chatbot-messages-list';
+        
+          if (conversations.length === 0) {
+            const emptyState = document.createElement('div');
+            emptyState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
+            emptyState.innerHTML = '<p>No past conversations yet.</p>';
+            listContainer.appendChild(emptyState);
+            return listContainer;
+          }
+        
+          conversations.forEach((conv) => {
+            const item = document.createElement('div');
+            item.className = 'chatbot-conversation-item';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'chatbot-conversation-avatar';
+            avatar.textContent = conv.preview.charAt(0).toUpperCase();
+        
+            const content = document.createElement('div');
+            content.className = 'chatbot-conversation-content';
+            
+            const preview = document.createElement('div');
+            preview.className = 'chatbot-conversation-preview';
+            preview.textContent = conv.preview;
+            
+            const time = document.createElement('div');
+            time.className = 'chatbot-conversation-time';
+            const date = new Date(conv.timestamp);
+            time.textContent = date.toLocaleString('en-US', { 
+              month: 'short', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+        
+            content.appendChild(preview);
+            content.appendChild(time);
+            item.appendChild(avatar);
+            item.appendChild(content);
+        
+            item.addEventListener('click', () => {
+              messages = [...conv.messages];
+              currentView = 'chat';
+              showWelcome = false;
+              render();
+            });
+        
+            listContainer.appendChild(item);
+          });
+        
+          return listContainer;
+        };
+
+
+
+        const createMessagesListView = () => {
+          const view = document.createElement('div');
+          view.className = 'chatbot-messages-list-view';
+          
+          const header = document.createElement('div');
+          header.className = 'chatbot-messages-list-header';
+          header.innerHTML = `
+            <h2>Messages</h2>
+            <button class="chatbot-welcome-close-btn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          `;
+          
+          header.querySelector('button').addEventListener('click', () => {
+            isOpen = false;
+            render();
+          });
+          
+          view.appendChild(header);
+          view.appendChild(createMessagesList());
+          
+          return view;
+        };
         
 
         const createWidget = () => {
@@ -1708,6 +1868,11 @@
             body.style.padding = '0';
             const welcomeView = createWelcomeView();
             body.appendChild(welcomeView);
+            widget.appendChild(body);
+            widget.appendChild(createFooter());
+          } else if (currentView === 'messages') {
+            body.style.padding = '0';
+            body.appendChild(createMessagesListView());
             widget.appendChild(body);
             widget.appendChild(createFooter());
           } else {
