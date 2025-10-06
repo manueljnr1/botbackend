@@ -77,7 +77,7 @@ openpyxl
 orjson
 packaging
 pandas
-passlib
+bcrypt==3.2.2
 pbr
 propcache
 proto-plus
