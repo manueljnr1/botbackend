@@ -234,7 +234,6 @@
       position: relative;
     }
 
-
     .chatbot-welcome-view::before {
       content: '';
       position: absolute;
@@ -243,13 +242,11 @@
       right: 0;
       height: 40%;
       background-image: 
-        linear-gradient(45deg, var(--chatbot-secondary) 25%, transparent 25%),
-        linear-gradient(-45deg, var(--chatbot-secondary) 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, var(--chatbot-secondary) 75%),
-        linear-gradient(-45deg, transparent 75%, var(--chatbot-secondary) 75%);
-      background-size: 30px 30px;
-      background-position: 0 0, 0 15px, 15px -15px, -15px 0px;
-      opacity: 0.1;
+        linear-gradient(45deg, transparent 48%, var(--chatbot-secondary) 48%, var(--chatbot-secondary) 52%, transparent 52%),
+        linear-gradient(-45deg, transparent 48%, var(--chatbot-secondary) 48%, var(--chatbot-secondary) 52%, transparent 52%);
+      background-size: 40px 40px;
+      background-position: 0 0, 20px 0;
+      opacity: 0.5;
       pointer-events: none;
       z-index: 0;
     }
@@ -260,6 +257,8 @@
       display: flex;
       flex-direction: column;
       align-items: center;
+      position: relative;
+      z-index: 1;
     }
 
     .chatbot-welcome-logo {
@@ -407,17 +406,30 @@
       color: #9ca3af;
     }
 
-    .chatbot-body::before {
-      content: '';
+   
+    .chatbot-welcome-close-btn {
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 20px;
-      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.8), transparent);
-      pointer-events: none;
-      z-index: 1;
+      top: 16px;
+      right: 16px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 10;
     }
+
+    .chatbot-welcome-close-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: rotate(90deg);
+    }
+
 
     .chatbot-body::-webkit-scrollbar {
       width: 6px;
@@ -1374,6 +1386,15 @@
           const welcomeView = document.createElement('div');
           welcomeView.className = 'chatbot-welcome-view';
 
+
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-welcome-close-btn';
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.addEventListener('click', () => {
+            isOpen = false;
+            render();
+          });
+
           const content = document.createElement('div');
           content.className = 'chatbot-welcome-content';
 
@@ -1478,10 +1499,13 @@
           content.appendChild(actionButtons);
           content.appendChild(quickLinks);
 
+          welcomeView.appendChild(closeBtn);
           welcomeView.appendChild(content);
 
           return welcomeView;
         };
+
+
 
         const createBrandSection = () => {
           const brandSection = document.createElement('div');
