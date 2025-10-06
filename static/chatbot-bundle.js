@@ -234,7 +234,7 @@
     }
 
     .chatbot-welcome-content {
-      padding: 0 0 20px 0;
+      padding: 40px 24px;
       width: 100%;
       display: flex;
       flex-direction: column;
@@ -248,7 +248,6 @@
       align-items: center;
       justify-content: center;
       margin-bottom: 24px;
-      margin-top: 0;
     }
 
     .chatbot-welcome-heading {
@@ -1595,6 +1594,7 @@
           body.className = 'chatbot-body';
           
           if (showWelcome) {
+            body.style.padding = '0';
             const welcomeView = createWelcomeView();
             body.appendChild(welcomeView);
             widget.appendChild(body);
