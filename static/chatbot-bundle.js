@@ -599,6 +599,13 @@
       overflow: hidden;
     }
 
+
+    .chatbot-body.welcome-view::before {
+      top: 40%;
+      height: 20px;
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.8), transparent);
+    }
+
     .chatbot-send-btn:hover:not(:disabled) {
       transform: scale(1.1) rotate(15deg);
       box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
