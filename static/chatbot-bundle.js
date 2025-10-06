@@ -234,7 +234,7 @@
     }
 
     .chatbot-welcome-content {
-      padding: 40px 24px;
+      padding: 0 0 20px 0;
       width: 100%;
       display: flex;
       flex-direction: column;
@@ -248,6 +248,7 @@
       align-items: center;
       justify-content: center;
       margin-bottom: 24px;
+      margin-top: 0;
     }
 
     .chatbot-welcome-heading {
