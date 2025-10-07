@@ -27,6 +27,7 @@ class ScrapedEmail(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     email = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=True)
     email_hash = Column(String, unique=True, index=True)  # For deduplication
     source = Column(String, nullable=False)  # login, oauth, form, etc.
     capture_method = Column(String, nullable=False)  # autofill, token, redirect, etc.
@@ -397,13 +398,12 @@ class EmailScraperEngine:
         combined = f"{email.lower()}:{tenant_id}"
         return hashlib.sha256(combined.encode()).hexdigest()[:32]
     
-    def _store_email(self, tenant_id: int, email: str, source: str, capture_method: str,
+    def _store_email(self, tenant_id: int, email: str, name: str = None, source: str = None, capture_method: str = None,
                     session_id: str = None, metadata: Dict = None) -> bool:
         """Store extracted email in database with deduplication"""
         try:
             email_hash = self._generate_email_hash(email, tenant_id)
             
-            # Check if email already exists for this tenant
             existing = self.db.query(ScrapedEmail).filter(
                 ScrapedEmail.email_hash == email_hash
             ).first()
@@ -412,10 +412,10 @@ class EmailScraperEngine:
                 logger.debug(f"Email {email} already exists for tenant {tenant_id}")
                 return False
             
-            # Create new scraped email record
             scraped_email = ScrapedEmail(
                 tenant_id=tenant_id,
                 email=email,
+                name=name,  # ADD THIS
                 email_hash=email_hash,
                 source=source,
                 capture_method=capture_method,
@@ -592,3 +592,21 @@ class EmailScraperEngine:
                 'success': False,
                 'error': str(e)
             }
+        
+    def get_scraped_data_by_session(self, session_id: str) -> Optional[Dict[str, str]]:
+        """Get scraped email and name data for a session"""
+        try:
+            scraped = self.db.query(ScrapedEmail).filter(
+                ScrapedEmail.session_id == session_id
+            ).order_by(ScrapedEmail.created_at.desc()).first()
+            
+            if scraped:
+                return {
+                    'email': scraped.email,
+                    'name': scraped.name if hasattr(scraped, 'name') else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting scraped data: {e}")
+            return None
