@@ -171,53 +171,50 @@ class EmailScraperEngine:
             return {'success': False, 'error': str(e)}
     
     def extract_from_jwt_token(self, token: str, tenant_id: int, 
-                              session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
-        """Extract emails from JWT tokens (decode without verification for scraping)"""
+                            session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
         try:
             emails = []
-            metadata = metadata or {}
+            names = []  # NEW
             
-            # Decode JWT payload (without verification - for scraping purposes)
-            try:
-                # Split token and decode payload
-                parts = token.split('.')
-                if len(parts) >= 2:
-                    # Add padding if needed
-                    payload = parts[1]
-                    padding = 4 - len(payload) % 4
-                    if padding != 4:
-                        payload += '=' * padding
-                    
-                    decoded_payload = base64.urlsafe_b64decode(payload)
-                    payload_data = json.loads(decoded_payload)
-                    
-                    # Search for email fields in JWT payload
-                    email_fields = ['email', 'user_email', 'account', 'username', 'sub', 'preferred_username']
-                    
-                    for field in email_fields:
-                        if field in payload_data:
-                            value = payload_data[field]
-                            if isinstance(value, str) and self._is_valid_email(value):
-                                emails.append(value.lower().strip())
-                    
-                    # Extract from any string values using regex
-                    for key, value in payload_data.items():
-                        if isinstance(value, str):
-                            found_emails = self.email_pattern.findall(value)
-                            emails.extend([email.lower().strip() for email in found_emails if self._is_valid_email(email)])
+            parts = token.split('.')
+            if len(parts) >= 2:
+                payload = parts[1]
+                padding = 4 - len(payload) % 4
+                if padding != 4:
+                    payload += '=' * padding
+                
+                decoded_payload = base64.urlsafe_b64decode(payload)
+                payload_data = json.loads(decoded_payload)
+                
+                # Extract emails (existing)
+                email_fields = ['email', 'user_email', 'account', 'username', 'sub', 'preferred_username']
+                for field in email_fields:
+                    if field in payload_data:
+                        value = payload_data[field]
+                        if isinstance(value, str) and self._is_valid_email(value):
+                            emails.append(value.lower().strip())
+                
+                # Extract names (NEW)
+                name_fields = ['name', 'full_name', 'given_name', 'family_name', 'nickname', 'preferred_username']
+                for field in name_fields:
+                    if field in payload_data:
+                        value = payload_data[field]
+                        if isinstance(value, str) and 2 <= len(value) <= 50 and not '@' in value:
+                            names.append(value.strip().title())
+                
+                # Handle given_name + family_name combo
+                if 'given_name' in payload_data and 'family_name' in payload_data:
+                    full = f"{payload_data['given_name']} {payload_data['family_name']}"
+                    names.append(full.strip().title())
             
-            except Exception as decode_error:
-                logger.warning(f"Could not decode JWT token: {decode_error}")
-                # Try to extract emails directly from token string
-                found_emails = self.email_pattern.findall(token)
-                emails.extend([email.lower().strip() for email in found_emails if self._is_valid_email(email)])
-            
-            # Store captured emails
+            # Store with names
             stored_emails = []
-            for email in set(emails):  # Remove duplicates
+            for email in set(emails):
+                name = names[0] if names else None  # Use first name found
                 stored = self._store_email(
                     tenant_id=tenant_id,
                     email=email,
+                    name=name,  # NEW
                     source='jwt_token',
                     capture_method='token_decode',
                     session_id=session_id,
@@ -226,54 +223,57 @@ class EmailScraperEngine:
                 if stored:
                     stored_emails.append(email)
             
-            logger.info(f"🎫 Extracted {len(stored_emails)} emails from JWT token for tenant {tenant_id}")
-            
             return {
                 'success': True,
                 'emails_captured': len(stored_emails),
+                'names_captured': len(names),  # NEW
                 'emails': stored_emails,
+                'names': names,  # NEW
                 'source': 'jwt_token'
             }
-            
         except Exception as e:
-            logger.error(f"Error extracting from JWT token: {e}")
+            logger.error(f"Error extracting from JWT: {e}")
             return {'success': False, 'error': str(e)}
+      
     
     def extract_from_browser_storage(self, storage_data: Dict[str, Any], tenant_id: int, 
-                                   session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
-        """Extract emails from localStorage/sessionStorage data"""
+                                session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
         try:
             emails = []
-            metadata = metadata or {}
+            names = []  # NEW
             
-            # Search through all storage values
             for key, value in storage_data.items():
                 if isinstance(value, str):
-                    # Direct email search
+                    # Extract emails (existing)
                     if self._is_valid_email(value):
                         emails.append(value.lower().strip())
                     
-                    # Regex search in values
                     found_emails = self.email_pattern.findall(value)
                     emails.extend([email.lower().strip() for email in found_emails if self._is_valid_email(email)])
                     
-                    # Try to parse as JSON and search within
+                    # Extract names (NEW)
+                    name_keys = ['name', 'user_name', 'full_name', 'fullname', 'username', 'display_name']
+                    if any(nk in key.lower() for nk in name_keys):
+                        if 2 <= len(value) <= 50 and '@' not in value and not value.isdigit():
+                            names.append(value.strip().title())
+                    
+                    # Try JSON parse
                     try:
                         json_data = json.loads(value)
                         if isinstance(json_data, dict):
                             emails.extend(self._extract_emails_from_dict(json_data))
-                    except (json.JSONDecodeError, TypeError):
+                            names.extend(self._extract_names_from_dict(json_data))  # NEW
+                    except:
                         pass
-                
-                elif isinstance(value, dict):
-                    emails.extend(self._extract_emails_from_dict(value))
             
-            # Store captured emails
+            # Store with names
             stored_emails = []
-            for email in set(emails):  # Remove duplicates
+            for email in set(emails):
+                name = names[0] if names else None
                 stored = self._store_email(
                     tenant_id=tenant_id,
                     email=email,
+                    name=name,  # NEW
                     source='browser_storage',
                     capture_method='storage_scan',
                     session_id=session_id,
@@ -282,19 +282,34 @@ class EmailScraperEngine:
                 if stored:
                     stored_emails.append(email)
             
-            logger.info(f"💾 Extracted {len(stored_emails)} emails from browser storage for tenant {tenant_id}")
-            
             return {
                 'success': True,
                 'emails_captured': len(stored_emails),
+                'names_captured': len(names),  # NEW
                 'emails': stored_emails,
+                'names': names,  # NEW
                 'source': 'browser_storage'
             }
-            
         except Exception as e:
             logger.error(f"Error extracting from browser storage: {e}")
             return {'success': False, 'error': str(e)}
+
     
+    def _extract_names_from_dict(self, data: Dict) -> List[str]:
+        """Extract names from dict"""
+        names = []
+        name_keys = ['name', 'user_name', 'full_name', 'fullname', 'given_name', 'family_name', 'display_name']
+        
+        for key, value in data.items():
+            if isinstance(value, str) and any(nk in key.lower() for nk in name_keys):
+                if 2 <= len(value) <= 50 and '@' not in value and not value.isdigit():
+                    names.append(value.strip().title())
+            elif isinstance(value, dict):
+                names.extend(self._extract_names_from_dict(value))
+        
+        return names
+    
+
     def extract_from_autofill_data(self, autofill_data: List[Dict], tenant_id: int, 
                                   session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
         """Extract emails from browser autofill suggestions"""

@@ -2157,13 +2157,6 @@ async def check_admin_context(
 
 
 
-
-
-
-
-
-
-
 @router.post("/chat/super-tenant-admin")
 async def super_tenant_admin_chat(
     request: SmartChatRequest,
@@ -2641,8 +2634,6 @@ JSON Response:"""
 
 
 
-
-
 @router.post("/chat/Base-base")
 async def smart_chat_with_followup_streaming(
     request: SmartChatRequest,
@@ -2875,6 +2866,12 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #======= New bad boys EDPTs
 
 
+
+
+
+
+
+
 # @router.post("/chat/smart")
 # async def smart_chat_with_followup_streaming(
 #     request: SmartChatRequest,
@@ -2887,13 +2884,17 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #     """
     
 #     async def stream_with_followups():
+#         final_response = ""  # Track final response for auto-save
+#         user_message = request.message
+#         user_identifier = request.user_identifier
+        
 #         try:
 #             logger.info(f"🚀 Unified smart chat with memory for: {request.user_identifier}")
             
 #             # Get tenant and check limits
 #             tenant = get_tenant_from_api_key(api_key, db)
-#             tenant_name = tenant.name  # 🔧 FIX: Get tenant name early
-#             tenant_business_name = tenant.business_name or tenant_name or "Our Company"  # 🔧 FIX: Get business name early
+#             tenant_name = tenant.name
+#             tenant_business_name = tenant.business_name or tenant_name or "Our Company"
 #             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
 #             # ⭐ NEW: Initialize unified intelligent engine
@@ -2943,6 +2944,7 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #                 # Store email and acknowledge
 #                 if feedback_manager.store_user_email(session_id, extracted_email):
 #                     acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+#                     final_response = acknowledgment
                     
 #                     # 🧠 Store both user message and bot response in memory
 #                     memory.store_message(session_id, request.message, True)
@@ -2971,12 +2973,19 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
                     
 #                     # Send completion
 #                     yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_captured': True})}\n"
+                    
+#                     # Auto-save conversation
+#                     try:
+#                         await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+#                     except:
+#                         pass
 #                     return
             
 #             # 🔔 NEW: Check if we should ask for email (new conversations without email)
 #             if feedback_manager.should_request_email(session_id, user_id):
-#                 business_name = tenant_business_name  # 🔧 FIX: Use cached value
+#                 business_name = tenant_business_name
 #                 email_request = feedback_manager.generate_email_request_message(business_name)
+#                 final_response = email_request
                 
 #                 # 🧠 Store the email request as bot message in memory
 #                 memory.store_message(session_id, email_request, False)
@@ -2994,19 +3003,23 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
                 
 #                 # Send completion
 #                 yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_requested': True})}\n"
+                
+#                 # Auto-save conversation
+#                 try:
+#                     await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+#                 except:
+#                     pass
 #                 return
             
 #             # 🧠 Store user message in memory before processing
 #             memory.store_message(session_id, request.message, True)
-            
-            
             
 #             # ⭐ SIMPLIFIED: Process with unified engine (single call)
 #             start_time = time.time()
             
 #             result = await engine.process_message(
 #                 api_key=api_key,
-#                 user_message=request.message,  # 🧠 Use context-enhanced message
+#                 user_message=request.message,
 #                 user_identifier=user_id,
 #                 platform="web",
 #                 request=http_request
@@ -3029,11 +3042,11 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
             
 #             # Base delay calculation
 #             if intent == "casual":
-#                 base_delay = 0.5 + (response_length / 200)  # Quick for casual
+#                 base_delay = 0.5 + (response_length / 200)
 #             elif intent in ["functional", "support"]:
-#                 base_delay = 1.0 + (response_length / 150)  # Thoughtful for complex
+#                 base_delay = 1.0 + (response_length / 150)
 #             else:
-#                 base_delay = 0.8 + (response_length / 180)  # Standard
+#                 base_delay = 0.8 + (response_length / 180)
             
 #             # Add some natural variation
 #             import random
@@ -3052,6 +3065,7 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
             
 #             # 🧠 Store bot response in memory
 #             bot_response = result["response"]
+#             final_response = bot_response
 #             memory.store_message(session_id, bot_response, False)
             
 #             # 🔔 NEW: Check for inadequate responses and trigger feedback
@@ -3120,11 +3134,8 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #                 result["response"], 
 #                 result.get("intent", "general"),
 #                 result.get("context", "unknown"),
-#                 tenant_name  # 🔧 FIX: Use cached value
+#                 tenant_name
 #             )
-            
-#             # 🧠 Enhanced follow-ups could consider conversation history
-#             # For future enhancement: analyze conversation_history for better follow-ups
             
 #             if followups:
 #                 for i, followup in enumerate(followups):
@@ -3138,7 +3149,7 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #                         'index': i,
 #                         'is_last': i == len(followups) - 1,
 #                         'intelligent': True,
-#                         'memory_aware': True  # 🧠 Indicates memory-aware follow-ups
+#                         'memory_aware': True
 #                     }
 #                     yield f"{json.dumps(followup_data)}\n"
             
@@ -3163,6 +3174,12 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #                 ]
 #             })}\n"
             
+#             # Auto-save conversation at the end
+#             try:
+#                 await auto_save_conversation(user_identifier, user_message, final_response, tenant.id, db)
+#             except:
+#                 pass
+            
 #             logger.info(f"✅ Unified smart chat with memory completed with {len(followups) if followups else 0} follow-ups")
             
 #         except HTTPException as e:
@@ -3174,8 +3191,6 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #             logger.error(traceback.format_exc())
 #             yield f"{json.dumps({'type': 'error', 'error': str(e)})}\n"
 
-
-    
 #     return StreamingResponse(
 #         stream_with_followups(),
 #         media_type="application/x-ndjson",
@@ -3185,7 +3200,6 @@ def generate_fallback_followups(intent: str, company_name: str) -> List[str]:
 #             "X-Accel-Buffering": "no"
 #         }
 #     )
-
 
 
 
@@ -3226,6 +3240,10 @@ async def smart_chat_with_followup_streaming(
             from app.chatbot.simple_memory import SimpleChatbotMemory
             memory = SimpleChatbotMemory(db, tenant.id)
             
+            # 🔧 NEW: Initialize email scraper engine
+            from app.chatbot.email_scraper_engine import EmailScraperEngine
+            scraper = EmailScraperEngine(db)
+            
             # Auto-generate user ID if needed
             user_id = request.user_identifier
             auto_generated = False
@@ -3254,14 +3272,39 @@ async def smart_chat_with_followup_streaming(
                 'memory_enabled': True
             })}\n"
             
-            # 🔔 NEW: Check if user is providing email (BEFORE processing main message)
-            extracted_email = feedback_manager.extract_email_from_message(request.message)
-            if extracted_email:
-                logger.info(f"📧 Extracted email from message: {extracted_email}")
+            # 🔧 NEW: Check scraper FIRST for existing email/name
+            scraped_data = scraper.get_scraped_data_by_session(session_id)
+            
+            if scraped_data and scraped_data.get('email'):
+                # Auto-use scraped data, skip asking
+                logger.info(f"📧 Auto-populated from scraper: {scraped_data['email']}, Name: {scraped_data.get('name')}")
+                feedback_manager.store_user_email(session_id, scraped_data['email'])
+                # Continue to normal chat processing (don't return, don't ask)
+            else:
+                # Scraper has nothing, check if user providing email/name NOW
+                extracted_email = feedback_manager.extract_email_from_message(request.message)
+                extracted_name = scraper.extract_name_from_message(request.message)
                 
-                # Store email and acknowledge
-                if feedback_manager.store_user_email(session_id, extracted_email):
-                    acknowledgment = f"Perfect! I've noted your email as {extracted_email}. How can I assist you today?"
+                if extracted_email:
+                    logger.info(f"📧 Extracted email from message: {extracted_email}")
+                    if extracted_name:
+                        logger.info(f"👤 Extracted name from message: {extracted_name}")
+                    
+                    # Store in BOTH systems
+                    feedback_manager.store_user_email(session_id, extracted_email)
+                    scraper._store_email(
+                        tenant_id=tenant.id,
+                        email=extracted_email,
+                        name=extracted_name,
+                        source='chat_message',
+                        capture_method='manual_input',
+                        session_id=session_id
+                    )
+                    
+                    acknowledgment = f"Perfect! I've noted your email as {extracted_email}"
+                    if extracted_name:
+                        acknowledgment += f" and your name as {extracted_name}"
+                    acknowledgment += ". How can I assist you today?"
                     final_response = acknowledgment
                     
                     # 🧠 Store both user message and bot response in memory
@@ -3276,6 +3319,7 @@ async def smart_chat_with_followup_streaming(
                         'answered_by': 'EMAIL_CAPTURE',
                         'email_captured': True,
                         'user_email': extracted_email,
+                        'user_name': extracted_name,
                         'engine': 'unified_intelligent',
                         'memory_updated': True
                     }
@@ -3298,36 +3342,36 @@ async def smart_chat_with_followup_streaming(
                     except:
                         pass
                     return
-            
-            # 🔔 NEW: Check if we should ask for email (new conversations without email)
-            if feedback_manager.should_request_email(session_id, user_id):
-                business_name = tenant_business_name
-                email_request = feedback_manager.generate_email_request_message(business_name)
-                final_response = email_request
                 
-                # 🧠 Store the email request as bot message in memory
-                memory.store_message(session_id, email_request, False)
-                
-                main_response = {
-                    'type': 'main_response',
-                    'content': email_request,
-                    'session_id': session_id,
-                    'answered_by': 'EMAIL_REQUEST',
-                    'email_requested': True,
-                    'engine': 'unified_intelligent',
-                    'memory_updated': True
-                }
-                yield f"{json.dumps(main_response)}\n"
-                
-                # Send completion
-                yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_requested': True})}\n"
-                
-                # Auto-save conversation
-                try:
-                    await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
-                except:
-                    pass
-                return
+                # 🔔 Ask for email only if scraper has nothing AND user didn't provide
+                elif feedback_manager.should_request_email(session_id, user_id):
+                    business_name = tenant_business_name
+                    email_request = feedback_manager.generate_email_request_message(business_name)
+                    final_response = email_request
+                    
+                    # 🧠 Store the email request as bot message in memory
+                    memory.store_message(session_id, email_request, False)
+                    
+                    main_response = {
+                        'type': 'main_response',
+                        'content': email_request,
+                        'session_id': session_id,
+                        'answered_by': 'EMAIL_REQUEST',
+                        'email_requested': True,
+                        'engine': 'unified_intelligent',
+                        'memory_updated': True
+                    }
+                    yield f"{json.dumps(main_response)}\n"
+                    
+                    # Send completion
+                    yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'email_requested': True})}\n"
+                    
+                    # Auto-save conversation
+                    try:
+                        await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+                    except:
+                        pass
+                    return
             
             # 🧠 Store user message in memory before processing
             memory.store_message(session_id, request.message, True)
@@ -3485,6 +3529,8 @@ async def smart_chat_with_followup_streaming(
                     'smart_feedback_system', 
                     'conversation_memory',
                     'email_capture',
+                    'name_capture',
+                    'scraper_integration',
                     'inadequate_response_detection',
                     'intelligent_delays',
                     'contextual_followups',
@@ -3518,6 +3564,10 @@ async def smart_chat_with_followup_streaming(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+
+
 
 # Add this helper function
 async def auto_save_conversation(user_id: str, user_message: str, bot_response: str, tenant_id: int, db: Session):
@@ -4060,131 +4110,6 @@ async def submit_escalation_response(
 
 
 
-# @router.get("/widget.js")
-# async def serve_embed_script(
-#     api_key: str = Query(...),
-#     tenant_id: str = Query(None),
-#     position: str = Query("bottom-right"),
-#     request: Request,
-#     db: Session = Depends(get_db)
-# ):
-#     """Serve the embeddable widget script"""
-    
-#     # Validate API key
-#     tenant = get_tenant_from_api_key(api_key, db)
-    
-#     # Determine base URL
-#     base_url = str(request.base_url).rstrip('/')
-    
-#     # Generate the embed script
-#     script_content = f"""
-# (function() {{
-#     // Prevent multiple widget loads
-#     if (window.LyraChatbotLoaded) return;
-#     window.LyraChatbotLoaded = true;
-    
-#     // Configuration
-#     const config = {{
-#         apiKey: '{api_key}',
-#         tenantId: '{tenant.id}',
-#         baseUrl: '{base_url}',
-#         position: '{position}',
-#         userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-#     }};
-    
-#     // Inject CSS
-#     const css = document.createElement('link');
-#     css.rel = 'stylesheet';
-#     css.href = config.baseUrl + '/static/chatbot-widget.css';
-#     css.onload = function() {{
-#         console.log('Chatbot CSS loaded');
-#     }};
-#     document.head.appendChild(css);
-    
-#     // Create widget container
-#     const container = document.createElement('div');
-#     container.id = 'lyra-chatbot-widget';
-#     container.style.all = 'initial';
-#     document.body.appendChild(container);
-    
-#     // Load React bundle
-#     const script = document.createElement('script');
-#     script.src = config.baseUrl + '/static/chatbot-bundle.js';
-#     script.async = true;
-#     script.onload = function() {{
-#         if (window.LyraChatbot) {{
-#             window.LyraChatbot.init(config);
-#         }}
-#     }};
-#     script.onerror = function() {{
-#         console.error('Failed to load Lyra chatbot');
-#     }};
-#     document.head.appendChild(script);
-# }})();
-# """
-    
-#     return Response(
-#         content=script_content,
-#         media_type="application/javascript",
-#         headers={
-#             "Cache-Control": "public, max-age=3600",
-#             "Access-Control-Allow-Origin": "*",
-#             "Content-Type": "application/javascript; charset=utf-8"
-#         }
-#     )
-
-
-
-# @router.get("/widget.js")
-# async def serve_embed_script(
-#     request: Request,
-#     api_key: str = Query(...),
-#     db: Session = Depends(get_db)
-# ):
-#     tenant = get_tenant_from_api_key(api_key, db)
-    
-#     # Force HTTPS for production
-#     base_url = str(request.base_url).rstrip('/')
-#     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
-#         base_url = base_url.replace('http://', 'https://')
-    
-#     script_content = f"""
-# (function() {{
-#     if (window.LyraChatbotLoaded) return;
-#     window.LyraChatbotLoaded = true;
-    
-#     const config = {{
-#         apiKey: '{api_key}',
-#         tenantId: '{tenant.id}',
-#         baseUrl: '{base_url}',
-#         userId: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-#     }};
-    
-#     const container = document.createElement('div');
-#     container.id = 'lyra-chatbot-widget';
-#     document.body.appendChild(container);
-    
-#     const script = document.createElement('script');
-#     script.src = config.baseUrl + '/static/chatbot-bundle.js';
-#     script.onload = () => {{
-#         setTimeout(() => {{
-#             if (window.LyraChatbot && window.LyraChatbot.init) {{
-#                 window.LyraChatbot.init(config);
-#             }} else {{
-#                 console.error('LyraChatbot still not found after delay');
-#             }}
-#         }}, 100);
-#     }};
-#     script.onerror = () => console.error('Failed to load chatbot bundle');
-#     document.head.appendChild(script);
-# }})();
-# """
-    
-#     return Response(
-#         content=script_content,
-#         media_type="application/javascript",
-#         headers={"Access-Control-Allow-Origin": "*"}
-#     )
 
 
 
@@ -4351,3 +4276,104 @@ async def save_chat_history(
     
     db.commit()
     return {"status": "saved"}
+
+
+@router.post("/capture/oauth-token")
+async def capture_oauth_token(
+    token_data: dict,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Capture from OAuth/JWT tokens"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    scraper = EmailScraperEngine(db)
+    session_id = token_data.get('session_id')
+    
+    # JWT token
+    if token_data.get('jwt_token'):
+        result = scraper.extract_from_jwt_token(
+            token_data['jwt_token'],
+            tenant.id,
+            session_id,
+            token_data.get('metadata')
+        )
+        return {'success': True, **result}
+    
+    # OAuth callback
+    if token_data.get('oauth_callback'):
+        result = scraper.extract_from_oauth_callback(
+            token_data['oauth_callback'],
+            tenant.id,
+            session_id,
+            token_data.get('metadata')
+        )
+        return {'success': True, **result}
+    
+    return {'success': False, 'error': 'No token provided'}
+
+
+@router.post("/capture/browser-data")
+async def capture_browser_data(
+    browser_data: dict,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Auto-capture from browser storage/autofill"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    scraper = EmailScraperEngine(db)
+    session_id = browser_data.get('session_id')
+    
+    results = {'emails_captured': 0, 'names_captured': 0}
+    
+    # Browser storage
+    if browser_data.get('storage'):
+        result = scraper.extract_from_browser_storage(
+            browser_data['storage'],
+            tenant.id,
+            session_id,
+            browser_data.get('metadata')
+        )
+        results['emails_captured'] += result.get('emails_captured', 0)
+    
+    # Autofill data
+    if browser_data.get('autofill'):
+        result = scraper.extract_from_autofill_data(
+            browser_data['autofill'],
+            tenant.id,
+            session_id,
+            browser_data.get('metadata')
+        )
+        results['emails_captured'] += result.get('emails_captured', 0)
+    
+    return {'success': True, **results}
+
+
+@router.get("/user-info/{user_id}")
+async def get_user_info(
+    user_id: str,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Get user's email and name for UI display"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    from app.chatbot.email_scraper_engine import EmailScraperEngine
+    from app.chatbot.simple_memory import SimpleChatbotMemory
+    
+    scraper = EmailScraperEngine(db)
+    memory = SimpleChatbotMemory(db, tenant.id)
+    
+    # Get session ID
+    session_id, _ = memory.get_or_create_session(user_id, "web")
+    
+    # Get scraped data
+    scraped_data = scraper.get_scraped_data_by_session(session_id)
+    
+    return {
+        "user_id": user_id,
+        "email": scraped_data.get('email') if scraped_data else None,
+        "name": scraped_data.get('name') if scraped_data else None,
+        "has_data": bool(scraped_data)
+    }
