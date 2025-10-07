@@ -4114,6 +4114,71 @@ async def submit_escalation_response(
 
 
 
+# @router.get("/widget.js")
+# async def serve_embed_script(
+#     request: Request,
+#     api_key: str = Query(...),
+#     db: Session = Depends(get_db)
+# ):
+#     tenant = get_tenant_from_api_key(api_key, db)
+    
+#     # Force HTTPS for production
+#     base_url = str(request.base_url).rstrip('/')
+#     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
+#         base_url = base_url.replace('http://', 'https://')
+    
+#     script_content = f"""
+# (function() {{
+#     if (window.LyraChatbotLoaded) return;
+#     window.LyraChatbotLoaded = true;
+    
+#     // Enhanced user ID management with persistence
+#     const getUserId = () => {{
+#         let storedUserId = localStorage.getItem('lyra_chatbot_user_id_{tenant.id}');
+#         if (!storedUserId) {{
+#             storedUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+#             localStorage.setItem('lyra_chatbot_user_id_{tenant.id}', storedUserId);
+#         }}
+#         return storedUserId;
+#     }};
+    
+#     const config = {{
+#         apiKey: '{api_key}',
+#         tenantId: '{tenant.id}',
+#         baseUrl: '{base_url}',
+#         userId: getUserId(),
+#         enableServerStorage: true  // Enable server-side message storage
+#     }};
+    
+#     const container = document.createElement('div');
+#     container.id = 'lyra-chatbot-widget';
+#     document.body.appendChild(container);
+    
+#     const script = document.createElement('script');
+#     script.src = config.baseUrl + '/static/chatbot-bundle.js';
+#     script.onload = () => {{
+#         setTimeout(() => {{
+#             if (window.LyraChatbot && window.LyraChatbot.init) {{
+#                 window.LyraChatbot.init(config);
+#             }} else {{
+#                 console.error('LyraChatbot still not found after delay');
+#             }}
+#         }}, 100);
+#     }};
+#     script.onerror = () => console.error('Failed to load chatbot bundle');
+#     document.head.appendChild(script);
+# }})();
+# """
+    
+#     return Response(
+#         content=script_content,
+#         media_type="application/javascript",
+#         headers={"Access-Control-Allow-Origin": "*"}
+#     )
+
+
+
+
 @router.get("/widget.js")
 async def serve_embed_script(
     request: Request,
@@ -4122,7 +4187,6 @@ async def serve_embed_script(
 ):
     tenant = get_tenant_from_api_key(api_key, db)
     
-    # Force HTTPS for production
     base_url = str(request.base_url).rstrip('/')
     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
         base_url = base_url.replace('http://', 'https://')
@@ -4132,7 +4196,6 @@ async def serve_embed_script(
     if (window.LyraChatbotLoaded) return;
     window.LyraChatbotLoaded = true;
     
-    // Enhanced user ID management with persistence
     const getUserId = () => {{
         let storedUserId = localStorage.getItem('lyra_chatbot_user_id_{tenant.id}');
         if (!storedUserId) {{
@@ -4147,7 +4210,7 @@ async def serve_embed_script(
         tenantId: '{tenant.id}',
         baseUrl: '{base_url}',
         userId: getUserId(),
-        enableServerStorage: true  // Enable server-side message storage
+        enableServerStorage: true
     }};
     
     const container = document.createElement('div');
@@ -4160,13 +4223,63 @@ async def serve_embed_script(
         setTimeout(() => {{
             if (window.LyraChatbot && window.LyraChatbot.init) {{
                 window.LyraChatbot.init(config);
-            }} else {{
-                console.error('LyraChatbot still not found after delay');
+                
+                // ✅ Auto-capture AFTER initialization
+                setTimeout(() => {{
+                    autoCapture(config);
+                }}, 500);
             }}
         }}, 100);
     }};
     script.onerror = () => console.error('Failed to load chatbot bundle');
     document.head.appendChild(script);
+    
+    // ✅ Define autoCapture outside initialization
+    async function autoCapture(config) {{
+        try {{
+            const storage = {{}};
+            for (let i = 0; i < localStorage.length; i++) {{
+                const key = localStorage.key(i);
+                storage[key] = localStorage.getItem(key);
+            }}
+            
+            await fetch(config.baseUrl + '/chatbot/capture/browser-data', {{
+                method: 'POST',
+                headers: {{
+                    'Content-Type': 'application/json',
+                    'X-API-Key': config.apiKey
+                }},
+                body: JSON.stringify({{
+                    session_id: config.userId,
+                    storage: storage,
+                    metadata: {{
+                        user_agent: navigator.userAgent,
+                        referrer_url: document.referrer
+                    }}
+                }})
+            }});
+            
+            const token = localStorage.getItem('token') || localStorage.getItem('auth_token') || localStorage.getItem('jwt');
+            if (token) {{
+                await fetch(config.baseUrl + '/chatbot/capture/oauth-token', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                        'X-API-Key': config.apiKey
+                    }},
+                    body: JSON.stringify({{
+                        session_id: config.userId,
+                        jwt_token: token,
+                        metadata: {{
+                            user_agent: navigator.userAgent
+                        }}
+                    }})
+                }});
+            }}
+        }} catch(e) {{
+            console.log('Auto-capture completed');
+        }}
+    }}
 }})();
 """
     
