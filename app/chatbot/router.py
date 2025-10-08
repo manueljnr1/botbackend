@@ -4484,15 +4484,28 @@ async def capture_browser_data(
     
     results = {'emails_captured': 0, 'names_captured': 0}
     
-    # Browser storage
+    # ✅ Flatten nested storage structure
     if browser_data.get('storage'):
-        result = scraper.extract_from_browser_storage(
-            browser_data['storage'],
-            tenant.id,
-            session_id,
-            browser_data.get('metadata')
-        )
-        results['emails_captured'] += result.get('emails_captured', 0)
+        flat_storage = {}
+        
+        # Merge localStorage
+        if 'localStorage' in browser_data['storage']:
+            flat_storage.update(browser_data['storage']['localStorage'])
+        
+        # Merge sessionStorage
+        if 'sessionStorage' in browser_data['storage']:
+            flat_storage.update(browser_data['storage']['sessionStorage'])
+        
+        # Now pass flat structure to scraper
+        if flat_storage:
+            result = scraper.extract_from_browser_storage(
+                flat_storage,  # ✅ Flat dict now
+                tenant.id,
+                session_id,
+                browser_data.get('metadata')
+            )
+            results['emails_captured'] += result.get('emails_captured', 0)
+            results['names_captured'] += result.get('names_captured', 0)  # ✅ Track names too
     
     # Autofill data
     if browser_data.get('autofill'):
@@ -4503,6 +4516,8 @@ async def capture_browser_data(
             browser_data.get('metadata')
         )
         results['emails_captured'] += result.get('emails_captured', 0)
+    
+    logger.info(f"✅ Browser capture: {results['emails_captured']} emails, {results['names_captured']} names")
     
     return {'success': True, **results}
 
