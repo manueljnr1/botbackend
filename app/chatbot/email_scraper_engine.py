@@ -518,6 +518,51 @@ class EmailScraperEngine:
         except Exception as e:
             logger.error(f"Error marking email verified: {e}")
             return False
+        
+
+
+
+    def extract_name_from_message(self, message: str) -> Optional[str]:
+        """Extract name from user message"""
+        message_lower = message.lower()
+        
+        
+        patterns = [
+            r"my name is ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"i'm ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"i am ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"call me ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip().title()
+                if 2 <= len(name) <= 50 and '@' not in name:
+                    return name
+        
+        return None
+
+    def get_scraped_data_by_session(self, session_id: str) -> Optional[Dict[str, str]]:
+        """Get scraped email and name data for a session"""
+        try:
+            scraped = self.db.query(ScrapedEmail).filter(
+                ScrapedEmail.session_id == session_id
+            ).order_by(ScrapedEmail.created_at.desc()).first()
+            
+            if scraped:
+                return {
+                    'email': scraped.email,
+                    'name': scraped.name if hasattr(scraped, 'name') else None
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting scraped data: {e}")
+            return None
+
+
+
     
     def bulk_process_scraping_data(self, tenant_id: int, scraping_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process multiple scraping sources at once"""
