@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Test Chatbot Auto-Capture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 420px;
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo h1 {
+            font-size: 28px;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+        
+        .logo p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
+        .success-message {
+            display: none;
+            background: #10b981;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 20px;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .info-box {
+            background: #f3f4f6;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .info-box strong {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>🚀 Lyra Test</h1>
+            <p>Login to test auto-capture</p>
+        </div>
+        
+        <div class="success-message" id="successMessage">
+            ✅ Logged in! Check chatbot - it should auto-capture your data
+        </div>
+        
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="name">Full Name</label>
+                <input 
+                    type="text" 
+                    id="name" 
+                    name="name" 
+                    value="Emmanuel"
+                    required
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input 
+                    type="email" 
+                    id="email" 
+                    name="email" 
+                    value="emmanue.ba@yahoo.com"
+                    required
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    value="Emmanuel12!"
+                    required
+                >
+            </div>
+            
+            <button type="submit" class="btn-login">
+                Login & Test Auto-Capture
+            </button>
+        </form>
+        
+        <div class="info-box">
+            <strong>🔍 What happens after login:</strong><br>
+            • Your email & name are stored in localStorage<br>
+            • A fake JWT token is generated<br>
+            • Chatbot scraper auto-captures this data<br>
+            • Chatbot won't ask for email again!
+        </div>
+    </div>
+
+    <!-- Chatbot Widget Integration -->
+    <script src="https://agentlyra.com/chatbot/widget.js?api_key=sk-f37356b62211465ea3d2efb5e537799a" async></script>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            // Simulate successful login by storing data in localStorage
+            // This is what the chatbot scraper will capture!
+            
+            // Store user data (common patterns the scraper looks for)
+            localStorage.setItem('user_email', email);
+            localStorage.setItem('user_name', name);
+            localStorage.setItem('full_name', name);
+            localStorage.setItem('account', email);
+            localStorage.setItem('username', email);
+            
+            // Generate a fake JWT token (the scraper will decode this)
+            const fakeJWT = generateFakeJWT(email, name);
+            localStorage.setItem('token', fakeJWT);
+            localStorage.setItem('auth_token', fakeJWT);
+            localStorage.setItem('jwt', fakeJWT);
+            
+            // Also store in a user object (common pattern)
+            const userData = {
+                email: email,
+                name: name,
+                full_name: name,
+                given_name: name.split(' ')[0],
+                family_name: name.split(' ')[1] || '',
+                user_email: email,
+                username: email
+            };
+            localStorage.setItem('user', JSON.stringify(userData));
+            localStorage.setItem('currentUser', JSON.stringify(userData));
+            
+            // Show success message
+            const successMsg = document.getElementById('successMessage');
+            successMsg.style.display = 'block';
+            
+            // Log what was stored
+            console.log('✅ Login simulation complete!');
+            console.log('📧 Email stored:', email);
+            console.log('👤 Name stored:', name);
+            console.log('🔑 JWT token stored:', fakeJWT);
+            console.log('💾 localStorage keys:', Object.keys(localStorage));
+            
+            // Alert user
+            setTimeout(() => {
+                alert('✅ Login successful!\n\n' +
+                      '📧 Email: ' + email + '\n' +
+                      '👤 Name: ' + name + '\n\n' +
+                      'Open the chatbot now - it should NOT ask for your email!');
+            }, 500);
+        });
+        
+        function generateFakeJWT(email, name) {
+            // Create a fake but valid-looking JWT with email and name in payload
+            const header = btoa(JSON.stringify({alg: "HS256", typ: "JWT"}));
+            
+            const payload = btoa(JSON.stringify({
+                email: email,
+                user_email: email,
+                name: name,
+                full_name: name,
+                given_name: name.split(' ')[0],
+                family_name: name.split(' ')[1] || '',
+                sub: email,
+                preferred_username: email,
+                iat: Math.floor(Date.now() / 1000),
+                exp: Math.floor(Date.now() / 1000) + 3600
+            }));
+            
+            const signature = btoa('fake_signature_for_testing');
+            
+            return `${header}.${payload}.${signature}`;
+        }
+        
+        // On page load, check if already "logged in"
+        window.addEventListener('load', function() {
+            const storedEmail = localStorage.getItem('user_email');
+            if (storedEmail) {
+                console.log('🔍 Found existing login data:', storedEmail);
+                document.getElementById('successMessage').style.display = 'block';
+                document.getElementById('successMessage').textContent = 
+                    '✅ Already logged in as ' + storedEmail;
+            }
+        });
+    </script>
+</body>
+</html>

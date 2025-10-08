@@ -3229,10 +3229,10 @@ async def smart_chat_with_followup_streaming(
             tenant_business_name = tenant.business_name or tenant_name or "Our Company"
             check_conversation_limit_dependency_with_super_tenant(tenant.id, db)
             
-            # ⭐ NEW: Initialize unified intelligent engine
+            # â­ NEW: Initialize unified intelligent engine
             engine = get_unified_intelligent_engine(db, tenant.id)
             
-            # 🔔 NEW: Initialize smart feedback manager
+            # 📔 NEW: Initialize smart feedback manager
             from app.chatbot.smart_feedback import AdvancedSmartFeedbackManager
             feedback_manager = AdvancedSmartFeedbackManager(db, tenant.id)
             
@@ -3240,7 +3240,7 @@ async def smart_chat_with_followup_streaming(
             from app.chatbot.simple_memory import SimpleChatbotMemory
             memory = SimpleChatbotMemory(db, tenant.id)
             
-            # 🔧 NEW: Initialize email scraper engine
+            # 📧 NEW: Initialize email scraper engine
             from app.chatbot.email_scraper_engine import EmailScraperEngine
             scraper = EmailScraperEngine(db)
             
@@ -3254,7 +3254,7 @@ async def smart_chat_with_followup_streaming(
             
             session_id, is_new_session = memory.get_or_create_session(user_id, "web")
 
-            # ⭐ ADD LOCATION DETECTION HERE (before email check)
+            # â­ ADD LOCATION DETECTION HERE (before email check)
             if is_new_session:
                 await engine._detect_and_store_location(http_request, tenant.id, session_id, user_id)
 
@@ -3272,14 +3272,58 @@ async def smart_chat_with_followup_streaming(
                 'memory_enabled': True
             })}\n"
             
-            # 🔧 NEW: Check scraper FIRST for existing email/name
+            # 📧 NEW: Check scraper FIRST for existing email/name
             scraped_data = scraper.get_scraped_data_by_session(session_id)
             
             if scraped_data and scraped_data.get('email'):
-                # Auto-use scraped data, skip asking
+                # Store in feedback system (silent - always do this)
                 logger.info(f"📧 Auto-populated from scraper: {scraped_data['email']}, Name: {scraped_data.get('name')}")
                 feedback_manager.store_user_email(session_id, scraped_data['email'])
-                # Continue to normal chat processing (don't return, don't ask)
+                
+                # ✅ ONLY greet if this is a NEW session with NO history
+                if is_new_session and len(conversation_history) == 0:
+                    name = scraped_data.get('name', 'there')
+                    welcome_msg = f"👋 Welcome back, {name}! I have your email as {scraped_data['email']}. How can I help you today?"
+                    final_response = welcome_msg
+                    
+                    # 🧠 Store welcome in memory
+                    memory.store_message(session_id, welcome_msg, False)
+                    
+                    main_response = {
+                        'type': 'main_response',
+                        'content': welcome_msg,
+                        'session_id': session_id,
+                        'answered_by': 'AUTO_WELCOME_WITH_NAME',
+                        'email_captured': True,
+                        'name_captured': bool(scraped_data.get('name')),
+                        'user_email': scraped_data['email'],
+                        'user_name': scraped_data.get('name'),
+                        'engine': 'unified_intelligent',
+                        'memory_updated': True
+                    }
+                    yield f"{json.dumps(main_response)}\n"
+                    
+                    # Send completion
+                    yield f"{json.dumps({'type': 'complete', 'total_followups': 0, 'auto_welcome': True})}\n"
+                    
+                    # Track conversation
+                    track_conversation_started_with_super_tenant(
+                        tenant_id=tenant.id,
+                        user_identifier=user_id,
+                        platform="web",
+                        db=db
+                    )
+                    
+                    # Auto-save conversation
+                    try:
+                        await auto_save_conversation(user_id, user_message, final_response, tenant.id, db)
+                    except:
+                        pass
+                    
+                    return  # ✅ Stop here for first-time welcome
+                
+                # ✅ For returning users - continue to normal chat processing below
+                # (scraper already has data, no need to ask)
             else:
                 # Scraper has nothing, check if user providing email/name NOW
                 extracted_email = feedback_manager.extract_email_from_message(request.message)
@@ -3343,7 +3387,7 @@ async def smart_chat_with_followup_streaming(
                         pass
                     return
                 
-                # 🔔 Ask for email only if scraper has nothing AND user didn't provide
+                # 📔 Ask for email only if scraper has nothing AND user didn't provide
                 elif feedback_manager.should_request_email(session_id, user_id):
                     business_name = tenant_business_name
                     email_request = feedback_manager.generate_email_request_message(business_name)
@@ -3376,7 +3420,7 @@ async def smart_chat_with_followup_streaming(
             # 🧠 Store user message in memory before processing
             memory.store_message(session_id, request.message, True)
             
-            # ⭐ SIMPLIFIED: Process with unified engine (single call)
+            # â­ SIMPLIFIED: Process with unified engine (single call)
             start_time = time.time()
             
             result = await engine.process_message(
@@ -3394,7 +3438,7 @@ async def smart_chat_with_followup_streaming(
             
             logger.info("✅ Unified engine response received successfully")
             
-            # ⭐ INTELLIGENT DELAY: Based on response complexity
+            # â­ INTELLIGENT DELAY: Based on response complexity
             response_delay = 0
             processing_time = time.time() - start_time
             
@@ -3430,7 +3474,7 @@ async def smart_chat_with_followup_streaming(
             final_response = bot_response
             memory.store_message(session_id, bot_response, False)
             
-            # 🔔 NEW: Check for inadequate responses and trigger feedback
+            # 📔 NEW: Check for inadequate responses and trigger feedback
             feedback_triggered = False
             feedback_id = None
             
@@ -3439,7 +3483,7 @@ async def smart_chat_with_followup_streaming(
                 logger.info(f"🔍 Inadequate response detection result: {is_inadequate}")
                 
                 if is_inadequate:
-                    logger.info(f"🔔 Detected inadequate response, triggering feedback system")
+                    logger.info(f"📔 Detected inadequate response, triggering feedback system")
                     
                     # 🧠 Use memory's conversation history for feedback context
                     feedback_context = memory.get_conversation_history(user_id, 10)
@@ -3475,7 +3519,7 @@ async def smart_chat_with_followup_streaming(
                 'architecture': result.get('architecture'),
                 'response_delay': actual_delay,
                 'processing_time': processing_time,
-                # 🔔 Feedback information
+                # 📔 Feedback information
                 'feedback_triggered': feedback_triggered,
                 'feedback_id': feedback_id,
                 'feedback_system': 'advanced',
@@ -3486,7 +3530,7 @@ async def smart_chat_with_followup_streaming(
             }
             yield f"{json.dumps(main_response)}\n"
             
-            # ⭐ SMART FOLLOW-UP GENERATION with memory context
+            # â­ SMART FOLLOW-UP GENERATION with memory context
             base_followup_delay = 1.5 + random.uniform(0.3, 0.8)
             await asyncio.sleep(base_followup_delay)
             

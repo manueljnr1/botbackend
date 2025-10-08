@@ -1266,6 +1266,8 @@
         await captureBrowserData();
         await captureOAuthToken();
         userInfo = await loadUserInfo();
+        await new Promise(resolve => setTimeout(resolve, 800));
+        userInfo = await loadUserInfo();
 
        
 
