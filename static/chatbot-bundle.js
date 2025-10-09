@@ -1041,6 +1041,7 @@
         let currentView = 'welcome';
         let conversations = [];
         let userInfo = null;
+        let renderedMessageCount = 0;
         
         let videoPlayer = {
           active: false,
@@ -1333,7 +1334,7 @@
         userInfo = await loadUserInfo();
         await new Promise(resolve => setTimeout(resolve, 800));
         userInfo = await loadUserInfo();
-        if (userInfo) render();
+        
 
        
 
@@ -1817,12 +1818,16 @@
           const messagesContainer = document.createElement('div');
           
           messagesContainer.appendChild(createBrandSection());
-
+        
           messages.forEach((message, index) => {
             const messageEl = document.createElement('div');
-            messageEl.className = `chatbot-message ${message.role === 'assistant' ? 'assistant' : 'user'} chatbot-message-animate`;
-            messageEl.style.animationDelay = `${index * 0.1}s`;
-
+            const isNewMessage = index >= renderedMessageCount;
+            messageEl.className = `chatbot-message ${message.role === 'assistant' ? 'assistant' : 'user'} ${isNewMessage ? 'chatbot-message-animate' : ''}`;
+            
+            if (isNewMessage) {
+              messageEl.style.animationDelay = `${(index - renderedMessageCount) * 0.1}s`;
+            }
+        
             const bubble = document.createElement('div');
             bubble.className = `chatbot-bubble ${message.role} chatbot-bubble-enhanced`;
 
@@ -2089,6 +2094,16 @@
             }, 100);
           }
         };
+
+
+        loadUserInfo().then(info => {
+          if (info && info.name) {
+            userInfo = info;
+            if (isOpen && showWelcome) {
+              render();
+            }
+          }
+        });
 
         render();
 
