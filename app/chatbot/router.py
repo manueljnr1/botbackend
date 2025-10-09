@@ -147,6 +147,8 @@ class SmartChatRequest(BaseModel):
     message: str
     user_identifier: str
     max_context: int = 200
+    user_email: Optional[str] = None 
+    user_name: Optional[str] = None
 
 class TenantFeedbackResponse(BaseModel):
     feedback_id: str
@@ -3259,6 +3261,18 @@ async def smart_chat_with_followup_streaming(
                 await engine._detect_and_store_location(http_request, tenant.id, session_id, user_id)
 
             conversation_history = memory.get_conversation_history(user_id, min(7, request.max_context))
+
+
+            if request.user_email or request.user_name:
+                logger.info(f"📧 API provided user data - Email: {request.user_email}, Name: {request.user_name}")
+                scraper._store_email(
+                    tenant_id=tenant.id,
+                    email=request.user_email,
+                    name=request.user_name,
+                    source='api_provided',
+                    capture_method='backend_integration',
+                    session_id=session_id
+                )
             
             # Send initial metadata with memory info
             yield f"{json.dumps({
@@ -4254,7 +4268,9 @@ async def serve_embed_script(
         tenantId: '{tenant.id}',
         baseUrl: '{base_url}',
         userId: getUserId(),
-        enableServerStorage: true
+        enableServerStorage: true,
+        userEmail: window.LyraChatbotUserData?.email || null,
+        userName: window.LyraChatbotUserData?.name || null
     }};
     
     const container = document.createElement('div');
@@ -4549,3 +4565,26 @@ async def get_user_info(
         "name": scraped_data.get('name') if scraped_data else None,
         "has_data": bool(scraped_data)
     }
+
+
+@router.post("/capture/manual-user-data")
+async def capture_manual_user_data(
+    user_data: dict,
+    api_key: str = Header(..., alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """Accept user data directly from business"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    scraper = EmailScraperEngine(db)
+    
+    if user_data.get('email'):
+        scraper._store_email(
+            tenant_id=tenant.id,
+            email=user_data['email'],
+            name=user_data.get('name'),
+            source='business_api',
+            capture_method='manual_provided',
+            session_id=user_data.get('session_id')
+        )
+    
+    return {'success': True}

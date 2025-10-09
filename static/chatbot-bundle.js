@@ -888,6 +888,31 @@
       text-decoration: none;
     }
 
+    .chatbot-widget {
+      will-change: transform, opacity;
+      transform: translateZ(0);
+      backface-visibility: hidden;
+    }
+
+    .chatbot-body {
+      will-change: scroll-position;
+      transform: translateZ(0);
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+
+    .chatbot-message {
+      will-change: transform, opacity;
+      transform: translateZ(0);
+    }
+
+    @media (min-width: 769px) {
+      .chatbot-widget.chatbot-bottom-right,
+      .chatbot-widget.chatbot-bottom-left {
+        bottom: 100px !important;
+      }
+    }
+
     @media (max-width: 768px) {
       .chatbot-widget {
         width: 70vw;
@@ -920,8 +945,10 @@
     @media (max-width: 480px) {
       .chatbot-widget {
         width: 100vw;
+        height: 100vh;
         height: 100dvh;
-        max-height: -webkit-fill-available;
+        max-height: 100vh;
+        max-height: 100dvh;
         border-radius: 0;
         position: fixed;
         top: 0 !important;
@@ -929,30 +956,43 @@
         right: 0 !important;
         bottom: 0 !important;
         margin: 0;
+        transform: translateZ(0);
       }
+
       .chatbot-body {
+        position: fixed;
+        top: 60px;
+        bottom: 80px;
+        left: 0;
+        right: 0;
         padding: 16px;
-        height: calc(100dvh - 140px);
         overflow-y: auto;
+        transform: translateZ(0);
       }
-      .chatbot-body {
-        -webkit-overflow-scrolling: touch;
-      }
+      
       .chatbot-input-area {
-        padding: 12px;
-        position: sticky;
+        position: fixed;
         bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 12px;
         background: white;
         z-index: 2;
+        transform: translateZ(0);
         padding-bottom: max(12px, env(safe-area-inset-bottom));
       }
+      
       .chatbot-header {
-        padding: 16px;
-        position: sticky;
+        position: fixed;
         top: 0;
+        left: 0;
+        right: 0;
+        padding: 16px;
         z-index: 2;
+        transform: translateZ(0);
         padding-top: max(16px, env(safe-area-inset-top));
       }
+
       .chatbot-input-wrapper * {
         font-size: 16px !important;
       }
@@ -975,6 +1015,28 @@
         let messages = [];
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
+
+        if (config.userEmail || config.userName) {
+          try {
+            await fetch(`${config.baseUrl}/chatbot/capture/manual-user-data`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': config.apiKey
+              },
+              body: JSON.stringify({
+                session_id: userId,
+                email: config.userEmail || null,
+                name: config.userName || null,
+                source: 'business_provided'
+              })
+            });
+            console.log('✅ Manual user data captured:', config.userEmail, config.userName);
+          } catch (error) {
+            console.warn('Failed to capture manual user data:', error);
+          }
+        }
+        
         let showWelcome = true;
         let currentView = 'welcome';
         let conversations = [];
@@ -1015,7 +1077,7 @@
                 const loadedMessages = JSON.parse(stored);
                 if (loadedMessages.length > 0) {
                   messages = loadedMessages;
-                  showWelcome = false;
+              
                 }
               }
             } catch (error) {
@@ -1036,7 +1098,7 @@
               const data = await response.json();
               if (data.messages && data.messages.length > 0) {
                 messages = data.messages;
-                showWelcome = false;
+                
               }
             }
           } catch (error) {
@@ -1067,6 +1129,9 @@
             console.warn('Failed to save server messages:', error);
           }
         };
+
+
+
 
 
         const captureBrowserData = async () => {
@@ -1268,6 +1333,7 @@
         userInfo = await loadUserInfo();
         await new Promise(resolve => setTimeout(resolve, 800));
         userInfo = await loadUserInfo();
+        if (userInfo) render();
 
        
 
