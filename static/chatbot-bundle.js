@@ -908,8 +908,9 @@
 
     @media (min-width: 769px) {
       .chatbot-widget.chatbot-bottom-right,
-      .chatbot-widget.chatbot-bottom-left {
-        bottom: 100px !important;
+      .chatbot-widget.chatbot-bottom-left,
+      .chatbot-open-btn.chatbot-bottom-right,
+      .chatbot-open-btn.chatbot-bottom-left {
       }
     }
 
