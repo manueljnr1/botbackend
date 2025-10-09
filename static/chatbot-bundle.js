@@ -1331,9 +1331,15 @@
         await loadMessages();
         await captureBrowserData();
         await captureOAuthToken();
+
+        // Load userInfo BEFORE first render
         userInfo = await loadUserInfo();
-        await new Promise(resolve => setTimeout(resolve, 800));
-        userInfo = await loadUserInfo();
+        if (!userInfo || !userInfo.name) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          userInfo = await loadUserInfo();
+        }
+
+        render();
         
 
        
@@ -1822,10 +1828,17 @@
           messages.forEach((message, index) => {
             const messageEl = document.createElement('div');
             const isNewMessage = index >= renderedMessageCount;
-            messageEl.className = `chatbot-message ${message.role === 'assistant' ? 'assistant' : 'user'} ${isNewMessage ? 'chatbot-message-animate' : ''}`;
+            
+            // Only add animation class for NEW messages
+            messageEl.className = `chatbot-message ${message.role === 'assistant' ? 'assistant' : 'user'}`;
             
             if (isNewMessage) {
+              messageEl.classList.add('chatbot-message-animate');
               messageEl.style.animationDelay = `${(index - renderedMessageCount) * 0.1}s`;
+            } else {
+              // Force no animation for existing messages
+              messageEl.style.opacity = '1';
+              messageEl.style.transform = 'translateY(0)';
             }
         
             const bubble = document.createElement('div');
@@ -2096,14 +2109,7 @@
         };
 
 
-        loadUserInfo().then(info => {
-          if (info && info.name) {
-            userInfo = info;
-            if (isOpen && showWelcome) {
-              render();
-            }
-          }
-        });
+      
 
         render();
 
