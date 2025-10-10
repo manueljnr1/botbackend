@@ -441,7 +441,7 @@
 
    
     .chatbot-welcome-close-btn {
-      position: absolute;
+      position: fixed;
       top: 16px;
       right: 16px;
       background: rgba(255, 255, 255, 0.2);
@@ -1340,7 +1340,7 @@
           userInfo = await loadUserInfo();
         }
 
-        render();
+    
         
 
        
@@ -1674,6 +1674,7 @@
         };
 
         const createWelcomeView = () => {
+          
           const welcomeView = document.createElement('div');
           welcomeView.className = 'chatbot-welcome-view';
 
@@ -1695,7 +1696,16 @@
 
           const heading = document.createElement('div');
           heading.className = 'chatbot-welcome-heading';
-          heading.textContent = userInfo?.name ? `Hi ${userInfo.name}` : 'Need support?';
+          heading.textContent = userInfo?.name ? `Hi ${userInfo.name.split(' ')[0]},` : 'Need support?';
+
+          if (!userInfo?.name) {
+            loadUserInfo().then(info => {
+                if (info?.name) {
+                    userInfo = info;
+                    heading.textContent = `Hi ${info.name.split(' ')[0]},`;
+                }
+            });
+        }
 
           const subheading = document.createElement('div');
           subheading.className = 'chatbot-welcome-subheading';
@@ -1886,7 +1896,9 @@
             messagesContainer.appendChild(typingMessage);
           }
 
+          renderedMessageCount = messages.length;
           return messagesContainer;
+          
         };
 
         const createInputArea = () => {

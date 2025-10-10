@@ -53,7 +53,7 @@ from app.live_chat.transcript_router import router as transcript_router
 from app.chatbot.admin_router import router as enhanced_admin_router
 from app.admin import intent_training_router
 from app.analytics.router import router as analytics_router
-from app.fine_tuning.router import router as fine_tuning_router
+# from app.fine_tuning.router import router as fine_tuning_router
 from app.analytics.analytics_service import AnalyticsService
 
 
@@ -216,7 +216,7 @@ app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanc
 app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
-app.include_router(fine_tuning_router, prefix="/fine-tuning", tags=["Fine-Tuning"])
+# app.include_router(fine_tuning_router, prefix="/fine-tuning", tags=["Fine-Tuning"])
 
 
 
@@ -326,12 +326,12 @@ async def startup_event():
 
 
 
-        try:
-            from app.fine_tuning.trainer import start_background_training
-            asyncio.create_task(start_background_training())
-            logger.info("🧠 Background fine-tuning system started - Autonomous learning enabled")
-        except Exception as e:
-            logger.error(f"❌ Failed to start background training: {e}")
+        # try:
+        #     from app.fine_tuning.trainer import start_background_training
+        #     asyncio.create_task(start_background_training())
+        #     logger.info("🧠 Background fine-tuning system started - Autonomous learning enabled")
+        # except Exception as e:
+        #     logger.error(f"❌ Failed to start background training: {e}")
 
 
         from app.database import retry_database_initialization
