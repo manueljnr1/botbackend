@@ -52,13 +52,15 @@ def get_engine_config():
         config = {
             **base_config,
             "pool_size": 20,          # Increased from 5
-            "max_overflow": 30,       # Increased from 10
+            "max_overflow": 30,
+            "pool_pre_ping":True,       # Increased from 10
         }
     elif settings.is_staging():
         config = {
             **base_config,
             "pool_size": 10,          # Increased from 3
-            "max_overflow": 15,       # Increased from 7
+            "max_overflow": 15,
+            "pool_pre_ping":True,       # Increased from 7
         }
     else:  # development
         config = {
@@ -66,6 +68,7 @@ def get_engine_config():
             "pool_size": 8,           # Increased from 2
             "max_overflow": 12,       # Increased from 5
             "echo": False,
+            "pool_pre_ping":True,
         }
         
         # For SQLite in development, optimize for single-threaded usage

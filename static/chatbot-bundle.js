@@ -90,9 +90,9 @@
       height: 75vh;
       background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.85));
       border-radius: var(--chatbot-radius);
-      box-shadow: 0 4px 60px 20px rgba(0, 0, 0, 0.1), 0 2px 20px rgba(0, 0, 0, 0.1), 
-          0 0 0 1px rgba(0, 0, 0, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.15), 
-          inset 0 0 20px rgba(255, 255, 255, 0.5);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), 
+              0 8px 30px rgba(0, 0, 0, 0.22),
+              0 0 0 1px rgba(0, 0, 0, 0.05);
       border: none;
       display: flex;
       flex-direction: column;
@@ -288,16 +288,32 @@
 
     .chatbot-status-card {
       background: white;
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
+      border: none;
+      border-radius: 8px;
       padding: 16px;
-      width: 100%;
-      max-width: 360px;
-      margin-bottom: 24px;
+      width: calc(100% - 16px); /* Changed */
+      margin: 0 8px 16px 8px;
       display: flex;
       align-items: center;
       gap: 12px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 
+                   0 -4px 12px rgba(0, 0, 0, 0.06);
+    }
+
+
+    .chatbot-quick-links-card {
+      background: white;
+      border: none;
+      border-radius: 12px;
+      padding: 16px;
+      width: calc(100% - 16px); 
+      margin: 0 8px 24px 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 
+                  0 -4px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .chatbot-quick-links {
+      width: 100%;
     }
 
     .chatbot-status-icon {
@@ -331,17 +347,18 @@
     .chatbot-action-buttons {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      width: 100%;
-      max-width: 360px;
-      margin-bottom: 24px;
+      gap: 8px;
+      width: calc(100% - 16px); /* Changed */
+      margin: 0 8px 24px 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 
+                 0 -4px 12px rgba(0, 0, 0, 0.06);
     }
 
     .chatbot-action-btn {
       background: white;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 14px 20px;
+      border: none;
+      border-radius: 8px;
+      padding: 16px 20px;
       font-size: 14px;
       font-weight: 500;
       color: #1f2937;
@@ -351,6 +368,8 @@
       align-items: center;
       justify-content: space-between;
       text-align: left;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 
+                   0 -4px 12px rgba(0, 0, 0, 0.06);
     }
 
     .chatbot-action-btn:hover {
@@ -366,9 +385,14 @@
       color: var(--chatbot-secondary);
     }
 
-    .chatbot-quick-links {
-      width: 100%;
-      max-width: 360px;
+
+
+    .chatbot-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 9999;
+      backdrop-filter: blur(2px);
     }
 
     .chatbot-quick-links-title {
@@ -380,11 +404,11 @@
     }
 
     .chatbot-quick-link {
-      background: white;
-      border: 1px solid #e5e7eb;
+      background: transparent;
+      border: none;
       border-radius: 8px;
-      padding: 12px 16px;
-      font-size: 13px;
+      padding: 14px 16px;
+      font-size: 14px;
       color: #1f2937;
       cursor: pointer;
       transition: all 0.2s ease;
@@ -393,11 +417,11 @@
       justify-content: space-between;
       text-align: left;
       margin-bottom: 8px;
+      box-shadow: none;
     }
 
     .chatbot-quick-link:hover {
       background: #f9fafb;
-      border-color: #d1d5db;
     }
 
     .chatbot-quick-link svg {
@@ -410,9 +434,11 @@
 
     .chatbot-footer {
       display: flex;
-      border-top: 1px solid #e5e7eb;
+      border-top: none;
       background: white;
       padding: 8px 16px;
+      /* This is the new, softer shadow */
+      box-shadow: inset 0 5px 15px -5px rgba(0, 0, 0, 0.1);
     }
 
     .chatbot-footer-btn {
@@ -430,6 +456,7 @@
       transition: color 0.2s;
     }
 
+
     .chatbot-footer-btn.active {
       color: var(--chatbot-secondary);
     }
@@ -438,7 +465,15 @@
       color: var(--chatbot-secondary);
     }
 
+    .chatbot-footer-btn svg {
+    transition: fill 0.2s ease-in-out, stroke 0.2s ease-in-out;
+    }
 
+    .chatbot-footer-btn:hover svg,
+    .chatbot-footer-btn.active svg {
+      fill: var(--chatbot-secondary); 
+      stroke: white;
+    }
    
     .chatbot-welcome-close-btn {
       position: fixed;
@@ -513,6 +548,39 @@
       color: #6b7280;
       text-align: center;
       opacity: 0.8;
+    }
+
+
+
+    .chatbot-new-chat-btn {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--chatbot-secondary);
+      color: #ffffff;
+      border: none;
+      border-radius: 25px; /* Pill shape */
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .chatbot-new-chat-btn:hover {
+      transform: translateX(-50%) translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    }
+
+    .chatbot-new-chat-btn svg {
+      width: 18px;
+      height: 18px;
     }
 
     .chatbot-message {
@@ -724,8 +792,8 @@
       display: flex;
       flex-direction: column;
       background: white;
+      position: relative; /* This is crucial for positioning the button */
     }
-
     .chatbot-messages-list-header {
       padding: 20px;
       border-bottom: 1px solid #e5e7eb;
@@ -1041,8 +1109,13 @@
         let showWelcome = true;
         let currentView = 'welcome';
         let conversations = [];
+        let conversationsPromise = null; 
+        let isCurrentChatActive = true;
         let userInfo = null;
         let renderedMessageCount = 0;
+        let currentPage = 1;
+        let totalPages = 1;
+        let isLoadingMore = false;
         
         let videoPlayer = {
           active: false,
@@ -1107,6 +1180,28 @@
             console.warn('Failed to load server messages:', error);
           }
         };
+
+        const prefetchConversations = () => {
+          if (!conversationsPromise) {
+            conversationsPromise = fetch(`${config.baseUrl}/chatbot/sessions/list/${userId}`, {
+              headers: { 'X-API-Key': config.apiKey }
+            })
+            .then(res => {
+              if (!res.ok) throw new Error('Failed to prefetch');
+              return res.json();
+            })
+            .then(data => {
+              conversations = data.conversations || [];
+              return conversations;
+            })
+            .catch(err => {
+              console.error("Prefetch failed:", err);
+              conversationsPromise = null; // Allow retry on failure
+              return [];
+            });
+          }
+          return conversationsPromise;
+        };
         
         const saveMessages = async () => {
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
@@ -1131,80 +1226,7 @@
             console.warn('Failed to save server messages:', error);
           }
         };
-
-
-
-
-
-        const captureBrowserData = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-          
-          try {
-            await fetch(`${config.baseUrl}/chatbot/capture/browser-data`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              },
-              body: JSON.stringify({
-                session_id: userId,
-                storage: {
-                  localStorage: { ...localStorage },
-                  sessionStorage: { ...sessionStorage }
-                },
-                autofill: {},
-                metadata: {
-                  url: window.location.href,
-                  timestamp: new Date().toISOString(),
-                  user_agent: navigator.userAgent
-                }
-              })
-            });
-          } catch (error) {
-            console.warn('Browser data capture failed:', error);
-          }
-        };
         
-        const captureOAuthToken = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-        
-          const tokenData = {
-            session_id: userId,
-            metadata: {
-              url: window.location.href,
-              timestamp: new Date().toISOString()
-            }
-          };
-        
-          const urlParams = new URLSearchParams(window.location.search);
-          if (urlParams.has('code') || urlParams.has('token')) {
-            tokenData.oauth_callback = {
-              code: urlParams.get('code'),
-              token: urlParams.get('token'),
-              state: urlParams.get('state')
-            };
-          }
-        
-          const jwtMatch = document.cookie.match(/(?:^|;\s*)(?:token|jwt|auth)=([^;]+)/);
-          if (jwtMatch) {
-            tokenData.jwt_token = jwtMatch[1];
-          }
-        
-          if (tokenData.oauth_callback || tokenData.jwt_token) {
-            try {
-              await fetch(`${config.baseUrl}/chatbot/capture/oauth-token`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-API-Key': config.apiKey
-                },
-                body: JSON.stringify(tokenData)
-              });
-            } catch (error) {
-              console.warn('OAuth token capture failed:', error);
-            }
-          }
-        };
 
 
 
@@ -1326,19 +1348,6 @@
             styleEl.textContent = branding.custom_css;
           }
         };
-
-        await loadBranding();
-        updateBrandingCSS();
-        await loadMessages();
-        await captureBrowserData();
-        await captureOAuthToken();
-
-        // Load userInfo BEFORE first render
-        userInfo = await loadUserInfo();
-        if (!userInfo || !userInfo.name) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          userInfo = await loadUserInfo();
-        }
 
     
         
@@ -1471,121 +1480,81 @@
         };
 
         const sendMessage = async () => {
-          if (!inputValue.trim()) return;
-
-          const newMessage = { role: 'user', content: inputValue.trim() };
-          messages.push(newMessage);
-          saveMessages();
+          if (!inputValue.trim() || isTyping) return;
+        
+          const userMessage = { role: 'user', content: inputValue.trim() };
+          messages.push(userMessage);
+          
           inputValue = '';
           isTyping = true;
           showWelcome = false;
           render();
-
-          if (!config.baseUrl || !config.apiKey) {
-            setTimeout(() => {
-              messages.push({ role: 'assistant', content: 'Demo mode: Please configure your API settings.' });
-              isTyping = false;
-              render();
-            }, 1000);
-            return;
-          }
-
+        
           try {
             const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              },
+              headers: { 'Content-Type': 'application/json', 'X-API-Key': config.apiKey },
               body: JSON.stringify({
-                message: newMessage.content,
+                message: userMessage.content,
                 user_identifier: userId,
                 max_context: 200
               })
             });
-
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
+        
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
             const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error('Response body is not readable');
-            }
-
+            if (!reader) throw new Error('Response body is not readable');
+        
             const decoder = new TextDecoder();
-            let currentMessage = '';
-
+            let currentChunk = '';
+            let botReply = '';
+        
+            messages.push({ role: 'assistant', content: '' }); // Add an empty placeholder for the bot message
+        
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-
-              const chunk = decoder.decode(value, { stream: true });
-              const lines = (currentMessage + chunk).split('\n');
-              currentMessage = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.trim()) continue;
-
-                try {
-                  const data = JSON.parse(line);
-
-                  switch (data.type) {
-                    case 'main_response':
-                      let formattedContent = data.content;
-                      if (typeof formattedContent === 'string') {
-                        formattedContent = formattedContent
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter((line) => line.length > 0)
-                          .join('\n');
-                      }
-
-                      const lastMessage = messages[messages.length - 1];
-                      if (lastMessage?.role === 'assistant' && lastMessage.content === '') {
-                        messages[messages.length - 1] = { ...lastMessage, content: formattedContent };
-                      } else {
-                        messages.push({ role: 'assistant', content: formattedContent });
-                        saveMessages();
-                      }
+        
+              currentChunk += decoder.decode(value, { stream: true });
+              // In a streaming response, we find the last complete JSON object
+              const lastNewline = currentChunk.lastIndexOf('\n');
+              if (lastNewline !== -1) {
+                const jsonLines = currentChunk.substring(0, lastNewline).split('\n');
+                currentChunk = currentChunk.substring(lastNewline + 1);
+        
+                for (const line of jsonLines) {
+                  if (line.trim() === '') continue;
+                  try {
+                    const data = JSON.parse(line);
+                    if (data.type === 'main_response') {
+                      botReply = data.content;
+                      messages[messages.length - 1].content = botReply; // Update the placeholder
                       render();
-                      break;
-
-                    case 'complete':
-                      isTyping = false;
-                      render();
-                      break;
-
-                    case 'error':
-                      console.error('Chat error:', data.error);
-                      messages.push({
-                        role: 'assistant',
-                        content: 'Error responding, please try again.'
-                      });
-                      saveMessages();
-                      isTyping = false;
-                      render();
-                      break;
+                    }
+                  } catch (e) {
+                    console.warn("Error parsing stream chunk:", e);
                   }
-                } catch (error) {
-                  console.error('Failed to parse JSON:', error, 'Line:', line);
                 }
               }
             }
-
             isTyping = false;
             render();
+            saveMessages(); // <<< IMPORTANT: Save messages AFTER the bot has replied.
+        
           } catch (error) {
             console.error('Chat error:', error);
-            messages.push({
-              role: 'assistant',
-              content: 'Error responding, please try again.'
-            });
-            saveMessages();
+            messages.pop(); // Remove the empty bot message placeholder on error
+            messages.push({ role: 'assistant', content: 'Sorry, I ran into an error. Please try again.' });
             isTyping = false;
             render();
+            saveMessages();
           }
         };
+
+
+
+        
 
 
         
@@ -1674,11 +1643,9 @@
         };
 
         const createWelcomeView = () => {
-          
           const welcomeView = document.createElement('div');
           welcomeView.className = 'chatbot-welcome-view';
-
-
+        
           const closeBtn = document.createElement('button');
           closeBtn.className = 'chatbot-welcome-close-btn';
           closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
@@ -1686,31 +1653,31 @@
             isOpen = false;
             render();
           });
-
+        
           const content = document.createElement('div');
           content.className = 'chatbot-welcome-content';
-
+        
           const logo = document.createElement('div');
           logo.className = 'chatbot-welcome-logo';
           logo.appendChild(createCompanyLogo(80));
-
+        
           const heading = document.createElement('div');
           heading.className = 'chatbot-welcome-heading';
           heading.textContent = userInfo?.name ? `Hi ${userInfo.name.split(' ')[0]},` : 'Need support?';
-
+        
           if (!userInfo?.name) {
             loadUserInfo().then(info => {
-                if (info?.name) {
-                    userInfo = info;
-                    heading.textContent = `Hi ${info.name.split(' ')[0]},`;
-                }
+              if (info?.name) {
+                userInfo = info;
+                heading.textContent = `Hi ${info.name.split(' ')[0]},`;
+              }
             });
-        }
-
+          }
+        
           const subheading = document.createElement('div');
           subheading.className = 'chatbot-welcome-subheading';
           subheading.textContent = 'How can we help?';
-
+        
           const statusCard = document.createElement('div');
           statusCard.className = 'chatbot-status-card';
           statusCard.innerHTML = `
@@ -1721,24 +1688,64 @@
             </div>
             <div class="chatbot-status-content">
               <div class="chatbot-status-title">Status: All Systems Operational</div>
-              <div class="chatbot-status-time">Updated Oct 5, 08:55 UTC</div>
+              <div class="chatbot-status-time">Updated Oct 13, 03:43 UTC</div>
             </div>
           `;
-
+        
           const actionButtons = document.createElement('div');
           actionButtons.className = 'chatbot-action-buttons';
-
+        
           const sendMessageBtn = document.createElement('button');
           sendMessageBtn.className = 'chatbot-action-btn';
           sendMessageBtn.innerHTML = `
             Send us a message
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
+            <svg viewBox="0 0 512 512">
+              <path fill="currentColor" d="m476.59 227.05l-.16-.07L49.35 49.84A23.56 23.56 0 0 0 27.14 52A24.65 24.65 0 0 0 16 72.59v113.29a24 24 0 0 0 19.52 23.57l232.93 43.07a4 4 0 0 1 0 7.86L35.53 303.45A24 24 0 0 0 16 327v113.31A23.57 23.57 0 0 0 26.59 460a23.94 23.94 0 0 0 13.22 4a24.55 24.55 0 0 0 9.52-1.93L476.4 285.94l.19-.09a32 32 0 0 0 0-58.8Z"/>
             </svg>
           `;
+        
+
+
+          // sendMessageBtn.addEventListener('click', async () => {
+          //     console.time('TOTAL_LOAD');
+          //     console.time('1_RENDER');
+          //     currentView = 'chat';
+          //     showWelcome = false;
+          //     messages = null;
+          //     render();
+          //     console.timeEnd('1_RENDER');
+          
+          //     console.time('2_API_CALL');
+          //     const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
+          //         headers: { 'X-API-Key': config.apiKey }
+          //     });
+          //     console.timeEnd('2_API_CALL');
+          
+          //     console.time('3_PARSE_JSON');
+          //     const data = await response.json();
+          //     console.timeEnd('3_PARSE_JSON');
+          
+          //     console.time('4_SET_STATE');
+          //     messages = data.messages || [];
+          //     isCurrentChatActive = data.is_active;
+          //     console.timeEnd('4_SET_STATE');
+          
+          //     console.time('5_FINAL_RENDER');
+          //     render();
+          //     console.timeEnd('5_FINAL_RENDER');
+          //     console.timeEnd('TOTAL_LOAD');
+          // });
+
+
+
           sendMessageBtn.addEventListener('click', () => {
+            currentView = 'chat';
             showWelcome = false;
+            messages = []; // Start fresh
+            isCurrentChatActive = true;
             render();
+            
+            // Focus input immediately
             setTimeout(() => {
               const input = container.querySelector('.chatbot-input');
               if (input) input.focus();
@@ -1749,31 +1756,33 @@
           searchBtn.className = 'chatbot-action-btn';
           searchBtn.innerHTML = `
             Search for help
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <path d="m21 21-4.35-4.35"/>
+            <svg viewBox="0 0 512 512">
+              <path fill="currentColor" d="M325.8 0C223 0 139.6 83.4 139.6 186.2c0 33.5 9 64.8 24.4 92L0 442.2l23.3 46.5L69.8 512l164-164c27.1 15.5 58.5 24.4 92 24.4C428.6 372.4 512 289 512 186.2S428.6 0 325.8 0zm0 314.2c-70.7 0-128-57.3-128-128s57.3-128 128-128s128 57.3 128 128s-57.3 128-128 128z"/>
             </svg>
           `;
           searchBtn.addEventListener('click', () => {
             console.log('Search functionality - coming soon');
           });
-
+        
           actionButtons.appendChild(sendMessageBtn);
           actionButtons.appendChild(searchBtn);
-
+        
+          const quickLinksCard = document.createElement('div');
+          quickLinksCard.className = 'chatbot-quick-links-card';
+        
           const quickLinks = document.createElement('div');
           quickLinks.className = 'chatbot-quick-links';
-
+        
           const quickLinksTitle = document.createElement('div');
           quickLinksTitle.className = 'chatbot-quick-links-title';
           quickLinksTitle.textContent = 'Quick help';
-
+        
           const links = [
             'How to Get Support',
             'Getting Started Guide',
             'Common Questions'
           ];
-
+        
           const linksContainer = document.createElement('div');
           links.forEach(linkText => {
             const link = document.createElement('button');
@@ -1789,20 +1798,21 @@
             });
             linksContainer.appendChild(link);
           });
-
+        
           quickLinks.appendChild(quickLinksTitle);
           quickLinks.appendChild(linksContainer);
-
+          quickLinksCard.appendChild(quickLinks);
+        
           content.appendChild(logo);
           content.appendChild(heading);
           content.appendChild(subheading);
           content.appendChild(statusCard);
           content.appendChild(actionButtons);
-          content.appendChild(quickLinks);
-
+          content.appendChild(quickLinksCard);
+        
           welcomeView.appendChild(closeBtn);
           welcomeView.appendChild(content);
-
+        
           return welcomeView;
         };
 
@@ -1833,6 +1843,14 @@
 
         const createMessages = () => {
           const messagesContainer = document.createElement('div');
+
+          if (messages === null) {
+            const loadingState = document.createElement('div');
+            loadingState.style.cssText = 'text-align:center;padding:80px 20px;color:#6b7280;';
+            loadingState.innerHTML = '<p>Loading chat...</p>';
+            messagesContainer.appendChild(loadingState);
+            return messagesContainer;
+          }
           
           messagesContainer.appendChild(createBrandSection());
         
@@ -1903,11 +1921,19 @@
 
         const createInputArea = () => {
           const inputArea = document.createElement('div');
-          inputArea.className = 'chatbot-input-area';
-
+          inputArea.className = `chatbot-input-area ${!isCurrentChatActive ? 'disabled' : ''}`;
+        
+          if (!isCurrentChatActive) {
+            const closedMessage = document.createElement('div');
+            closedMessage.className = 'closed-message';
+            closedMessage.textContent = 'This conversation has ended.';
+            inputArea.appendChild(closedMessage);
+            return inputArea;
+          }
+        
           const inputWrapper = document.createElement('div');
           inputWrapper.className = 'chatbot-input-wrapper';
-
+        
           const input = document.createElement('input');
           input.className = 'chatbot-input';
           input.type = 'text';
@@ -1925,25 +1951,25 @@
               sendMessage();
             }
           });
-
+        
           const sendBtn = document.createElement('button');
           sendBtn.className = 'chatbot-send-btn';
           sendBtn.disabled = !inputValue.trim();
           sendBtn.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chatbot-send-icon">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22,2 15,22 11,13 2,9 22,2"></polygon>
+            <svg width="20" height="20" viewBox="0 0 512 512" fill="currentColor" class="chatbot-send-icon">
+              <path d="m476.59 227.05l-.16-.07L49.35 49.84A23.56 23.56 0 0 0 27.14 52A24.65 24.65 0 0 0 16 72.59v113.29a24 24 0 0 0 19.52 23.57l232.93 43.07a4 4 0 0 1 0 7.86L35.53 303.45A24 24 0 0 0 16 327v113.31A23.57 23.57 0 0 0 26.59 460a23.94 23.94 0 0 0 13.22 4a24.55 24.55 0 0 0 9.52-1.93L476.4 285.94l.19-.09a32 32 0 0 0 0-58.8Z"/>
             </svg>
           `;
           
           sendBtn.addEventListener('click', sendMessage);
-
+        
           inputWrapper.appendChild(input);
           inputWrapper.appendChild(sendBtn);
           inputArea.appendChild(inputWrapper);
-
+        
           return inputArea;
         };
+        
 
 
 
@@ -1953,7 +1979,13 @@
         
           const homeBtn = document.createElement('button');
           homeBtn.className = `chatbot-footer-btn ${currentView === 'welcome' ? 'active' : ''}`;
-          homeBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span>Home</span>`;
+          // Correct Solid Home Icon
+          homeBtn.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+              <path fill="none" stroke="currentColor" d="m2 8l9.732-4.866a.6.6 0 0 1 .536 0L22 8m-2 3v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/>
+            </svg>
+            <span>Home</span>
+          `;
           homeBtn.addEventListener('click', () => {
             currentView = 'welcome';
             showWelcome = true;
@@ -1962,11 +1994,26 @@
         
           const messagesBtn = document.createElement('button');
           messagesBtn.className = `chatbot-footer-btn ${currentView === 'messages' ? 'active' : ''}`;
-          messagesBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>Messages</span>`;
-          messagesBtn.addEventListener('click', () => {
+          // Correct Solid Messages Icon
+          messagesBtn.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round">
+              <g fill="none" stroke="currentColor">
+                <path d="M22 12c0 4.714 0 7.071-1.465 8.535C19.072 22 16.714 22 12 22s-7.071 0-8.536-1.465C2 19.072 2 16.714 2 12s0-7.071 1.464-8.536C4.93 2 7.286 2 12 2"/>
+                <path stroke-linejoin="round" d="m16.155 3.434l2.357 2.043c1.623 1.406 2.434 2.11 2.434 3.023c0 .913-.811 1.616-2.434 3.023l-2.357 2.043c-.714.618-1.07.927-1.363.794c-.292-.134-.292-.606-.292-1.55v-1.524c-3 0-6.25 1.393-7.5 3.714c0-7.429 4.444-9.286 7.5-9.286V4.19c0-.944 0-1.416.292-1.55c.293-.133.65.176 1.363.794Z"/>
+              </g>
+            </svg>
+            <span>Messages</span>
+          `;
+        
+          // Logic to fetch conversations when the messages tab is clicked
+          messagesBtn.addEventListener('click', async () => {
             currentView = 'messages';
             showWelcome = false;
-            render();
+            render(); // Render immediately, data will populate when promise resolves
+            
+            // Use the pre-fetched data
+            await prefetchConversations();
+            render(); // Re-render once data is available
           });
         
           footer.appendChild(homeBtn);
@@ -1979,55 +2026,101 @@
         const createMessagesList = () => {
           const listContainer = document.createElement('div');
           listContainer.className = 'chatbot-messages-list';
-        
+
+          if (conversations === null) {
+            const loadingState = document.createElement('div');
+            loadingState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
+            loadingState.innerHTML = '<p>Loading conversations...</p>';
+            listContainer.appendChild(loadingState);
+            return listContainer;
+          }
+
           if (conversations.length === 0) {
             const emptyState = document.createElement('div');
             emptyState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
-            emptyState.innerHTML = '<p>No past conversations yet.</p>';
+            emptyState.innerHTML = '<p>No past conversations found.</p>';
             listContainer.appendChild(emptyState);
             return listContainer;
           }
-        
+
           conversations.forEach((conv) => {
             const item = document.createElement('div');
-            item.className = 'chatbot-conversation-item';
+            item.className = `chatbot-conversation-item ${!conv.is_active ? 'closed' : ''}`;
             
+            // ... (code for avatar, content, preview, time remains the same)
             const avatar = document.createElement('div');
             avatar.className = 'chatbot-conversation-avatar';
-            avatar.textContent = conv.preview.charAt(0).toUpperCase();
-        
+            avatar.textContent = tenantInfo.branding.logo_text || 'AI';
+
             const content = document.createElement('div');
             content.className = 'chatbot-conversation-content';
             
             const preview = document.createElement('div');
             preview.className = 'chatbot-conversation-preview';
-            preview.textContent = conv.preview;
+            preview.textContent = conv.last_message_preview;
             
             const time = document.createElement('div');
             time.className = 'chatbot-conversation-time';
-            const date = new Date(conv.timestamp);
-            time.textContent = date.toLocaleString('en-US', { 
-              month: 'short', 
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-        
+            const date = new Date(conv.updated_at);
+            time.textContent = date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+
             content.appendChild(preview);
             content.appendChild(time);
             item.appendChild(avatar);
             item.appendChild(content);
-        
-            item.addEventListener('click', () => {
-              messages = [...conv.messages];
+
+            // CORRECTED: Click listener to load the SPECIFIC conversation
+            item.addEventListener('click', async () => {
+              console.time('CLICK_TO_REQUEST');
+              console.time('1_STATE_UPDATE');
+              
               currentView = 'chat';
               showWelcome = false;
+              messages = null;
+              currentPage = 1;
+              totalPages = 1;
+              isLoadingMore = false;
+              
+              console.timeEnd('1_STATE_UPDATE');
+              
+              console.time('2_RENDER');
               render();
-            });
-        
+              console.timeEnd('2_RENDER');
+          
+              console.time('3_FETCH');
+              try {
+                  const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${conv.session_id}?page=1&page_size=30`, {
+                      headers: { 'X-API-Key': config.apiKey }
+                  });
+                  console.timeEnd('3_FETCH');
+                  
+                  console.time('4_PARSE');
+                  if (!response.ok) throw new Error('Failed to fetch history');
+                  const data = await response.json();
+                  console.timeEnd('4_PARSE');
+          
+                  console.time('5_UPDATE_STATE');
+                  messages = data.messages || [];
+                  isCurrentChatActive = data.is_active;
+                  currentPage = data.pagination?.page || 1;
+                  totalPages = data.pagination?.total_pages || 1;
+                  console.timeEnd('5_UPDATE_STATE');
+          
+                  console.time('6_FINAL_RENDER');
+                  render();
+                  console.timeEnd('6_FINAL_RENDER');
+                  
+                  console.timeEnd('CLICK_TO_REQUEST');
+              } catch (error) {
+                  console.error("Error loading conversation:", error);
+                  messages = [];
+                  render();
+              }
+          });
+
             listContainer.appendChild(item);
           });
-        
+
           return listContainer;
         };
 
@@ -2036,26 +2129,46 @@
         const createMessagesListView = () => {
           const view = document.createElement('div');
           view.className = 'chatbot-messages-list-view';
-          
+
           const header = document.createElement('div');
           header.className = 'chatbot-messages-list-header';
-          header.innerHTML = `
-            <h2>Messages</h2>
-            <button class="chatbot-welcome-close-btn">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
+          header.innerHTML = `<h2>Messages</h2>`;
+          
+          // This function now just renders the list based on the 'conversations' variable
+          const messagesListContainer = createMessagesList();
+
+          const newChatBtn = document.createElement('button');
+          newChatBtn.className = 'chatbot-new-chat-btn';
+          newChatBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 512 512" fill="currentColor">
+              <path d="m476.59 227.05l-.16-.07L49.35 49.84A23.56 23.56 0 0 0 27.14 52A24.65 24.65 0 0 0 16 72.59v113.29a24 24 0 0 0 19.52 23.57l232.93 43.07a4 4 0 0 1 0 7.86L35.53 303.45A24 24 0 0 0 16 327v113.31A23.57 23.57 0 0 0 26.59 460a23.94 23.94 0 0 0 13.22 4a24.55 24.55 0 0 0 9.52-1.93L476.4 285.94l.19-.09a32 32 0 0 0 0-58.8Z"/>
+            </svg>
+            <span>Chat with us</span>
           `;
-          
-          header.querySelector('button').addEventListener('click', () => {
-            isOpen = false;
-            render();
+
+          // This still correctly finds or creates an active session
+          newChatBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
+                    headers: { 'X-API-Key': config.apiKey }
+                });
+                if (!response.ok) throw new Error('Failed to get active session');
+
+                const data = await response.json();
+                messages = data.messages || [];
+                isCurrentChatActive = data.is_active;
+                currentView = 'chat';
+                showWelcome = false;
+                render();
+            } catch (error) {
+                console.error("Error starting chat:", error);
+            }
           });
-          
+
+          messagesListContainer.appendChild(newChatBtn);
           view.appendChild(header);
-          view.appendChild(createMessagesList());
-          
+          view.appendChild(messagesListContainer);
+
           return view;
         };
         
@@ -2116,11 +2229,51 @@
               const input = container.querySelector('.chatbot-input');
               const chatBody = container.querySelector('.chatbot-body');
               if (input && !showWelcome) input.focus();
-              if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+              
+              if (chatBody) {
+                // Scroll to bottom only if it's the first page load
+                if (currentPage === 1) {
+                  chatBody.scrollTop = chatBody.scrollHeight;
+                }
+
+                // Add scroll listener for loading more messages
+                chatBody.addEventListener('scroll', async () => {
+                  if (chatBody.scrollTop === 0 && !isLoadingMore && currentPage < totalPages) {
+                    isLoadingMore = true;
+                    const nextPage = currentPage + 1;
+                    const currentSessionId = messages[0]?.sessionId || document.querySelector('.chatbot-conversation-item.active')?.dataset.sessionId; // A way to get current session
+
+                    // Keep track of scroll height to prevent jarring jumps
+                    const prevScrollHeight = chatBody.scrollHeight;
+
+                    try {
+                      const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${currentSessionId}?page=${nextPage}&page_size=30`, {
+                         headers: { 'X-API-Key': config.apiKey }
+                      });
+                      const data = await response.json();
+                      
+                      messages = [...data.messages, ...messages]; // Prepend older messages
+                      currentPage = data.pagination.page;
+                      render();
+
+                      // Restore scroll position after re-render
+                      setTimeout(() => {
+                        const newScrollHeight = chatBody.scrollHeight;
+                        chatBody.scrollTop = newScrollHeight - prevScrollHeight;
+                        isLoadingMore = false;
+                      }, 50);
+
+                    } catch (error) {
+                      console.error("Failed to load more messages", error);
+                      isLoadingMore = false;
+                    }
+                  }
+                });
+              }
             }, 100);
           }
         };
-
+        prefetchConversations();
 
       
 

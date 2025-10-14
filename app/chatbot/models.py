@@ -25,6 +25,7 @@ class ChatSession(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), index=True)
     user_email = Column(String, nullable=True) 
     session_metadata = Column(JSON, nullable=True)
+    last_message_preview = Column(Text, nullable=True)
     
     # === FIX START ===
     # Add the missing fields for the smart feedback system
@@ -57,9 +58,10 @@ class ChatMessage(Base):
     content = Column(Text)
     translated_content = Column(Text, nullable=True)  # Add translated content
     source_language = Column(String(10), nullable=True)  # Source language code
-    target_language = Column(String(10), nullable=True)  # Target language code (if translated)
+    target_language = Column(String(10), nullable=True)  
     is_from_user = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    
     
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
