@@ -1082,6 +1082,7 @@
         let isOpen = false;
         let isTyping = false;
         let messages = [];
+        let conversationCache = {};
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
 
@@ -1706,51 +1707,19 @@
         
 
 
-          // sendMessageBtn.addEventListener('click', async () => {
-          //     console.time('TOTAL_LOAD');
-          //     console.time('1_RENDER');
-          //     currentView = 'chat';
-          //     showWelcome = false;
-          //     messages = null;
-          //     render();
-          //     console.timeEnd('1_RENDER');
-          
-          //     console.time('2_API_CALL');
-          //     const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
-          //         headers: { 'X-API-Key': config.apiKey }
-          //     });
-          //     console.timeEnd('2_API_CALL');
-          
-          //     console.time('3_PARSE_JSON');
-          //     const data = await response.json();
-          //     console.timeEnd('3_PARSE_JSON');
-          
-          //     console.time('4_SET_STATE');
-          //     messages = data.messages || [];
-          //     isCurrentChatActive = data.is_active;
-          //     console.timeEnd('4_SET_STATE');
-          
-          //     console.time('5_FINAL_RENDER');
-          //     render();
-          //     console.timeEnd('5_FINAL_RENDER');
-          //     console.timeEnd('TOTAL_LOAD');
-          // });
-
-
 
           sendMessageBtn.addEventListener('click', () => {
             currentView = 'chat';
             showWelcome = false;
-            messages = []; // Start fresh
+            messages = [];
             isCurrentChatActive = true;
             render();
             
-            // Focus input immediately
             setTimeout(() => {
-              const input = container.querySelector('.chatbot-input');
-              if (input) input.focus();
+                const input = container.querySelector('.chatbot-input');
+                if (input) input.focus();
             }, 100);
-          });
+        });
 
           const searchBtn = document.createElement('button');
           searchBtn.className = 'chatbot-action-btn';
@@ -2071,46 +2040,48 @@
 
             // CORRECTED: Click listener to load the SPECIFIC conversation
             item.addEventListener('click', async () => {
-              console.time('CLICK_TO_REQUEST');
-              console.time('1_STATE_UPDATE');
-              
               currentView = 'chat';
               showWelcome = false;
+              
+              // Check cache first
+              if (conversationCache[conv.session_id]) {
+                  console.log('📦 Loading from cache');
+                  messages = conversationCache[conv.session_id].messages;
+                  isCurrentChatActive = conversationCache[conv.session_id].is_active;
+                  currentPage = conversationCache[conv.session_id].currentPage;
+                  totalPages = conversationCache[conv.session_id].totalPages;
+                  render();
+                  return; // Don't fetch - use cached data
+              }
+              
+              // Only fetch if not cached
               messages = null;
               currentPage = 1;
               totalPages = 1;
               isLoadingMore = false;
-              
-              console.timeEnd('1_STATE_UPDATE');
-              
-              console.time('2_RENDER');
               render();
-              console.timeEnd('2_RENDER');
           
-              console.time('3_FETCH');
               try {
                   const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${conv.session_id}?page=1&page_size=30`, {
                       headers: { 'X-API-Key': config.apiKey }
                   });
-                  console.timeEnd('3_FETCH');
-                  
-                  console.time('4_PARSE');
                   if (!response.ok) throw new Error('Failed to fetch history');
-                  const data = await response.json();
-                  console.timeEnd('4_PARSE');
           
-                  console.time('5_UPDATE_STATE');
+                  const data = await response.json();
                   messages = data.messages || [];
                   isCurrentChatActive = data.is_active;
                   currentPage = data.pagination?.page || 1;
                   totalPages = data.pagination?.total_pages || 1;
-                  console.timeEnd('5_UPDATE_STATE');
-          
-                  console.time('6_FINAL_RENDER');
-                  render();
-                  console.timeEnd('6_FINAL_RENDER');
                   
-                  console.timeEnd('CLICK_TO_REQUEST');
+                  // Cache the result
+                  conversationCache[conv.session_id] = {
+                      messages,
+                      is_active: isCurrentChatActive,
+                      currentPage,
+                      totalPages
+                  };
+                  
+                  render();
               } catch (error) {
                   console.error("Error loading conversation:", error);
                   messages = [];
@@ -2147,23 +2118,18 @@
           `;
 
           // This still correctly finds or creates an active session
-          newChatBtn.addEventListener('click', async () => {
-            try {
-                const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
-                    headers: { 'X-API-Key': config.apiKey }
-                });
-                if (!response.ok) throw new Error('Failed to get active session');
-
-                const data = await response.json();
-                messages = data.messages || [];
-                isCurrentChatActive = data.is_active;
-                currentView = 'chat';
-                showWelcome = false;
-                render();
-            } catch (error) {
-                console.error("Error starting chat:", error);
-            }
-          });
+          newChatBtn.addEventListener('click', () => {
+            currentView = 'chat';
+            showWelcome = false;
+            messages = [];
+            isCurrentChatActive = true;
+            render();
+            
+            setTimeout(() => {
+                const input = container.querySelector('.chatbot-input');
+                if (input) input.focus();
+            }, 100);
+        });
 
           messagesListContainer.appendChild(newChatBtn);
           view.appendChild(header);
