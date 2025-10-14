@@ -423,10 +423,16 @@
       text-align: left;
       margin-bottom: 8px;
       box-shadow: none;
+      width: 100%;
     }
 
     .chatbot-quick-link:hover {
       background: #f9fafb;
+      color: var(--chatbot-secondary);
+    }
+
+    .chatbot-quick-link:hover svg {
+      color: var(--chatbot-secondary);
     }
 
     .chatbot-quick-link svg {
@@ -804,77 +810,6 @@
     }
 
 
-    // .chatbot-faq-view {
-    //   display: flex;
-    //   flex-direction: column;
-    //   flex: 1;
-    //   background: white;
-    // }
-    // .chatbot-faq-header {
-    //   display: flex;
-    //   align-items: center;
-    //   justify-content: center;
-    //   padding: 10px 16px;
-    //   border-bottom: 1px solid #e5e7eb;
-    //   position: relative;
-    // }
-    // .chatbot-faq-back-btn {
-    //   position: absolute;
-    //   background: transparent;
-    //   left: 16px;
-    //   border: none;
-    //   cursor: pointer;
-    //   padding: 4px;
-    //   margin-right: 12px;
-    // }
-    // .chatbot-faq-header h2 {
-    //   font-size: 18px;
-    //   font-weight: 500;
-    //   color: #1f2937;
-    //   margin: 0;
-    // }
-    // .chatbot-faq-list {
-    //   flex: 1;
-    //   overflow-y: auto;
-    //   padding: 8px 16px;
-    // }
-    // .chatbot-faq-item {
-    //   border-bottom: 1px solid #f0f2f5;
-    // }
-    // .chatbot-faq-question {
-    //   background: transparent;
-    //   border: none;
-    //   width: 100%;
-    //   text-align: left;
-    //   padding: 16px 0;
-    //   font-size: 14px;
-    //   font-weight: 500;
-    //   color: #1f2937;
-    //   cursor: pointer;
-    //   display: flex;
-    //   justify-content: space-between;
-    //   align-items: center;
-    // }
-    // .chatbot-faq-question svg {
-    //   transition: transform 0.2s;
-    //   flex-shrink: 0;
-    //   margin-left: 12px;
-    // }
-    // .chatbot-faq-item.active .chatbot-faq-question svg {
-    //   transform: rotate(180deg);
-    // }
-    // .chatbot-faq-answer {
-    //   max-height: 0;
-    //   overflow: hidden;
-    //   font-size: 13px;
-    //   color: #6b7280;
-    //   padding: 0 8px;
-    //   transition: max-height 0.3s ease-out, padding 0.3s ease-out;
-    // }
-    // .chatbot-faq-item.active .chatbot-faq-answer {
-    //   max-height: 300px; /* Adjust if answers are very long */
-    //   padding: 0 8px 16px 8px;
-    // }
 
 
 
@@ -966,6 +901,42 @@
       padding-bottom: 20px;
     }
 
+
+    .chatbot-game-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      background-color: #f0f2f5;
+      color: #1f2937;
+      text-align: center;
+      padding: 20px;
+      position: relative; /* Needed for the close button */
+    }
+    #lyra-tower-canvas {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+    .chatbot-game-score {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--chatbot-secondary);
+      margin: 10px 0;
+    }
+    .chatbot-game-instructions {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+    .chatbot-game-view .chatbot-welcome-close-btn {
+      color: #1f2937;
+      background: rgba(0, 0, 0, 0.05);
+    }
+    .chatbot-game-view .chatbot-welcome-close-btn:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
 
 
     .chatbot-messages-list-view {
@@ -1154,6 +1125,42 @@
     .chatbot-message {
       will-change: transform, opacity;
       transform: translateZ(0);
+    }
+
+    .chatbot-quote {
+      font-size: 13px; 
+      font-style: italic;
+      color: #9ca3af;
+      cursor: default;
+      transition: all 0.4s ease;
+      margin-top: auto; 
+      padding-top: 15px;
+      padding-bottom: 25px;
+    }
+
+    .chatbot-quote:hover {
+      color: transparent;
+      background-image: linear-gradient(45deg, #ff00ff, #00ffff, #ffff00, #ff00ff);
+      background-size: 400% 400%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: radiant-text 3s ease infinite, sparkle-glow 1.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes radiant-text {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    @keyframes sparkle-glow {
+      from {
+        text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #00ffff;
+      }
+      to {
+        text-shadow: 0 0 10px #fff, 0 0 20px #ff00ff, 0 0 30px #ffff00;
+      }
     }
 
     @media (min-width: 769px) {
@@ -1937,6 +1944,13 @@
           const logo = document.createElement('div');
           logo.className = 'chatbot-welcome-logo';
           logo.appendChild(createCompanyLogo(80));
+
+          logo.style.cursor = 'pointer'; 
+          logo.addEventListener('click', () => {
+            currentView = 'game';
+            showWelcome = false;
+            render();
+          });
         
           const heading = document.createElement('div');
           heading.className = 'chatbot-welcome-heading';
@@ -2040,11 +2054,14 @@
             const link = document.createElement('button');
             link.className = 'chatbot-quick-link';
             link.innerHTML = `
-              ${linkInfo.text}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="9 18 15 12 9 6"></polyline>
-              </svg>
-            `;
+            <span>${linkInfo.text}</span>
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+                <path d="m15 17l5-5l-5-5"/>
+                <path d="M4 18v-2a4 4 0 0 1 4-4h12"/>
+              </g>
+            </svg>
+          `;
             link.addEventListener('click', linkInfo.action);
             linksContainer.appendChild(link);
           });
@@ -2123,6 +2140,120 @@
           faqView.appendChild(list);
           return faqView;
         };
+
+
+        let towerGameInstance = null;
+        
+        const createGameView = () => {
+          const gameView = document.createElement('div');
+          gameView.className = 'chatbot-game-view';
+
+          // Add the Close Button
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-welcome-close-btn'; 
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.addEventListener('click', () => {
+            isOpen = false;
+            render();
+          });
+
+          gameView.innerHTML = `
+            <h2>Lyra Tower</h2>
+            <div id="game-score" class="chatbot-game-score">0</div>
+            <canvas id="lyra-tower-canvas" width="300" height="400"></canvas>
+            <div id="game-instructions" class="chatbot-game-instructions">Click to start!</div>
+          `;
+          
+          gameView.prepend(closeBtn); // Add the close button to the top
+
+          setTimeout(() => {
+            const canvas = gameView.querySelector('#lyra-tower-canvas');
+            if (canvas) {
+              towerGameInstance = LyraTowerGame(canvas);
+              canvas.addEventListener('click', () => {
+                if (towerGameInstance) towerGameInstance.onTap();
+              });
+            }
+          }, 100);
+
+          const quote = document.createElement('div');
+          quote.className = 'chatbot-quote';
+          quote.innerHTML = `<em>"The time is always right to do what is right"</em>`;
+          gameView.appendChild(quote);
+
+          return gameView;
+
+          return gameView;
+        };
+
+        const LyraTowerGame = (canvas) => {
+          const ctx = canvas.getContext('2d');
+          let score, blocks, gameState, animationFrameId;
+
+          const reset = () => {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            
+            score = 0;
+            gameState = 'waiting';
+            blocks = [{ x: 0, y: canvas.height - 20, width: canvas.width, height: 20 }];
+            
+            document.getElementById('game-score').textContent = '0';
+            document.getElementById('game-instructions').textContent = 'Click to start!';
+            
+            loop();
+          };
+
+          const addBlock = (x, width) => {
+            const newY = blocks[blocks.length - 1].y - 20;
+            blocks.push({ x, y: newY, width, height: 20, speed: (2 + score / 5) * (Math.random() > 0.5 ? 1 : -1) });
+          };
+
+          const onTap = () => {
+            if (gameState === 'waiting') {
+              gameState = 'playing';
+              document.getElementById('game-instructions').textContent = 'Click to drop the block!';
+              addBlock(Math.random() * (canvas.width - 100), 100);
+            } else if (gameState === 'playing') {
+              const currentBlock = blocks[blocks.length - 1];
+              const topBlock = blocks[blocks.length - 2];
+              const overlap = Math.max(0, Math.min(currentBlock.x + currentBlock.width, topBlock.x + topBlock.width) - Math.max(currentBlock.x, topBlock.x));
+
+              if (overlap > 0) {
+                currentBlock.width = overlap;
+                currentBlock.x = Math.max(currentBlock.x, topBlock.x);
+                score++;
+                document.getElementById('game-score').textContent = score;
+                addBlock(currentBlock.x, currentBlock.width);
+              } else {
+                gameState = 'gameOver';
+                document.getElementById('game-instructions').textContent = `Game Over! Score: ${score}. Click to play again.`;
+              }
+            } else if (gameState === 'gameOver') {
+              reset();
+            }
+          };
+
+          const loop = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (gameState === 'playing') {
+              const currentBlock = blocks[blocks.length - 1];
+              currentBlock.x += currentBlock.speed;
+              if (currentBlock.x < 0 || currentBlock.x + currentBlock.width > canvas.width) {
+                currentBlock.speed *= -1;
+              }
+            }
+            blocks.forEach((block, i) => {
+              const hue = 190 + (i * 10);
+              ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
+              ctx.fillRect(block.x, block.y, block.width, block.height);
+            });
+            animationFrameId = requestAnimationFrame(loop);
+          };
+
+          reset();
+          return { onTap };
+        };
+
 
 
         const createBrandSection = () => {
@@ -2436,7 +2567,11 @@
           const body = document.createElement('div');
           body.className = 'chatbot-body';
           
-          if (showWelcome) {
+          if (currentView === 'game') {
+            body.style.padding = '0';
+            body.appendChild(createGameView());
+            widget.appendChild(body); // Note: No footer is added here
+          } else if (showWelcome) {
             body.style.padding = '0';
             if (isFaqViewOpen) {
               body.appendChild(createFaqView());
@@ -2462,7 +2597,7 @@
             const inputArea = createInputArea();
             widget.appendChild(inputArea);
           }
-        
+ 
           return widget;
         };
 
