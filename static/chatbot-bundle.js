@@ -235,6 +235,7 @@
       background: linear-gradient(to bottom, #000000 0%, #000000 40%, #ffffff 40%, #ffffff 100%);
       height: 100%;
       overflow-y: auto;
+      overscroll-behavior: contain;
       position: relative;
     }
 
@@ -847,6 +848,7 @@
     .chatbot-faq-list {
       flex: 1;
       overflow-y: auto;
+      overscroll-behavior: contain;
       padding: 16px; /* More padding around the cards */
       display: flex;
       flex-direction: column;
@@ -964,6 +966,7 @@
     .chatbot-messages-list {
       flex: 1;
       overflow-y: auto;
+      overscroll-behavior: contain;
       padding: 12px;
     }
 
@@ -1129,13 +1132,16 @@
 
     .chatbot-quote {
       font-size: 13px; 
-      font-style: italic;
+      // font-style: italic;
+      font-weight: 600;
       color: #9ca3af;
       cursor: default;
       transition: all 0.4s ease;
       margin-top: auto; 
       padding-top: 15px;
       padding-bottom: 25px;
+      user-select: none; /* <-- Add this line */
+      -webkit-user-select: none;
     }
 
     .chatbot-quote:hover {
@@ -1255,12 +1261,15 @@
       .chatbot-widget > .chatbot-body:first-child {
         position: fixed;
         top: 0;
-        bottom: 56px; /* Height of the footer */
+        bottom: 56px; 
         left: 0;
         right: 0;
         width: 100%;
         overflow-y: auto;
       }
+
+      .chatbot-body.is-game-view {
+        bottom: 0;
 
       .chatbot-widget > .chatbot-body:first-child + .chatbot-footer {
         position: fixed;
@@ -1874,6 +1883,9 @@
           openButton.appendChild(ring2);
 
           openButton.addEventListener('click', () => {
+            currentView = 'welcome';
+            showWelcome = true;
+            isFaqViewOpen = false;
             isOpen = true;
             render();
           });
@@ -2170,7 +2182,7 @@
             const canvas = gameView.querySelector('#lyra-tower-canvas');
             if (canvas) {
               towerGameInstance = LyraTowerGame(canvas);
-              canvas.addEventListener('click', () => {
+              gameView.addEventListener('click', () => {
                 if (towerGameInstance) towerGameInstance.onTap();
               });
             }
@@ -2568,6 +2580,7 @@
           body.className = 'chatbot-body';
           
           if (currentView === 'game') {
+            body.classList.add('is-game-view');
             body.style.padding = '0';
             body.appendChild(createGameView());
             widget.appendChild(body); // Note: No footer is added here
