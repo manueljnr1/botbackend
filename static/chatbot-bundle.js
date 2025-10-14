@@ -1229,7 +1229,42 @@
         };
         
 
-
+        const findOrCreateActiveChat = async () => {
+          // Ensure conversations are loaded
+          const conversationList = await prefetchConversations(); 
+        
+          // Find an open/active conversation
+          const activeConversation = conversationList.find(conv => conv.is_active);
+        
+          if (activeConversation) {
+            // Active conversation found, load it by simulating a click on its item.
+            // This reuses the existing, robust logic for loading a conversation.
+            const conversationItem = document.querySelector(`[data-session-id='${activeConversation.session_id}']`);
+            if (conversationItem) {
+                conversationItem.click();
+            } else {
+                // Fallback if item isn't rendered: manually load it.
+                const itemClickHandler = document.querySelector('.chatbot-conversation-item')?.onclick;
+                if(typeof itemClickHandler === 'function') {
+                    const mockEvent = new MouseEvent('click');
+                    Object.defineProperty(mockEvent, 'currentTarget', { value: { dataset: { sessionId: activeConversation.session_id } } });
+                    itemClickHandler(mockEvent);
+                }
+            }
+          } else {
+            // No active chat found, create a new one.
+            currentView = 'chat';
+            showWelcome = false;
+            messages = [];
+            isCurrentChatActive = true;
+            render();
+            
+            setTimeout(() => {
+                const input = container.querySelector('.chatbot-input');
+                if (input) input.focus();
+            }, 100);
+          }
+        };
 
         const loadUserInfo = async () => {
           if (!config.baseUrl || !config.apiKey) return null;
@@ -1708,18 +1743,7 @@
 
 
 
-          sendMessageBtn.addEventListener('click', () => {
-            currentView = 'chat';
-            showWelcome = false;
-            messages = [];
-            isCurrentChatActive = true;
-            render();
-            
-            setTimeout(() => {
-                const input = container.querySelector('.chatbot-input');
-                if (input) input.focus();
-            }, 100);
-        });
+          sendMessageBtn.addEventListener('click', findOrCreateActiveChat);
 
           const searchBtn = document.createElement('button');
           searchBtn.className = 'chatbot-action-btn';
@@ -2117,19 +2141,8 @@
             <span>Chat with us</span>
           `;
 
-          // This still correctly finds or creates an active session
-          newChatBtn.addEventListener('click', () => {
-            currentView = 'chat';
-            showWelcome = false;
-            messages = [];
-            isCurrentChatActive = true;
-            render();
-            
-            setTimeout(() => {
-                const input = container.querySelector('.chatbot-input');
-                if (input) input.focus();
-            }, 100);
-        });
+          
+          newChatBtn.addEventListener('click', findOrCreateActiveChat);
 
           messagesListContainer.appendChild(newChatBtn);
           view.appendChild(header);
