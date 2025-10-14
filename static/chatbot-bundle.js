@@ -183,7 +183,7 @@
 
     .chatbot-title {
       font-size: 1rem;
-      font-weight: 600;
+      font-weight: 500;
       color: #1f2937;
       margin: 0;
     }
@@ -272,7 +272,7 @@
 
     .chatbot-welcome-heading {
       font-size: 24px;
-      font-weight: 700;
+      font-weight: 600;
       color: #ffffff;
       margin-bottom: 8px;
       line-height: 1.3;
@@ -280,7 +280,7 @@
 
     .chatbot-welcome-subheading {
       font-size: 24px;
-      font-weight: 700;
+      font-weight: 600;
       color: #ffffff;
       margin-bottom: 24px;
       line-height: 1.3;
@@ -334,7 +334,7 @@
 
     .chatbot-status-title {
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       color: #1f2937;
       margin-bottom: 2px;
     }
@@ -360,7 +360,8 @@
       border-radius: 8px;
       padding: 16px 20px;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 400;
+      color: #1f2937;
       color: #1f2937;
       cursor: pointer;
       transition: all 0.2s ease;
@@ -397,7 +398,7 @@
 
     .chatbot-quick-links-title {
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
       color: #6b7280;
       margin-bottom: 12px;
       text-align: left;
@@ -493,6 +494,16 @@
       z-index: 10;
     }
 
+    .chatbot-messages-list-view .chatbot-welcome-close-btn {
+      color: #1f2937; /* The soft black color */
+      background: rgba(0, 0, 0, 0.05); /* Optional: A very light grey background */
+    }
+
+    .chatbot-messages-list-view .chatbot-welcome-close-btn:hover {
+        background: rgba(0, 0, 0, 0.1); /* Slightly darker on hover */
+        transform: rotate(90deg); /* Keep the rotation effect */
+    }
+
     .chatbot-welcome-close-btn:hover {
       background: rgba(255, 255, 255, 0.3);
       transform: rotate(90deg);
@@ -533,7 +544,7 @@
 
     .chatbot-brand-name {
       font-size: 1.25rem;
-      font-weight: 700;
+      font-weight: 600;
       color: var(--chatbot-text);
       margin-bottom: 4px;
       text-align: center;
@@ -567,7 +578,7 @@
       border-radius: 25px; /* Pill shape */
       padding: 12px 20px;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s ease;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -617,6 +628,7 @@
       line-height: 1.5;
       position: relative;
       transition: all 0.2s ease;
+      font-weight: 400;
     }
 
     .chatbot-bubble-enhanced {
@@ -795,17 +807,18 @@
       position: relative; /* This is crucial for positioning the button */
     }
     .chatbot-messages-list-header {
-      padding: 20px;
+      padding: 10px 20px;
       border-bottom: 1px solid #e5e7eb;
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
     }
 
     .chatbot-messages-list-header h2 {
       margin: 0;
       font-size: 20px;
-      font-weight: 600;
+      font-weight: 500;
+      color: #1f2937;
     }
 
     .chatbot-messages-list {
@@ -819,7 +832,7 @@
       gap: 12px;
       padding: 12px;
       border-radius: 8px;
-      margin-bottom: 8px;
+      border-bottom: 1px solid #f0f2f5;
       cursor: pointer;
       transition: background 0.2s;
     }
@@ -838,7 +851,7 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      font-weight: 600;
+      font-weight: 500;
     }
 
     .chatbot-conversation-content {
@@ -995,6 +1008,7 @@
       .chatbot-bubble {
         max-width: calc(100% - 50px);
         font-size: 14px;
+        font-weight: 400;
       }
       .particle {
         display: none;
@@ -1069,6 +1083,50 @@
   `;
   document.head.appendChild(style);
 
+
+  const loadBranding = async (config, tenantInfo) => {
+    if (!config.baseUrl || !config.apiKey) return tenantInfo; // Return original if no config
+    try {
+      const response = await fetch(`${config.baseUrl}/chatbot/tenant-info`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': config.apiKey
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.branding) {
+          // Return the NEW, merged object
+          return {
+            ...tenantInfo,
+            ...data,
+            branding: { ...tenantInfo.branding, ...data.branding }
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to fetch branding', error);
+    }
+    return tenantInfo; // Return original on error
+  };
+
+  const updateBrandingCSS = (tenantInfo) => {
+    const root = document.documentElement;
+    const { branding } = tenantInfo;
+    root.style.setProperty('--chatbot-secondary', branding.user_bubble_color);
+    root.style.setProperty('--chatbot-shadow', '0 8px 30px rgba(0,0,0,0.12)');
+
+    if (branding.custom_css) {
+      let styleEl = document.getElementById('chatbot-custom-styles');
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'chatbot-custom-styles';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = branding.custom_css;
+    }
+  };
+
   window.LyraChatbot = {
     init: async function(config) {
       console.log('🚀 COMPLETE MODIFIED CHATBOT VERSION');
@@ -1078,6 +1136,28 @@
           console.error('Container element not found');
           return;
         }
+
+        let tenantInfo = {
+          business_name: config.businessName || 'Your Support Bot',
+          chatbot_widget_icon: config.widgetIcon || '',
+          branding: {
+            logo_text: config.logoText || 'SB',
+            logo_image: config.logoImage || '',
+            primary_color: config.primaryColor || '#007bff',
+            secondary_color: config.secondaryColor || '#007bff',
+            text_color: config.textColor || '#222222',
+            user_bubble_color: config.userBubbleColor || '#007bff',
+            border_color: config.borderColor || '#e0e0e0',
+            border_radius: config.borderRadius || '12px',
+            widget_position: config.position || 'bottom-right',
+            font_family: config.fontFamily || 'Inter, sans-serif',
+            custom_css: config.customCss || ''
+          }
+        };
+
+        tenantInfo = await loadBranding(config, tenantInfo);
+        updateBrandingCSS(tenantInfo);
+        
 
         let isOpen = false;
         let isTyping = false;
@@ -1127,23 +1207,7 @@
           y: 100
         };
 
-        let tenantInfo = {
-          business_name: config.businessName || 'Your Support Bot',
-          chatbot_widget_icon: config.widgetIcon || '',
-          branding: {
-            logo_text: config.logoText || 'SB',
-            logo_image: config.logoImage || '',
-            primary_color: config.primaryColor || '#007bff',
-            secondary_color: config.secondaryColor || '#007bff',
-            text_color: config.textColor || '#222222',
-            user_bubble_color: config.userBubbleColor || '#007bff',
-            border_color: config.borderColor || '#e0e0e0',
-            border_radius: config.borderRadius || '12px',
-            widget_position: config.position || 'bottom-right',
-            font_family: config.fontFamily || 'Inter, sans-serif',
-            custom_css: config.customCss || ''
-          }
-        };
+        
 
         const loadMessages = async () => {
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
@@ -1227,30 +1291,54 @@
             console.warn('Failed to save server messages:', error);
           }
         };
+
+
+
+        const loadConversation = async (sessionId, isActive) => {
+          currentView = 'chat';
+          showWelcome = false;
+        
+          if (conversationCache[sessionId]) {
+              messages = conversationCache[sessionId].messages;
+              isCurrentChatActive = conversationCache[sessionId].is_active;
+              render();
+              return;
+          }
+        
+          messages = null;
+          render();
+        
+          try {
+              const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${sessionId}?page=1&page_size=30`, {
+                  headers: { 'X-API-Key': config.apiKey }
+              });
+              if (!response.ok) throw new Error('Failed to fetch history');
+        
+              const data = await response.json();
+              messages = data.messages || [];
+              isCurrentChatActive = data.is_active;
+              
+              conversationCache[sessionId] = {
+                  messages,
+                  is_active: isCurrentChatActive
+              };
+              
+              render();
+          } catch (error) {
+              console.error("Error loading conversation:", error);
+              messages = [{ role: 'assistant', content: 'Could not load this conversation.' }];
+              render();
+          }
+        };
         
 
         const findOrCreateActiveChat = async () => {
-          // Ensure conversations are loaded
           const conversationList = await prefetchConversations(); 
-        
-          // Find an open/active conversation
           const activeConversation = conversationList.find(conv => conv.is_active);
         
           if (activeConversation) {
-            // Active conversation found, load it by simulating a click on its item.
-            // This reuses the existing, robust logic for loading a conversation.
-            const conversationItem = document.querySelector(`[data-session-id='${activeConversation.session_id}']`);
-            if (conversationItem) {
-                conversationItem.click();
-            } else {
-                // Fallback if item isn't rendered: manually load it.
-                const itemClickHandler = document.querySelector('.chatbot-conversation-item')?.onclick;
-                if(typeof itemClickHandler === 'function') {
-                    const mockEvent = new MouseEvent('click');
-                    Object.defineProperty(mockEvent, 'currentTarget', { value: { dataset: { sessionId: activeConversation.session_id } } });
-                    itemClickHandler(mockEvent);
-                }
-            }
+            // Active conversation exists, load it directly.
+            loadConversation(activeConversation.session_id, true);
           } else {
             // No active chat found, create a new one.
             currentView = 'chat';
@@ -1265,6 +1353,9 @@
             }, 100);
           }
         };
+
+
+
 
         const loadUserInfo = async () => {
           if (!config.baseUrl || !config.apiKey) return null;
@@ -1343,47 +1434,7 @@
           return formatted;
         };
 
-        const loadBranding = async () => {
-          if (!config.baseUrl || !config.apiKey) return;
-          
-          try {
-            const response = await fetch(`${config.baseUrl}/chatbot/tenant-info`, {
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              }
-            });
-            if (response.ok) {
-              const data = await response.json();
-              if (data.branding) {
-                tenantInfo = {
-                  ...tenantInfo,
-                  ...data,
-                  branding: { ...tenantInfo.branding, ...data.branding }
-                };
-              }
-            }
-          } catch (error) {
-            console.warn('Failed to fetch branding', error);
-          }
-        };
-
-        const updateBrandingCSS = () => {
-          const root = document.documentElement;
-          const { branding } = tenantInfo;
-          root.style.setProperty('--chatbot-secondary', branding.user_bubble_color);
-          root.style.setProperty('--chatbot-shadow', '0 8px 30px rgba(0,0,0,0.12)');
-
-          if (branding.custom_css) {
-            let styleEl = document.getElementById('chatbot-custom-styles');
-            if (!styleEl) {
-              styleEl = document.createElement('style');
-              styleEl.id = 'chatbot-custom-styles';
-              document.head.appendChild(styleEl);
-            }
-            styleEl.textContent = branding.custom_css;
-          }
-        };
+        
 
     
         
@@ -1734,7 +1785,7 @@
           const sendMessageBtn = document.createElement('button');
           sendMessageBtn.className = 'chatbot-action-btn';
           sendMessageBtn.innerHTML = `
-            Send us a message
+            <strong>Send us a message</strong>
             <svg viewBox="0 0 512 512">
               <path fill="currentColor" d="m476.59 227.05l-.16-.07L49.35 49.84A23.56 23.56 0 0 0 27.14 52A24.65 24.65 0 0 0 16 72.59v113.29a24 24 0 0 0 19.52 23.57l232.93 43.07a4 4 0 0 1 0 7.86L35.53 303.45A24 24 0 0 0 16 327v113.31A23.57 23.57 0 0 0 26.59 460a23.94 23.94 0 0 0 13.22 4a24.55 24.55 0 0 0 9.52-1.93L476.4 285.94l.19-.09a32 32 0 0 0 0-58.8Z"/>
             </svg>
@@ -2039,6 +2090,7 @@
           conversations.forEach((conv) => {
             const item = document.createElement('div');
             item.className = `chatbot-conversation-item ${!conv.is_active ? 'closed' : ''}`;
+            item.dataset.sessionId = conv.session_id;
             
             // ... (code for avatar, content, preview, time remains the same)
             const avatar = document.createElement('div');
@@ -2062,56 +2114,8 @@
             item.appendChild(avatar);
             item.appendChild(content);
 
-            // CORRECTED: Click listener to load the SPECIFIC conversation
-            item.addEventListener('click', async () => {
-              currentView = 'chat';
-              showWelcome = false;
-              
-              // Check cache first
-              if (conversationCache[conv.session_id]) {
-                  console.log('📦 Loading from cache');
-                  messages = conversationCache[conv.session_id].messages;
-                  isCurrentChatActive = conversationCache[conv.session_id].is_active;
-                  currentPage = conversationCache[conv.session_id].currentPage;
-                  totalPages = conversationCache[conv.session_id].totalPages;
-                  render();
-                  return; // Don't fetch - use cached data
-              }
-              
-              // Only fetch if not cached
-              messages = null;
-              currentPage = 1;
-              totalPages = 1;
-              isLoadingMore = false;
-              render();
-          
-              try {
-                  const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${conv.session_id}?page=1&page_size=30`, {
-                      headers: { 'X-API-Key': config.apiKey }
-                  });
-                  if (!response.ok) throw new Error('Failed to fetch history');
-          
-                  const data = await response.json();
-                  messages = data.messages || [];
-                  isCurrentChatActive = data.is_active;
-                  currentPage = data.pagination?.page || 1;
-                  totalPages = data.pagination?.total_pages || 1;
-                  
-                  // Cache the result
-                  conversationCache[conv.session_id] = {
-                      messages,
-                      is_active: isCurrentChatActive,
-                      currentPage,
-                      totalPages
-                  };
-                  
-                  render();
-              } catch (error) {
-                  console.error("Error loading conversation:", error);
-                  messages = [];
-                  render();
-              }
-          });
+            
+            item.addEventListener('click', () => loadConversation(conv.session_id));
 
             listContainer.appendChild(item);
           });
@@ -2125,11 +2129,20 @@
           const view = document.createElement('div');
           view.className = 'chatbot-messages-list-view';
 
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-welcome-close-btn'; 
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.addEventListener('click', () => {
+            isOpen = false;
+            render();
+          });
+          view.appendChild(closeBtn);
+
           const header = document.createElement('div');
           header.className = 'chatbot-messages-list-header';
           header.innerHTML = `<h2>Messages</h2>`;
           
-          // This function now just renders the list based on the 'conversations' variable
+          
           const messagesListContainer = createMessagesList();
 
           const newChatBtn = document.createElement('button');

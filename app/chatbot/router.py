@@ -2899,6 +2899,17 @@ async def smart_chat_with_followup_streaming(
         final_response = ""  # Track final response for auto-save
         user_message = request.message
         user_identifier = request.user_identifier
+
+
+        def update_session_preview(session_id_to_update: str, preview_text: str):
+            try:
+                session_to_update = db.query(ChatSession).filter(ChatSession.session_id == session_id_to_update).first()
+                if session_to_update:
+                    session_to_update.updated_at = datetime.utcnow()
+                    session_to_update.last_message_preview = preview_text[:100]
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to update session preview for {session_id_to_update}: {e}")
         
         try:
             logger.info(f"🚀 Unified smart chat with memory for: {request.user_identifier}")
@@ -2990,6 +3001,7 @@ async def smart_chat_with_followup_streaming(
                     
                     # 🧠 Store welcome in memory
                     memory.store_message(session_id, welcome_msg, False)
+                    update_session_preview(session_id, final_response)
                     
                     main_response = {
                         'type': 'main_response',
@@ -3056,6 +3068,7 @@ async def smart_chat_with_followup_streaming(
                     # 🧠 Store both user message and bot response in memory
                     memory.store_message(session_id, request.message, True)
                     memory.store_message(session_id, acknowledgment, False)
+                    update_session_preview(session_id, final_response)
                     
                     # Send immediate response for email capture
                     main_response = {
@@ -3097,6 +3110,7 @@ async def smart_chat_with_followup_streaming(
                     
                     # 🧠 Store the email request as bot message in memory
                     memory.store_message(session_id, email_request, False)
+                    update_session_preview(session_id, final_response)
                     
                     main_response = {
                         'type': 'main_response',
@@ -3174,15 +3188,8 @@ async def smart_chat_with_followup_streaming(
             bot_response = result["response"]
             final_response = bot_response
             memory.store_message(session_id, bot_response, False)
-            try:
-                session_to_update = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-                if session_to_update:
-                    session_to_update.updated_at = datetime.utcnow()
-                    session_to_update.last_message_preview = bot_response[:100] # Store a preview
-                    db.commit()
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to update session preview for {session_id}: {e}")
+            update_session_preview(session_id, bot_response)
+            
             
             # 📔 NEW: Check for inadequate responses and trigger feedback
             feedback_triggered = False
@@ -3456,6 +3463,7 @@ async def smart_chat_with_followup_streaming(
             # 🧠 Store bot response in memory
             bot_response = result["response"]
             memory.store_message(session_id, bot_response, False)
+            
             
             # Track conversation
             track_conversation_started_with_super_tenant(
@@ -4008,7 +4016,7 @@ async def get_chat_history(
     chat_session = db.query(ChatSession).filter(
         ChatSession.user_identifier == user_id,
         ChatSession.tenant_id == tenant.id
-    ).first()
+    ).order_by(ChatSession.updated_at.desc()).first()
     
     if not chat_session:
         return {"messages": [{"role": "assistant", "content": "Hello! How can I help you today?"}]}
@@ -4038,7 +4046,7 @@ async def save_chat_history(
     chat_session = db.query(ChatSession).filter(
         ChatSession.user_identifier == user_id,
         ChatSession.tenant_id == tenant.id
-    ).order_by(ChatSession.created_at.desc()).first() # Get the most recent session
+    ).order_by(ChatSession.created_at.desc()).first() 
     
     if not chat_session:
         chat_session = ChatSession(

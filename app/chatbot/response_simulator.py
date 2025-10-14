@@ -25,7 +25,7 @@ class SimpleHumanDelaySimulator:
     def calculate_response_delay(self, user_message: str, bot_response: str) -> float:
         """Calculate optimized delay for modern chat expectations"""
         
-        # 1. Analyze question complexity
+        
         complexity_score = self._analyze_complexity(user_message)
         
         # 2. Consider response length (reduced impact)
