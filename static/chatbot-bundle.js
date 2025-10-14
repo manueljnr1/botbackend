@@ -212,14 +212,18 @@
     }
 
     .chatbot-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
+      flex: 1; 
+      display: flex; 
       flex-direction: column;
-      gap: 16px;
-      background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
+      overflow-y: auto; 
       position: relative;
+    }
+
+    
+    .chatbot-header + .chatbot-body {
+      padding: 20px; 
+      gap: 16px; 
+      background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
     }
 
     .chatbot-welcome-view {
@@ -440,6 +444,7 @@
       padding: 8px 16px;
       /* This is the new, softer shadow */
       box-shadow: inset 0 5px 15px -5px rgba(0, 0, 0, 0.1);
+      margin-top: auto;
     }
 
     .chatbot-footer-btn {
@@ -799,6 +804,170 @@
     }
 
 
+    // .chatbot-faq-view {
+    //   display: flex;
+    //   flex-direction: column;
+    //   flex: 1;
+    //   background: white;
+    // }
+    // .chatbot-faq-header {
+    //   display: flex;
+    //   align-items: center;
+    //   justify-content: center;
+    //   padding: 10px 16px;
+    //   border-bottom: 1px solid #e5e7eb;
+    //   position: relative;
+    // }
+    // .chatbot-faq-back-btn {
+    //   position: absolute;
+    //   background: transparent;
+    //   left: 16px;
+    //   border: none;
+    //   cursor: pointer;
+    //   padding: 4px;
+    //   margin-right: 12px;
+    // }
+    // .chatbot-faq-header h2 {
+    //   font-size: 18px;
+    //   font-weight: 500;
+    //   color: #1f2937;
+    //   margin: 0;
+    // }
+    // .chatbot-faq-list {
+    //   flex: 1;
+    //   overflow-y: auto;
+    //   padding: 8px 16px;
+    // }
+    // .chatbot-faq-item {
+    //   border-bottom: 1px solid #f0f2f5;
+    // }
+    // .chatbot-faq-question {
+    //   background: transparent;
+    //   border: none;
+    //   width: 100%;
+    //   text-align: left;
+    //   padding: 16px 0;
+    //   font-size: 14px;
+    //   font-weight: 500;
+    //   color: #1f2937;
+    //   cursor: pointer;
+    //   display: flex;
+    //   justify-content: space-between;
+    //   align-items: center;
+    // }
+    // .chatbot-faq-question svg {
+    //   transition: transform 0.2s;
+    //   flex-shrink: 0;
+    //   margin-left: 12px;
+    // }
+    // .chatbot-faq-item.active .chatbot-faq-question svg {
+    //   transform: rotate(180deg);
+    // }
+    // .chatbot-faq-answer {
+    //   max-height: 0;
+    //   overflow: hidden;
+    //   font-size: 13px;
+    //   color: #6b7280;
+    //   padding: 0 8px;
+    //   transition: max-height 0.3s ease-out, padding 0.3s ease-out;
+    // }
+    // .chatbot-faq-item.active .chatbot-faq-answer {
+    //   max-height: 300px; /* Adjust if answers are very long */
+    //   padding: 0 8px 16px 8px;
+    // }
+
+
+
+    .chatbot-faq-view {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      background: #f9fafb; /* Light grey background for the whole view */
+    }
+    .chatbot-faq-header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      position: relative;
+      background: white; /* Keep header white */
+      flex-shrink: 0;
+    }
+    .chatbot-faq-back-btn {
+      position: absolute;
+      left: 16px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      color: #1f2937;
+    }
+    .chatbot-faq-header h2 {
+      font-size: 16px; /* Smaller title for a refined look */
+      font-weight: 500;
+      color: #1f2937;
+      margin: 0;
+    }
+    .chatbot-faq-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px; /* More padding around the cards */
+      display: flex;
+      flex-direction: column;
+      gap: 12px; /* Space between cards */
+    }
+    .chatbot-faq-item {
+      background: white;
+      border-radius: 12px; /* Rounded corners */
+      border: 1px solid #e5e7eb;
+      transition: all 0.2s ease-in-out;
+      overflow: hidden; /* Crucial for the accordion animation */
+    }
+    .chatbot-faq-item:hover {
+        border-color: #d1d5db;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); /* Subtle hover shadow */
+    }
+    .chatbot-faq-question {
+      background: transparent;
+      border: none;
+      width: 100%;
+      text-align: left;
+      padding: 16px; /* Consistent padding */
+      font-size: 14px;
+      font-weight: 500;
+      color: #1f2937;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chatbot-faq-question svg {
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Smoother animation */
+      flex-shrink: 0;
+      margin-left: 12px;
+      color: #9ca3af;
+    }
+    .chatbot-faq-item.active .chatbot-faq-question svg {
+      transform: rotate(180deg);
+      color: var(--chatbot-secondary); /* Use brand color when active */
+    }
+    .chatbot-faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      font-size: 14px; /* Larger answer text */
+      color: #4b5563; /* Softer text color for readability */
+      line-height: 1.6;
+      padding: 0 16px;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .chatbot-faq-item.active .chatbot-faq-answer {
+      max-height: 500px; /* Generous height for content */
+      padding-bottom: 20px;
+    }
+
+
+
     .chatbot-messages-list-view {
       height: 100%;
       display: flex;
@@ -1076,6 +1245,25 @@
         padding-top: max(16px, env(safe-area-inset-top));
       }
 
+      .chatbot-widget > .chatbot-body:first-child {
+        position: fixed;
+        top: 0;
+        bottom: 56px; /* Height of the footer */
+        left: 0;
+        right: 0;
+        width: 100%;
+        overflow-y: auto;
+      }
+
+      .chatbot-widget > .chatbot-body:first-child + .chatbot-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        padding-bottom: env(safe-area-inset-bottom); /* Support for iPhone notches */
+      }
+
       .chatbot-input-wrapper * {
         font-size: 16px !important;
       }
@@ -1188,6 +1376,8 @@
         }
         
         let showWelcome = true;
+        let isFaqViewOpen = false; // <-- Add this line
+        let faqData = [];
         let currentView = 'welcome';
         let conversations = [];
         let conversationsPromise = null; 
@@ -1822,24 +2012,40 @@
           quickLinksTitle.textContent = 'Quick help';
         
           const links = [
-            'How to Get Support',
-            'Getting Started Guide',
-            'Common Questions'
+            { text: 'How to Get Support', action: () => console.log('Link clicked: How to Get Support') },
+            { text: 'Getting Started Guide', action: () => console.log('Link clicked: Getting Started Guide') },
+            { 
+              text: 'Common Questions', 
+              action: async () => {
+                try {
+                  const response = await fetch(`${config.baseUrl}/knowledge-base/faqs`, {
+                    headers: { 'X-API-Key': config.apiKey }
+                  });
+                  if (!response.ok) throw new Error('Failed to fetch FAQs');
+                  faqData = await response.json();
+                  isFaqViewOpen = true;
+                  render();
+                } catch (error) {
+                  console.error('Error fetching FAQs:', error);
+                  faqData = []; // Ensure it's empty on error
+                  isFaqViewOpen = true; // Still open the view to show "No FAQs found"
+                  render();
+                }
+              } 
+            }
           ];
-        
+    
           const linksContainer = document.createElement('div');
-          links.forEach(linkText => {
+          links.forEach(linkInfo => {
             const link = document.createElement('button');
             link.className = 'chatbot-quick-link';
             link.innerHTML = `
-              ${linkText}
+              ${linkInfo.text}
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="9 18 15 12 9 6"></polyline>
               </svg>
             `;
-            link.addEventListener('click', () => {
-              console.log('Quick link clicked:', linkText);
-            });
+            link.addEventListener('click', linkInfo.action);
             linksContainer.appendChild(link);
           });
         
@@ -1860,6 +2066,63 @@
           return welcomeView;
         };
 
+
+
+        const createFaqView = () => {
+          const faqView = document.createElement('div');
+          faqView.className = 'chatbot-faq-view';
+
+          // Header with Back Button
+          const header = document.createElement('div');
+          header.className = 'chatbot-faq-header';
+          
+          const backBtn = document.createElement('button');
+          backBtn.className = 'chatbot-faq-back-btn';
+          backBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>`;
+          backBtn.addEventListener('click', () => {
+            isFaqViewOpen = false;
+            render();
+          });
+
+          header.innerHTML = `<h2>Common Questions</h2>`;
+          header.prepend(backBtn);
+          
+          // List of FAQs
+          const list = document.createElement('div');
+          list.className = 'chatbot-faq-list';
+
+          if (faqData.length > 0) {
+            faqData.forEach(faq => {
+              const item = document.createElement('div');
+              item.className = 'chatbot-faq-item';
+              
+              const question = document.createElement('button');
+              question.className = 'chatbot-faq-question';
+              question.innerHTML = `
+                <span>${faq.question}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              `;
+
+              const answer = document.createElement('div');
+              answer.className = 'chatbot-faq-answer';
+              answer.innerHTML = `<p>${faq.answer.replace(/\n/g, '<br>')}</p>`;
+
+              question.addEventListener('click', () => {
+                item.classList.toggle('active');
+              });
+
+              item.appendChild(question);
+              item.appendChild(answer);
+              list.appendChild(item);
+            });
+          } else {
+            list.innerHTML = `<p style="text-align:center; padding: 20px; color: #6b7280;">No FAQs found.</p>`;
+          }
+
+          faqView.appendChild(header);
+          faqView.appendChild(list);
+          return faqView;
+        };
 
 
         const createBrandSection = () => {
@@ -2175,8 +2438,11 @@
           
           if (showWelcome) {
             body.style.padding = '0';
-            const welcomeView = createWelcomeView();
-            body.appendChild(welcomeView);
+            if (isFaqViewOpen) {
+              body.appendChild(createFaqView());
+            } else {
+              body.appendChild(createWelcomeView());
+            }
             widget.appendChild(body);
             widget.appendChild(createFooter());
           } else if (currentView === 'messages') {
