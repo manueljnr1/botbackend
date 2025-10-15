@@ -1210,9 +1210,7 @@
     @media (max-width: 480px) {
       .chatbot-widget {
         width: 100vw;
-        height: 100vh;
         height: 100dvh;
-        max-height: 100vh;
         max-height: 100dvh;
         border-radius: 0;
         position: fixed;
@@ -1233,6 +1231,8 @@
         padding: 16px;
         overflow-y: auto;
         transform: translateZ(0);
+        display: flex; 
+        flex-direction: column;
       }
       
       .chatbot-input-area {
