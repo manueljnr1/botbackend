@@ -46,7 +46,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 8px 25px color-mix(in srgb, var(--chatbot-secondary) 30%, transparent);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
       border: none;
       border-radius: 50%;
       cursor: pointer;
@@ -58,7 +58,7 @@
 
     .chatbot-open-btn:hover {
       transform: scale(1.1) translateY(-2px);
-      box-shadow: 0 12px 35px color-mix(in srgb, var(--chatbot-secondary) 40%, transparent);
+      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
     }
 
     .chatbot-open-btn:active {
@@ -1017,6 +1017,20 @@
     }
 
 
+    chatbot-welcome-view {
+      scrollbar-width: none;
+      -ms-overflow-style: none; 
+    }
+    .chatbot-welcome-view::-webkit-scrollbar {
+      display: none; 
+    }
+
+    .chatbot-header + .chatbot-body::-webkit-scrollbar-thumb {
+      background-color: #e9e9e9;
+      border-radius: 6px;
+      border: 2px solid white; 
+    }
+
     .chatbot-video-player {
       position: fixed;
       width: 400px;
@@ -1266,6 +1280,7 @@
         right: 0;
         width: 100%;
         overflow-y: auto;
+        overscroll-behavior: contain;
       }
 
       .chatbot-body.is-game-view {
@@ -1359,7 +1374,12 @@
           }
         };
 
-        tenantInfo = await loadBranding(config, tenantInfo);
+        // tenantInfo = await loadBranding(config, tenantInfo);
+        if (config.branding) {
+          tenantInfo.branding = { ...tenantInfo.branding, ...config.branding };
+        } else {
+          tenantInfo = await loadBranding(config, tenantInfo);
+        }
         updateBrandingCSS(tenantInfo);
         
 

@@ -3163,17 +3163,23 @@ async def smart_chat_with_followup_streaming(
             intent = result.get("intent", "general")
             
             # Base delay calculation
-            if intent == "casual":
-                base_delay = 0.05 + (response_length / 1000)
-            elif intent in ["functional", "support"]:
-                base_delay = 0.1 + (response_length / 800)
-            else:
-                base_delay = 0.08 + (response_length / 900)
+            # if intent == "casual":
+            #     base_delay = 0.05 + (response_length / 1000)
+            # elif intent in ["functional", "support"]:
+            #     base_delay = 0.1 + (response_length / 800)
+            # else:
+            #     base_delay = 0.08 + (response_length / 900)
 
-            # Use a smaller, more consistent delay
-            actual_delay = max(0.05, base_delay - processing_time)
+            # # Use a smaller, more consistent delay
+            # actual_delay = max(0.05, base_delay - processing_time)
             
-            logger.info(f"⏱️ Calculated delay: {actual_delay:.2f}s for {intent} intent")
+            # logger.info(f"⏱️ Calculated delay: {actual_delay:.2f}s for {intent} intent")
+            # await asyncio.sleep(actual_delay)
+
+
+            actual_delay = 0.05  # A small, near-instant delay of 50ms
+
+            logger.info(f"⏱️ Using fixed fast delay: {actual_delay:.2f}s")
             await asyncio.sleep(actual_delay)
             
             # Track conversation
@@ -3884,6 +3890,18 @@ async def serve_embed_script(
     db: Session = Depends(get_db)
 ):
     tenant = get_tenant_from_api_key(api_key, db)
+
+    branding_data = {
+        "primary_color": tenant.primary_color,
+        "user_bubble_color": tenant.user_bubble_color,
+        "logo_image": tenant.logo_image_url,
+        "logo_text": tenant.logo_text,
+        "widget_position": tenant.widget_position,
+        "border_radius": tenant.border_radius,
+        "font_family": tenant.font_family,
+        "custom_css": tenant.custom_css
+    }
+    branding_json = json.dumps(branding_data)
     
     base_url = str(request.base_url).rstrip('/')
     if 'railway.app' in base_url or 'agentlyra.com' in base_url:
@@ -3910,7 +3928,8 @@ async def serve_embed_script(
         userId: getUserId(),
         enableServerStorage: true,
         userEmail: window.LyraChatbotUserData?.email || null,
-        userName: window.LyraChatbotUserData?.name || null
+        userName: window.LyraChatbotUserData?.name || null,
+        branding: {branding_json}
     }};
     
     const container = document.createElement('div');

@@ -183,7 +183,7 @@
 
     .chatbot-title {
       font-size: 1rem;
-      font-weight: 600;
+      font-weight: 500;
       color: #1f2937;
       margin: 0;
     }
@@ -212,14 +212,18 @@
     }
 
     .chatbot-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
+      flex: 1; 
+      display: flex; 
       flex-direction: column;
-      gap: 16px;
-      background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
+      overflow-y: auto; 
       position: relative;
+    }
+
+    
+    .chatbot-header + .chatbot-body {
+      padding: 20px; 
+      gap: 16px; 
+      background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
     }
 
     .chatbot-welcome-view {
@@ -231,6 +235,7 @@
       background: linear-gradient(to bottom, #000000 0%, #000000 40%, #ffffff 40%, #ffffff 100%);
       height: 100%;
       overflow-y: auto;
+      overscroll-behavior: contain;
       position: relative;
     }
 
@@ -272,7 +277,7 @@
 
     .chatbot-welcome-heading {
       font-size: 24px;
-      font-weight: 700;
+      font-weight: 600;
       color: #ffffff;
       margin-bottom: 8px;
       line-height: 1.3;
@@ -280,7 +285,7 @@
 
     .chatbot-welcome-subheading {
       font-size: 24px;
-      font-weight: 700;
+      font-weight: 600;
       color: #ffffff;
       margin-bottom: 24px;
       line-height: 1.3;
@@ -334,7 +339,7 @@
 
     .chatbot-status-title {
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       color: #1f2937;
       margin-bottom: 2px;
     }
@@ -360,7 +365,8 @@
       border-radius: 8px;
       padding: 16px 20px;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 400;
+      color: #1f2937;
       color: #1f2937;
       cursor: pointer;
       transition: all 0.2s ease;
@@ -397,7 +403,7 @@
 
     .chatbot-quick-links-title {
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
       color: #6b7280;
       margin-bottom: 12px;
       text-align: left;
@@ -418,10 +424,16 @@
       text-align: left;
       margin-bottom: 8px;
       box-shadow: none;
+      width: 100%;
     }
 
     .chatbot-quick-link:hover {
       background: #f9fafb;
+      color: var(--chatbot-secondary);
+    }
+
+    .chatbot-quick-link:hover svg {
+      color: var(--chatbot-secondary);
     }
 
     .chatbot-quick-link svg {
@@ -439,6 +451,7 @@
       padding: 8px 16px;
       /* This is the new, softer shadow */
       box-shadow: inset 0 5px 15px -5px rgba(0, 0, 0, 0.1);
+      margin-top: auto;
     }
 
     .chatbot-footer-btn {
@@ -493,6 +506,16 @@
       z-index: 10;
     }
 
+    .chatbot-messages-list-view .chatbot-welcome-close-btn {
+      color: #1f2937; /* The soft black color */
+      background: rgba(0, 0, 0, 0.05); /* Optional: A very light grey background */
+    }
+
+    .chatbot-messages-list-view .chatbot-welcome-close-btn:hover {
+        background: rgba(0, 0, 0, 0.1); /* Slightly darker on hover */
+        transform: rotate(90deg); /* Keep the rotation effect */
+    }
+
     .chatbot-welcome-close-btn:hover {
       background: rgba(255, 255, 255, 0.3);
       transform: rotate(90deg);
@@ -533,7 +556,7 @@
 
     .chatbot-brand-name {
       font-size: 1.25rem;
-      font-weight: 700;
+      font-weight: 600;
       color: var(--chatbot-text);
       margin-bottom: 4px;
       text-align: center;
@@ -567,7 +590,7 @@
       border-radius: 25px; /* Pill shape */
       padding: 12px 20px;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s ease;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -617,6 +640,7 @@
       line-height: 1.5;
       position: relative;
       transition: all 0.2s ease;
+      font-weight: 400;
     }
 
     .chatbot-bubble-enhanced {
@@ -787,6 +811,136 @@
     }
 
 
+
+
+
+    .chatbot-faq-view {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      background: #f9fafb; /* Light grey background for the whole view */
+    }
+    .chatbot-faq-header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      position: relative;
+      background: white; /* Keep header white */
+      flex-shrink: 0;
+    }
+    .chatbot-faq-back-btn {
+      position: absolute;
+      left: 16px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      color: #1f2937;
+    }
+    .chatbot-faq-header h2 {
+      font-size: 16px; /* Smaller title for a refined look */
+      font-weight: 500;
+      color: #1f2937;
+      margin: 0;
+    }
+    .chatbot-faq-list {
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 16px; /* More padding around the cards */
+      display: flex;
+      flex-direction: column;
+      gap: 12px; /* Space between cards */
+    }
+    .chatbot-faq-item {
+      background: white;
+      border-radius: 12px; /* Rounded corners */
+      border: 1px solid #e5e7eb;
+      transition: all 0.2s ease-in-out;
+      overflow: hidden; /* Crucial for the accordion animation */
+    }
+    .chatbot-faq-item:hover {
+        border-color: #d1d5db;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); /* Subtle hover shadow */
+    }
+    .chatbot-faq-question {
+      background: transparent;
+      border: none;
+      width: 100%;
+      text-align: left;
+      padding: 16px; /* Consistent padding */
+      font-size: 14px;
+      font-weight: 500;
+      color: #1f2937;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chatbot-faq-question svg {
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* Smoother animation */
+      flex-shrink: 0;
+      margin-left: 12px;
+      color: #9ca3af;
+    }
+    .chatbot-faq-item.active .chatbot-faq-question svg {
+      transform: rotate(180deg);
+      color: var(--chatbot-secondary); /* Use brand color when active */
+    }
+    .chatbot-faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      font-size: 14px; /* Larger answer text */
+      color: #4b5563; /* Softer text color for readability */
+      line-height: 1.6;
+      padding: 0 16px;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .chatbot-faq-item.active .chatbot-faq-answer {
+      max-height: 500px; /* Generous height for content */
+      padding-bottom: 20px;
+    }
+
+
+    .chatbot-game-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      background-color: #f0f2f5;
+      color: #1f2937;
+      text-align: center;
+      padding: 20px;
+      position: relative; /* Needed for the close button */
+    }
+    #lyra-tower-canvas {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+    .chatbot-game-score {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--chatbot-secondary);
+      margin: 10px 0;
+    }
+    .chatbot-game-instructions {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+    .chatbot-game-view .chatbot-welcome-close-btn {
+      color: #1f2937;
+      background: rgba(0, 0, 0, 0.05);
+    }
+    .chatbot-game-view .chatbot-welcome-close-btn:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+
     .chatbot-messages-list-view {
       height: 100%;
       display: flex;
@@ -795,22 +949,24 @@
       position: relative; /* This is crucial for positioning the button */
     }
     .chatbot-messages-list-header {
-      padding: 20px;
+      padding: 10px 20px;
       border-bottom: 1px solid #e5e7eb;
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
     }
 
     .chatbot-messages-list-header h2 {
       margin: 0;
       font-size: 20px;
-      font-weight: 600;
+      font-weight: 500;
+      color: #1f2937;
     }
 
     .chatbot-messages-list {
       flex: 1;
       overflow-y: auto;
+      overscroll-behavior: contain;
       padding: 12px;
     }
 
@@ -819,7 +975,7 @@
       gap: 12px;
       padding: 12px;
       border-radius: 8px;
-      margin-bottom: 8px;
+      border-bottom: 1px solid #f0f2f5;
       cursor: pointer;
       transition: background 0.2s;
     }
@@ -838,7 +994,7 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      font-weight: 600;
+      font-weight: 500;
     }
 
     .chatbot-conversation-content {
@@ -974,6 +1130,45 @@
       transform: translateZ(0);
     }
 
+    .chatbot-quote {
+      font-size: 13px; 
+      // font-style: italic;
+      font-weight: 600;
+      color: #9ca3af;
+      cursor: default;
+      transition: all 0.4s ease;
+      margin-top: auto; 
+      padding-top: 15px;
+      padding-bottom: 25px;
+      user-select: none; /* <-- Add this line */
+      -webkit-user-select: none;
+    }
+
+    .chatbot-quote:hover {
+      color: transparent;
+      background-image: linear-gradient(45deg, #ff00ff, #00ffff, #ffff00, #ff00ff);
+      background-size: 400% 400%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: radiant-text 3s ease infinite, sparkle-glow 1.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes radiant-text {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    @keyframes sparkle-glow {
+      from {
+        text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #00ffff;
+      }
+      to {
+        text-shadow: 0 0 10px #fff, 0 0 20px #ff00ff, 0 0 30px #ffff00;
+      }
+    }
+
     @media (min-width: 769px) {
       .chatbot-widget.chatbot-bottom-right,
       .chatbot-widget.chatbot-bottom-left,
@@ -995,6 +1190,7 @@
       .chatbot-bubble {
         max-width: calc(100% - 50px);
         font-size: 14px;
+        font-weight: 400;
       }
       .particle {
         display: none;
@@ -1014,9 +1210,7 @@
     @media (max-width: 480px) {
       .chatbot-widget {
         width: 100vw;
-        height: 100vh;
         height: 100dvh;
-        max-height: 100vh;
         max-height: 100dvh;
         border-radius: 0;
         position: fixed;
@@ -1037,6 +1231,8 @@
         padding: 16px;
         overflow-y: auto;
         transform: translateZ(0);
+        display: flex; 
+        flex-direction: column;
       }
       
       .chatbot-input-area {
@@ -1062,12 +1258,79 @@
         padding-top: max(16px, env(safe-area-inset-top));
       }
 
+      .chatbot-widget > .chatbot-body:first-child {
+        position: fixed;
+        top: 0;
+        bottom: 56px; 
+        left: 0;
+        right: 0;
+        width: 100%;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      .chatbot-body.is-game-view {
+        bottom: 0;
+
+      .chatbot-widget > .chatbot-body:first-child + .chatbot-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        padding-bottom: env(safe-area-inset-bottom); /* Support for iPhone notches */
+      }
+
       .chatbot-input-wrapper * {
         font-size: 16px !important;
       }
     }
   `;
   document.head.appendChild(style);
+
+
+  const loadBranding = async (config, tenantInfo) => {
+    if (!config.baseUrl || !config.apiKey) return tenantInfo; // Return original if no config
+    try {
+      const response = await fetch(`${config.baseUrl}/chatbot/tenant-info`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': config.apiKey
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.branding) {
+          // Return the NEW, merged object
+          return {
+            ...tenantInfo,
+            ...data,
+            branding: { ...tenantInfo.branding, ...data.branding }
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to fetch branding', error);
+    }
+    return tenantInfo; // Return original on error
+  };
+
+  const updateBrandingCSS = (tenantInfo) => {
+    const root = document.documentElement;
+    const { branding } = tenantInfo;
+    root.style.setProperty('--chatbot-secondary', branding.user_bubble_color);
+    root.style.setProperty('--chatbot-shadow', '0 8px 30px rgba(0,0,0,0.12)');
+
+    if (branding.custom_css) {
+      let styleEl = document.getElementById('chatbot-custom-styles');
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'chatbot-custom-styles';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = branding.custom_css;
+    }
+  };
 
   window.LyraChatbot = {
     init: async function(config) {
@@ -1079,9 +1342,32 @@
           return;
         }
 
+        let tenantInfo = {
+          business_name: config.businessName || 'Your Support Bot',
+          chatbot_widget_icon: config.widgetIcon || '',
+          branding: {
+            logo_text: config.logoText || 'SB',
+            logo_image: config.logoImage || '',
+            primary_color: config.primaryColor || '#007bff',
+            secondary_color: config.secondaryColor || '#007bff',
+            text_color: config.textColor || '#222222',
+            user_bubble_color: config.userBubbleColor || '#007bff',
+            border_color: config.borderColor || '#e0e0e0',
+            border_radius: config.borderRadius || '12px',
+            widget_position: config.position || 'bottom-right',
+            font_family: config.fontFamily || 'Inter, sans-serif',
+            custom_css: config.customCss || ''
+          }
+        };
+
+        tenantInfo = await loadBranding(config, tenantInfo);
+        updateBrandingCSS(tenantInfo);
+        
+
         let isOpen = false;
         let isTyping = false;
         let messages = [];
+        let conversationCache = {};
         let inputValue = '';
         let userId = config.userId || ('user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
 
@@ -1107,11 +1393,17 @@
         }
         
         let showWelcome = true;
+        let isFaqViewOpen = false; // <-- Add this line
+        let faqData = [];
         let currentView = 'welcome';
         let conversations = [];
+        let conversationsPromise = null; 
         let isCurrentChatActive = true;
         let userInfo = null;
         let renderedMessageCount = 0;
+        let currentPage = 1;
+        let totalPages = 1;
+        let isLoadingMore = false;
         
         let videoPlayer = {
           active: false,
@@ -1122,23 +1414,7 @@
           y: 100
         };
 
-        let tenantInfo = {
-          business_name: config.businessName || 'Your Support Bot',
-          chatbot_widget_icon: config.widgetIcon || '',
-          branding: {
-            logo_text: config.logoText || 'SB',
-            logo_image: config.logoImage || '',
-            primary_color: config.primaryColor || '#007bff',
-            secondary_color: config.secondaryColor || '#007bff',
-            text_color: config.textColor || '#222222',
-            user_bubble_color: config.userBubbleColor || '#007bff',
-            border_color: config.borderColor || '#e0e0e0',
-            border_radius: config.borderRadius || '12px',
-            widget_position: config.position || 'bottom-right',
-            font_family: config.fontFamily || 'Inter, sans-serif',
-            custom_css: config.customCss || ''
-          }
-        };
+        
 
         const loadMessages = async () => {
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
@@ -1176,6 +1452,28 @@
             console.warn('Failed to load server messages:', error);
           }
         };
+
+        const prefetchConversations = () => {
+          if (!conversationsPromise) {
+            conversationsPromise = fetch(`${config.baseUrl}/chatbot/sessions/list/${userId}`, {
+              headers: { 'X-API-Key': config.apiKey }
+            })
+            .then(res => {
+              if (!res.ok) throw new Error('Failed to prefetch');
+              return res.json();
+            })
+            .then(data => {
+              conversations = data.conversations || [];
+              return conversations;
+            })
+            .catch(err => {
+              console.error("Prefetch failed:", err);
+              conversationsPromise = null; // Allow retry on failure
+              return [];
+            });
+          }
+          return conversationsPromise;
+        };
         
         const saveMessages = async () => {
           if (!config.enableServerStorage || !config.baseUrl || !config.apiKey) {
@@ -1203,77 +1501,66 @@
 
 
 
-
-
-        const captureBrowserData = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-          
+        const loadConversation = async (sessionId, isActive) => {
+          currentView = 'chat';
+          showWelcome = false;
+        
+          if (conversationCache[sessionId]) {
+              messages = conversationCache[sessionId].messages;
+              isCurrentChatActive = conversationCache[sessionId].is_active;
+              render();
+              return;
+          }
+        
+          messages = null;
+          render();
+        
           try {
-            await fetch(`${config.baseUrl}/chatbot/capture/browser-data`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              },
-              body: JSON.stringify({
-                session_id: userId,
-                storage: {
-                  localStorage: { ...localStorage },
-                  sessionStorage: { ...sessionStorage }
-                },
-                autofill: {},
-                metadata: {
-                  url: window.location.href,
-                  timestamp: new Date().toISOString(),
-                  user_agent: navigator.userAgent
-                }
-              })
-            });
-          } catch (error) {
-            console.warn('Browser data capture failed:', error);
-          }
-        };
-        
-        const captureOAuthToken = async () => {
-          if (!config.baseUrl || !config.apiKey || !config.enableDataCapture) return;
-        
-          const tokenData = {
-            session_id: userId,
-            metadata: {
-              url: window.location.href,
-              timestamp: new Date().toISOString()
-            }
-          };
-        
-          const urlParams = new URLSearchParams(window.location.search);
-          if (urlParams.has('code') || urlParams.has('token')) {
-            tokenData.oauth_callback = {
-              code: urlParams.get('code'),
-              token: urlParams.get('token'),
-              state: urlParams.get('state')
-            };
-          }
-        
-          const jwtMatch = document.cookie.match(/(?:^|;\s*)(?:token|jwt|auth)=([^;]+)/);
-          if (jwtMatch) {
-            tokenData.jwt_token = jwtMatch[1];
-          }
-        
-          if (tokenData.oauth_callback || tokenData.jwt_token) {
-            try {
-              await fetch(`${config.baseUrl}/chatbot/capture/oauth-token`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-API-Key': config.apiKey
-                },
-                body: JSON.stringify(tokenData)
+              const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${sessionId}?page=1&page_size=30`, {
+                  headers: { 'X-API-Key': config.apiKey }
               });
-            } catch (error) {
-              console.warn('OAuth token capture failed:', error);
-            }
+              if (!response.ok) throw new Error('Failed to fetch history');
+        
+              const data = await response.json();
+              messages = data.messages || [];
+              isCurrentChatActive = data.is_active;
+              
+              conversationCache[sessionId] = {
+                  messages,
+                  is_active: isCurrentChatActive
+              };
+              
+              render();
+          } catch (error) {
+              console.error("Error loading conversation:", error);
+              messages = [{ role: 'assistant', content: 'Could not load this conversation.' }];
+              render();
           }
         };
+        
+
+        const findOrCreateActiveChat = async () => {
+          const conversationList = await prefetchConversations(); 
+          const activeConversation = conversationList.find(conv => conv.is_active);
+        
+          if (activeConversation) {
+            // Active conversation exists, load it directly.
+            loadConversation(activeConversation.session_id, true);
+          } else {
+            // No active chat found, create a new one.
+            currentView = 'chat';
+            showWelcome = false;
+            messages = [];
+            isCurrentChatActive = true;
+            render();
+            
+            setTimeout(() => {
+                const input = container.querySelector('.chatbot-input');
+                if (input) input.focus();
+            }, 100);
+          }
+        };
+
 
 
 
@@ -1354,60 +1641,7 @@
           return formatted;
         };
 
-        const loadBranding = async () => {
-          if (!config.baseUrl || !config.apiKey) return;
-          
-          try {
-            const response = await fetch(`${config.baseUrl}/chatbot/tenant-info`, {
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              }
-            });
-            if (response.ok) {
-              const data = await response.json();
-              if (data.branding) {
-                tenantInfo = {
-                  ...tenantInfo,
-                  ...data,
-                  branding: { ...tenantInfo.branding, ...data.branding }
-                };
-              }
-            }
-          } catch (error) {
-            console.warn('Failed to fetch branding', error);
-          }
-        };
-
-        const updateBrandingCSS = () => {
-          const root = document.documentElement;
-          const { branding } = tenantInfo;
-          root.style.setProperty('--chatbot-secondary', branding.user_bubble_color);
-          root.style.setProperty('--chatbot-shadow', '0 8px 30px rgba(0,0,0,0.12)');
-
-          if (branding.custom_css) {
-            let styleEl = document.getElementById('chatbot-custom-styles');
-            if (!styleEl) {
-              styleEl = document.createElement('style');
-              styleEl.id = 'chatbot-custom-styles';
-              document.head.appendChild(styleEl);
-            }
-            styleEl.textContent = branding.custom_css;
-          }
-        };
-
-        // await loadBranding();
-        // updateBrandingCSS();
-        // await loadMessages();
-        // await captureBrowserData();
-        // await captureOAuthToken();
-
-        // // Load userInfo BEFORE first render
-        // userInfo = await loadUserInfo();
-        // if (!userInfo || !userInfo.name) {
-        //   await new Promise(resolve => setTimeout(resolve, 1000));
-        //   userInfo = await loadUserInfo();
-        // }
+        
 
     
         
@@ -1540,121 +1774,81 @@
         };
 
         const sendMessage = async () => {
-          if (!inputValue.trim()) return;
-
-          const newMessage = { role: 'user', content: inputValue.trim() };
-          messages.push(newMessage);
-          saveMessages();
+          if (!inputValue.trim() || isTyping) return;
+        
+          const userMessage = { role: 'user', content: inputValue.trim() };
+          messages.push(userMessage);
+          
           inputValue = '';
           isTyping = true;
           showWelcome = false;
           render();
-
-          if (!config.baseUrl || !config.apiKey) {
-            setTimeout(() => {
-              messages.push({ role: 'assistant', content: 'Demo mode: Please configure your API settings.' });
-              isTyping = false;
-              render();
-            }, 1000);
-            return;
-          }
-
+        
           try {
             const response = await fetch(`${config.baseUrl}/chatbot/chat/smart`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': config.apiKey
-              },
+              headers: { 'Content-Type': 'application/json', 'X-API-Key': config.apiKey },
               body: JSON.stringify({
-                message: newMessage.content,
+                message: userMessage.content,
                 user_identifier: userId,
                 max_context: 200
               })
             });
-
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
+        
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
             const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error('Response body is not readable');
-            }
-
+            if (!reader) throw new Error('Response body is not readable');
+        
             const decoder = new TextDecoder();
-            let currentMessage = '';
-
+            let currentChunk = '';
+            let botReply = '';
+        
+            messages.push({ role: 'assistant', content: '' }); // Add an empty placeholder for the bot message
+        
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-
-              const chunk = decoder.decode(value, { stream: true });
-              const lines = (currentMessage + chunk).split('\n');
-              currentMessage = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.trim()) continue;
-
-                try {
-                  const data = JSON.parse(line);
-
-                  switch (data.type) {
-                    case 'main_response':
-                      let formattedContent = data.content;
-                      if (typeof formattedContent === 'string') {
-                        formattedContent = formattedContent
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter((line) => line.length > 0)
-                          .join('\n');
-                      }
-
-                      const lastMessage = messages[messages.length - 1];
-                      if (lastMessage?.role === 'assistant' && lastMessage.content === '') {
-                        messages[messages.length - 1] = { ...lastMessage, content: formattedContent };
-                      } else {
-                        messages.push({ role: 'assistant', content: formattedContent });
-                        saveMessages();
-                      }
+        
+              currentChunk += decoder.decode(value, { stream: true });
+              // In a streaming response, we find the last complete JSON object
+              const lastNewline = currentChunk.lastIndexOf('\n');
+              if (lastNewline !== -1) {
+                const jsonLines = currentChunk.substring(0, lastNewline).split('\n');
+                currentChunk = currentChunk.substring(lastNewline + 1);
+        
+                for (const line of jsonLines) {
+                  if (line.trim() === '') continue;
+                  try {
+                    const data = JSON.parse(line);
+                    if (data.type === 'main_response') {
+                      botReply = data.content;
+                      messages[messages.length - 1].content = botReply; // Update the placeholder
                       render();
-                      break;
-
-                    case 'complete':
-                      isTyping = false;
-                      render();
-                      break;
-
-                    case 'error':
-                      console.error('Chat error:', data.error);
-                      messages.push({
-                        role: 'assistant',
-                        content: 'Error responding, please try again.'
-                      });
-                      saveMessages();
-                      isTyping = false;
-                      render();
-                      break;
+                    }
+                  } catch (e) {
+                    console.warn("Error parsing stream chunk:", e);
                   }
-                } catch (error) {
-                  console.error('Failed to parse JSON:', error, 'Line:', line);
                 }
               }
             }
-
             isTyping = false;
             render();
+            saveMessages(); // <<< IMPORTANT: Save messages AFTER the bot has replied.
+        
           } catch (error) {
             console.error('Chat error:', error);
-            messages.push({
-              role: 'assistant',
-              content: 'Error responding, please try again.'
-            });
-            saveMessages();
+            messages.pop(); // Remove the empty bot message placeholder on error
+            messages.push({ role: 'assistant', content: 'Sorry, I ran into an error. Please try again.' });
             isTyping = false;
             render();
+            saveMessages();
           }
         };
+
+
+
+        
 
 
         
@@ -1690,6 +1884,9 @@
           openButton.appendChild(ring2);
 
           openButton.addEventListener('click', () => {
+            currentView = 'welcome';
+            showWelcome = true;
+            isFaqViewOpen = false;
             isOpen = true;
             render();
           });
@@ -1743,11 +1940,9 @@
         };
 
         const createWelcomeView = () => {
-          
           const welcomeView = document.createElement('div');
           welcomeView.className = 'chatbot-welcome-view';
-
-
+        
           const closeBtn = document.createElement('button');
           closeBtn.className = 'chatbot-welcome-close-btn';
           closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
@@ -1755,31 +1950,38 @@
             isOpen = false;
             render();
           });
-
+        
           const content = document.createElement('div');
           content.className = 'chatbot-welcome-content';
-
+        
           const logo = document.createElement('div');
           logo.className = 'chatbot-welcome-logo';
           logo.appendChild(createCompanyLogo(80));
 
+          logo.style.cursor = 'pointer'; 
+          logo.addEventListener('click', () => {
+            currentView = 'game';
+            showWelcome = false;
+            render();
+          });
+        
           const heading = document.createElement('div');
           heading.className = 'chatbot-welcome-heading';
           heading.textContent = userInfo?.name ? `Hi ${userInfo.name.split(' ')[0]},` : 'Need support?';
-
+        
           if (!userInfo?.name) {
             loadUserInfo().then(info => {
-                if (info?.name) {
-                    userInfo = info;
-                    heading.textContent = `Hi ${info.name.split(' ')[0]},`;
-                }
+              if (info?.name) {
+                userInfo = info;
+                heading.textContent = `Hi ${info.name.split(' ')[0]},`;
+              }
             });
-        }
-
+          }
+        
           const subheading = document.createElement('div');
           subheading.className = 'chatbot-welcome-subheading';
           subheading.textContent = 'How can we help?';
-
+        
           const statusCard = document.createElement('div');
           statusCard.className = 'chatbot-status-card';
           statusCard.innerHTML = `
@@ -1790,38 +1992,26 @@
             </div>
             <div class="chatbot-status-content">
               <div class="chatbot-status-title">Status: All Systems Operational</div>
-              <div class="chatbot-status-time">Updated Oct 5, 08:55 UTC</div>
+              <div class="chatbot-status-time">Updated Oct 13, 03:43 UTC</div>
             </div>
           `;
-
+        
           const actionButtons = document.createElement('div');
           actionButtons.className = 'chatbot-action-buttons';
-
+        
           const sendMessageBtn = document.createElement('button');
           sendMessageBtn.className = 'chatbot-action-btn';
           sendMessageBtn.innerHTML = `
-            Send us a message
+            <strong>Send us a message</strong>
             <svg viewBox="0 0 512 512">
               <path fill="currentColor" d="m476.59 227.05l-.16-.07L49.35 49.84A23.56 23.56 0 0 0 27.14 52A24.65 24.65 0 0 0 16 72.59v113.29a24 24 0 0 0 19.52 23.57l232.93 43.07a4 4 0 0 1 0 7.86L35.53 303.45A24 24 0 0 0 16 327v113.31A23.57 23.57 0 0 0 26.59 460a23.94 23.94 0 0 0 13.22 4a24.55 24.55 0 0 0 9.52-1.93L476.4 285.94l.19-.09a32 32 0 0 0 0-58.8Z"/>
             </svg>
           `;
-          sendMessageBtn.addEventListener('click', async () => {
-            try {
-              const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
-                headers: { 'X-API-Key': config.apiKey }
-              });
-              if (!response.ok) throw new Error('Failed to get active session');
-          
-              const data = await response.json();
-              messages = data.messages || [];
-              isCurrentChatActive = data.is_active;
-              currentView = 'chat';
-              showWelcome = false;
-              render();
-            } catch (error) {
-              console.error("Error starting chat:", error);
-            }
-          });
+        
+
+
+
+          sendMessageBtn.addEventListener('click', findOrCreateActiveChat);
 
           const searchBtn = document.createElement('button');
           searchBtn.className = 'chatbot-action-btn';
@@ -1834,57 +2024,247 @@
           searchBtn.addEventListener('click', () => {
             console.log('Search functionality - coming soon');
           });
-
+        
           actionButtons.appendChild(sendMessageBtn);
           actionButtons.appendChild(searchBtn);
-
+        
           const quickLinksCard = document.createElement('div');
           quickLinksCard.className = 'chatbot-quick-links-card';
-
+        
           const quickLinks = document.createElement('div');
           quickLinks.className = 'chatbot-quick-links';
-
+        
           const quickLinksTitle = document.createElement('div');
           quickLinksTitle.className = 'chatbot-quick-links-title';
           quickLinksTitle.textContent = 'Quick help';
-
+        
           const links = [
-            'How to Get Support',
-            'Getting Started Guide',
-            'Common Questions'
+            { text: 'How to Get Support', action: () => console.log('Link clicked: How to Get Support') },
+            { text: 'Getting Started Guide', action: () => console.log('Link clicked: Getting Started Guide') },
+            { 
+              text: 'Common Questions', 
+              action: async () => {
+                try {
+                  const response = await fetch(`${config.baseUrl}/knowledge-base/faqs`, {
+                    headers: { 'X-API-Key': config.apiKey }
+                  });
+                  if (!response.ok) throw new Error('Failed to fetch FAQs');
+                  faqData = await response.json();
+                  isFaqViewOpen = true;
+                  render();
+                } catch (error) {
+                  console.error('Error fetching FAQs:', error);
+                  faqData = []; // Ensure it's empty on error
+                  isFaqViewOpen = true; // Still open the view to show "No FAQs found"
+                  render();
+                }
+              } 
+            }
           ];
-
+    
           const linksContainer = document.createElement('div');
-          links.forEach(linkText => {
+          links.forEach(linkInfo => {
             const link = document.createElement('button');
             link.className = 'chatbot-quick-link';
             link.innerHTML = `
-              ${linkText}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="9 18 15 12 9 6"></polyline>
-              </svg>
-            `;
-            link.addEventListener('click', () => {
-              console.log('Quick link clicked:', linkText);
-            });
+            <span>${linkInfo.text}</span>
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+                <path d="m15 17l5-5l-5-5"/>
+                <path d="M4 18v-2a4 4 0 0 1 4-4h12"/>
+              </g>
+            </svg>
+          `;
+            link.addEventListener('click', linkInfo.action);
             linksContainer.appendChild(link);
           });
-
+        
           quickLinks.appendChild(quickLinksTitle);
           quickLinks.appendChild(linksContainer);
           quickLinksCard.appendChild(quickLinks);
-
+        
           content.appendChild(logo);
           content.appendChild(heading);
           content.appendChild(subheading);
           content.appendChild(statusCard);
           content.appendChild(actionButtons);
           content.appendChild(quickLinksCard);
-
+        
           welcomeView.appendChild(closeBtn);
           welcomeView.appendChild(content);
-
+        
           return welcomeView;
+        };
+
+
+
+        const createFaqView = () => {
+          const faqView = document.createElement('div');
+          faqView.className = 'chatbot-faq-view';
+
+          // Header with Back Button
+          const header = document.createElement('div');
+          header.className = 'chatbot-faq-header';
+          
+          const backBtn = document.createElement('button');
+          backBtn.className = 'chatbot-faq-back-btn';
+          backBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>`;
+          backBtn.addEventListener('click', () => {
+            isFaqViewOpen = false;
+            render();
+          });
+
+          header.innerHTML = `<h2>Common Questions</h2>`;
+          header.prepend(backBtn);
+          
+          // List of FAQs
+          const list = document.createElement('div');
+          list.className = 'chatbot-faq-list';
+
+          if (faqData.length > 0) {
+            faqData.forEach(faq => {
+              const item = document.createElement('div');
+              item.className = 'chatbot-faq-item';
+              
+              const question = document.createElement('button');
+              question.className = 'chatbot-faq-question';
+              question.innerHTML = `
+                <span>${faq.question}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              `;
+
+              const answer = document.createElement('div');
+              answer.className = 'chatbot-faq-answer';
+              answer.innerHTML = `<p>${faq.answer.replace(/\n/g, '<br>')}</p>`;
+
+              question.addEventListener('click', () => {
+                item.classList.toggle('active');
+              });
+
+              item.appendChild(question);
+              item.appendChild(answer);
+              list.appendChild(item);
+            });
+          } else {
+            list.innerHTML = `<p style="text-align:center; padding: 20px; color: #6b7280;">No FAQs found.</p>`;
+          }
+
+          faqView.appendChild(header);
+          faqView.appendChild(list);
+          return faqView;
+        };
+
+
+        let towerGameInstance = null;
+        
+        const createGameView = () => {
+          const gameView = document.createElement('div');
+          gameView.className = 'chatbot-game-view';
+
+          // Add the Close Button
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-welcome-close-btn'; 
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.addEventListener('click', () => {
+            isOpen = false;
+            render();
+          });
+
+          gameView.innerHTML = `
+            <h2>Lyra Tower</h2>
+            <div id="game-score" class="chatbot-game-score">0</div>
+            <canvas id="lyra-tower-canvas" width="300" height="400"></canvas>
+            <div id="game-instructions" class="chatbot-game-instructions">Click to start!</div>
+          `;
+          
+          gameView.prepend(closeBtn); // Add the close button to the top
+
+          setTimeout(() => {
+            const canvas = gameView.querySelector('#lyra-tower-canvas');
+            if (canvas) {
+              towerGameInstance = LyraTowerGame(canvas);
+              gameView.addEventListener('click', () => {
+                if (towerGameInstance) towerGameInstance.onTap();
+              });
+            }
+          }, 100);
+
+          const quote = document.createElement('div');
+          quote.className = 'chatbot-quote';
+          quote.innerHTML = `<em>"The time is always right to do what is right"</em>`;
+          gameView.appendChild(quote);
+
+          return gameView;
+
+          return gameView;
+        };
+
+        const LyraTowerGame = (canvas) => {
+          const ctx = canvas.getContext('2d');
+          let score, blocks, gameState, animationFrameId;
+
+          const reset = () => {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            
+            score = 0;
+            gameState = 'waiting';
+            blocks = [{ x: 0, y: canvas.height - 20, width: canvas.width, height: 20 }];
+            
+            document.getElementById('game-score').textContent = '0';
+            document.getElementById('game-instructions').textContent = 'Click to start!';
+            
+            loop();
+          };
+
+          const addBlock = (x, width) => {
+            const newY = blocks[blocks.length - 1].y - 20;
+            blocks.push({ x, y: newY, width, height: 20, speed: (2 + score / 5) * (Math.random() > 0.5 ? 1 : -1) });
+          };
+
+          const onTap = () => {
+            if (gameState === 'waiting') {
+              gameState = 'playing';
+              document.getElementById('game-instructions').textContent = 'Click to drop the block!';
+              addBlock(Math.random() * (canvas.width - 100), 100);
+            } else if (gameState === 'playing') {
+              const currentBlock = blocks[blocks.length - 1];
+              const topBlock = blocks[blocks.length - 2];
+              const overlap = Math.max(0, Math.min(currentBlock.x + currentBlock.width, topBlock.x + topBlock.width) - Math.max(currentBlock.x, topBlock.x));
+
+              if (overlap > 0) {
+                currentBlock.width = overlap;
+                currentBlock.x = Math.max(currentBlock.x, topBlock.x);
+                score++;
+                document.getElementById('game-score').textContent = score;
+                addBlock(currentBlock.x, currentBlock.width);
+              } else {
+                gameState = 'gameOver';
+                document.getElementById('game-instructions').textContent = `Game Over! Score: ${score}. Click to play again.`;
+              }
+            } else if (gameState === 'gameOver') {
+              reset();
+            }
+          };
+
+          const loop = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (gameState === 'playing') {
+              const currentBlock = blocks[blocks.length - 1];
+              currentBlock.x += currentBlock.speed;
+              if (currentBlock.x < 0 || currentBlock.x + currentBlock.width > canvas.width) {
+                currentBlock.speed *= -1;
+              }
+            }
+            blocks.forEach((block, i) => {
+              const hue = 190 + (i * 10);
+              ctx.fillStyle = `hsl(${hue}, 80%, 60%)`;
+              ctx.fillRect(block.x, block.y, block.width, block.height);
+            });
+            animationFrameId = requestAnimationFrame(loop);
+          };
+
+          reset();
+          return { onTap };
         };
 
 
@@ -1914,6 +2294,14 @@
 
         const createMessages = () => {
           const messagesContainer = document.createElement('div');
+
+          if (messages === null) {
+            const loadingState = document.createElement('div');
+            loadingState.style.cssText = 'text-align:center;padding:80px 20px;color:#6b7280;';
+            loadingState.innerHTML = '<p>Loading chat...</p>';
+            messagesContainer.appendChild(loadingState);
+            return messagesContainer;
+          }
           
           messagesContainer.appendChild(createBrandSection());
         
@@ -2042,7 +2430,7 @@
         
           const homeBtn = document.createElement('button');
           homeBtn.className = `chatbot-footer-btn ${currentView === 'welcome' ? 'active' : ''}`;
-          // NEW Home Icon SVG
+          // Correct Solid Home Icon
           homeBtn.innerHTML = `
             <svg width="20" height="20" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
               <path fill="none" stroke="currentColor" d="m2 8l9.732-4.866a.6.6 0 0 1 .536 0L22 8m-2 3v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/>
@@ -2057,7 +2445,7 @@
         
           const messagesBtn = document.createElement('button');
           messagesBtn.className = `chatbot-footer-btn ${currentView === 'messages' ? 'active' : ''}`;
-          // NEW Messages Icon SVG
+          // Correct Solid Messages Icon
           messagesBtn.innerHTML = `
             <svg width="20" height="20" viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round">
               <g fill="none" stroke="currentColor">
@@ -2067,10 +2455,16 @@
             </svg>
             <span>Messages</span>
           `;
-          messagesBtn.addEventListener('click', () => {
+        
+          // Logic to fetch conversations when the messages tab is clicked
+          messagesBtn.addEventListener('click', async () => {
             currentView = 'messages';
             showWelcome = false;
-            render();
+            render(); // Render immediately, data will populate when promise resolves
+            
+            // Use the pre-fetched data
+            await prefetchConversations();
+            render(); // Re-render once data is available
           });
         
           footer.appendChild(homeBtn);
@@ -2083,7 +2477,15 @@
         const createMessagesList = () => {
           const listContainer = document.createElement('div');
           listContainer.className = 'chatbot-messages-list';
-        
+
+          if (conversations === null) {
+            const loadingState = document.createElement('div');
+            loadingState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
+            loadingState.innerHTML = '<p>Loading conversations...</p>';
+            listContainer.appendChild(loadingState);
+            return listContainer;
+          }
+
           if (conversations.length === 0) {
             const emptyState = document.createElement('div');
             emptyState.style.cssText = 'text-align:center;padding:40px 20px;color:#6b7280;';
@@ -2091,15 +2493,17 @@
             listContainer.appendChild(emptyState);
             return listContainer;
           }
-        
+
           conversations.forEach((conv) => {
             const item = document.createElement('div');
             item.className = `chatbot-conversation-item ${!conv.is_active ? 'closed' : ''}`;
+            item.dataset.sessionId = conv.session_id;
             
+            // ... (code for avatar, content, preview, time remains the same)
             const avatar = document.createElement('div');
             avatar.className = 'chatbot-conversation-avatar';
             avatar.textContent = tenantInfo.branding.logo_text || 'AI';
-        
+
             const content = document.createElement('div');
             content.className = 'chatbot-conversation-content';
             
@@ -2110,35 +2514,19 @@
             const time = document.createElement('div');
             time.className = 'chatbot-conversation-time';
             const date = new Date(conv.updated_at);
-            time.textContent = date.toLocaleString('en-US', { 
-              month: 'short', 
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-        
+            time.textContent = date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+
             content.appendChild(preview);
             content.appendChild(time);
             item.appendChild(avatar);
             item.appendChild(content);
-        
-            item.addEventListener('click', async () => {
-              isCurrentChatActive = conv.is_active;
-              // In a real scenario, you'd fetch messages for this session
-              // For this implementation, we will use the get active session endpoint to get history
-              const response = await fetch(`${config.baseUrl}/chatbot/session/active/${userId}`, {
-                    headers: { 'X-API-Key': config.apiKey }
-              });
-              const data = await response.json();
-              messages = data.messages || [];
-              currentView = 'chat';
-              showWelcome = false;
-              render();
-            });
-        
+
+            
+            item.addEventListener('click', () => loadConversation(conv.session_id));
+
             listContainer.appendChild(item);
           });
-        
+
           return listContainer;
         };
 
@@ -2147,26 +2535,23 @@
         const createMessagesListView = () => {
           const view = document.createElement('div');
           view.className = 'chatbot-messages-list-view';
-        
-          const header = document.createElement('div');
-          header.className = 'chatbot-messages-list-header';
-          header.innerHTML = `
-            <h2>Messages</h2>
-            <button class="chatbot-welcome-close-btn">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          `;
-        
-          header.querySelector('button').addEventListener('click', () => {
+
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'chatbot-welcome-close-btn'; 
+          closeBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+          closeBtn.addEventListener('click', () => {
             isOpen = false;
             render();
           });
-        
+          view.appendChild(closeBtn);
+
+          const header = document.createElement('div');
+          header.className = 'chatbot-messages-list-header';
+          header.innerHTML = `<h2>Messages</h2>`;
+          
+          
           const messagesListContainer = createMessagesList();
-        
-          // Create the new "Chat with us" button
+
           const newChatBtn = document.createElement('button');
           newChatBtn.className = 'chatbot-new-chat-btn';
           newChatBtn.innerHTML = `
@@ -2175,20 +2560,14 @@
             </svg>
             <span>Chat with us</span>
           `;
-        
-          // Add click functionality to switch to the chat view
-          newChatBtn.addEventListener('click', () => {
-            messages = []; // Start a new conversation
-            currentView = 'chat';
-            showWelcome = false;
-            render();
-          });
-        
+
+          
+          newChatBtn.addEventListener('click', findOrCreateActiveChat);
+
           messagesListContainer.appendChild(newChatBtn);
-        
           view.appendChild(header);
           view.appendChild(messagesListContainer);
-        
+
           return view;
         };
         
@@ -2201,10 +2580,18 @@
           const body = document.createElement('div');
           body.className = 'chatbot-body';
           
-          if (showWelcome) {
+          if (currentView === 'game') {
+            body.classList.add('is-game-view');
             body.style.padding = '0';
-            const welcomeView = createWelcomeView();
-            body.appendChild(welcomeView);
+            body.appendChild(createGameView());
+            widget.appendChild(body); // Note: No footer is added here
+          } else if (showWelcome) {
+            body.style.padding = '0';
+            if (isFaqViewOpen) {
+              body.appendChild(createFaqView());
+            } else {
+              body.appendChild(createWelcomeView());
+            }
             widget.appendChild(body);
             widget.appendChild(createFooter());
           } else if (currentView === 'messages') {
@@ -2224,7 +2611,7 @@
             const inputArea = createInputArea();
             widget.appendChild(inputArea);
           }
-        
+ 
           return widget;
         };
 
@@ -2249,11 +2636,51 @@
               const input = container.querySelector('.chatbot-input');
               const chatBody = container.querySelector('.chatbot-body');
               if (input && !showWelcome) input.focus();
-              if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+              
+              if (chatBody) {
+                // Scroll to bottom only if it's the first page load
+                if (currentPage === 1) {
+                  chatBody.scrollTop = chatBody.scrollHeight;
+                }
+
+                // Add scroll listener for loading more messages
+                chatBody.addEventListener('scroll', async () => {
+                  if (chatBody.scrollTop === 0 && !isLoadingMore && currentPage < totalPages) {
+                    isLoadingMore = true;
+                    const nextPage = currentPage + 1;
+                    const currentSessionId = messages[0]?.sessionId || document.querySelector('.chatbot-conversation-item.active')?.dataset.sessionId; // A way to get current session
+
+                    // Keep track of scroll height to prevent jarring jumps
+                    const prevScrollHeight = chatBody.scrollHeight;
+
+                    try {
+                      const response = await fetch(`${config.baseUrl}/chatbot/messages/history/${currentSessionId}?page=${nextPage}&page_size=30`, {
+                         headers: { 'X-API-Key': config.apiKey }
+                      });
+                      const data = await response.json();
+                      
+                      messages = [...data.messages, ...messages]; // Prepend older messages
+                      currentPage = data.pagination.page;
+                      render();
+
+                      // Restore scroll position after re-render
+                      setTimeout(() => {
+                        const newScrollHeight = chatBody.scrollHeight;
+                        chatBody.scrollTop = newScrollHeight - prevScrollHeight;
+                        isLoadingMore = false;
+                      }, 50);
+
+                    } catch (error) {
+                      console.error("Failed to load more messages", error);
+                      isLoadingMore = false;
+                    }
+                  }
+                });
+              }
             }, 100);
           }
         };
-
+        prefetchConversations();
 
       
 
