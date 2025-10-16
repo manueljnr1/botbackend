@@ -1236,6 +1236,10 @@
         transform: translateZ(0);
       }
 
+      .chatbot-body.is-game-view {
+        bottom: 0;
+      }
+
       .chatbot-body {
         position: fixed;
         top: 60px;
@@ -1247,6 +1251,11 @@
         transform: translateZ(0);
         display: flex; 
         flex-direction: column;
+      }
+
+      .chatbot-footer {
+        background-color: white; 
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
       }
       
       .chatbot-input-area {
@@ -1284,7 +1293,8 @@
       }
 
       .chatbot-input-area.disabled {
-        min-height: 74px;
+        height: 80px;
+        min-height: 80px;
         display: flex;
         justify-content: center;
         align-items: center;
