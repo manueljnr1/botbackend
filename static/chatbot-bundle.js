@@ -1283,6 +1283,19 @@
         overscroll-behavior: contain;
       }
 
+      .chatbot-input-area.disabled {
+        min-height: 74px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .closed-message {
+        color: #4b5563;     
+        font-weight: 400;   
+        font-size: 14px;
+      }
+
       .chatbot-body.is-game-view {
         bottom: 0;
 
@@ -1292,7 +1305,8 @@
         left: 0;
         right: 0;
         width: 100%;
-        padding-bottom: env(safe-area-inset-bottom); /* Support for iPhone notches */
+        padding-bottom: env(safe-area-inset-bottom);
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
       }
 
       .chatbot-input-wrapper * {
