@@ -5,11 +5,13 @@ import jwt
 from jwt.exceptions import PyJWTError as JWTError
 from datetime import datetime, timedelta
 from typing import Optional
+from fastapi.responses import JSONResponse
 from collections import defaultdict
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.sql import func
 from fastapi import Request
 from fastapi import File, UploadFile
 from typing import List, Optional
@@ -387,56 +389,7 @@ async def get_current_user_hybrid(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-# async def get_current_user_or_admin(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-#     """Dependency to get current user (either admin or tenant)"""
-#     credentials_exception = HTTPException(
-#         status_code=status.HTTP_401_UNAUTHORIZED,
-#         detail="Could not validate credentials",
-#         headers={"WWW-Authenticate": "Bearer"},
-#     )
-    
-#     try:
-#         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
-#         user_id = payload.get("sub")
-#         is_admin = payload.get("is_admin", False)
-        
-#         if user_id is None:
-#             raise credentials_exception
-            
-#         if is_admin:
-#             admin = db.query(Admin).filter(Admin.id == user_id, Admin.is_active == True).first()
-#             if admin is None:
-#                 raise credentials_exception
-            
-#             class AdminUser:
-#                 def __init__(self, admin):
-#                     self.id = admin.id
-#                     self.username = admin.username
-#                     self.email = admin.email
-#                     self.is_admin = True
-#                     self.tenant_id = None
-#                     self.is_active = True
-#             return AdminUser(admin)
-#         else:
-#             tenant = db.query(Tenant).filter(Tenant.id == user_id, Tenant.is_active == True).first()
-#             if tenant is None:
-#                 raise credentials_exception
-            
-#             user = db.query(User).filter(User.tenant_id == tenant.id, User.is_active == True).first()
-#             if user is None:
-#                 class TenantUser:
-#                     def __init__(self, tenant):
-#                         self.id = f"tenant_{tenant.id}"
-#                         self.username = tenant.name
-#                         self.email = tenant.email
-#                         self.is_admin = False
-#                         self.tenant_id = tenant.id
-#                         self.is_active = tenant.is_active
-#                 return TenantUser(tenant)
-#             return user
-            
-#     except JWTError:
-#         raise credentials_exception
+
 
 
 
@@ -460,7 +413,7 @@ async def get_current_user_or_admin(
             raise credentials_exception
             
         if is_admin:
-            # ✅ ensure ID is an integer (to match Admin.id column type)
+            # ✅ 
             try:
                 admin_id = int(user_id)
             except ValueError:
@@ -911,6 +864,115 @@ async def resend_confirmation_email(
 
 
 
+# @router.post("/login", response_model=SupabaseTokenResponse)
+# async def login_with_supabase(
+#     login_data: SupabaseLoginRequest,
+#     request: Request,
+#     db: Session = Depends(get_db)
+# ):
+#     """Clean login without rate limiting for debugging"""
+#     try:
+#         normalized_email = login_data.email.lower().strip()
+#         client_ip = request.client.host
+        
+#         # Check for admin login first
+#         admin = db.query(Admin).filter(
+#             (func.lower(Admin.username) == normalized_email) |
+#             (func.lower(Admin.email) == normalized_email),
+#             Admin.is_active == True
+#         ).first()
+        
+#         if admin:
+#             logger.info(f"Admin found: {admin.username}, checking password...")
+#             password_valid = verify_password(login_data.password, admin.hashed_password)
+#             logger.info(f"Password valid: {password_valid}")
+            
+#             if password_valid:
+#                 logger.info(f"Admin login successful: {admin.username} ({admin.email}) from {client_ip}")
+                
+#                 access_token, expires_at = create_access_token(
+#                     data={
+#                         "sub": str(admin.id), 
+#                         "is_admin": True,
+#                         "login_ip": client_ip,
+#                         "login_time": datetime.utcnow().isoformat()
+#                     },
+#                     expires_delta=timedelta(minutes=30)
+#                 )
+                
+#                 return {
+#                     "access_token": access_token,
+#                     "token_type": "bearer",
+#                     "expires_at": expires_at,
+#                     "user_id": str(admin.id),
+#                     "email": admin.email,
+#                     "tenant_id": None,
+#                     "tenant_name": None,  # Admins don't have tenant names
+#                     "api_key": None,
+#                     "is_admin": True  # Add this field for admin identification
+#                 }
+#             else:
+#                 logger.warning(f"Failed admin login (wrong password): {normalized_email} from {client_ip}")
+#                 raise HTTPException(
+#                     status_code=status.HTTP_401_UNAUTHORIZED,
+#                     detail="Invalid email or password"
+#                 )
+#         else:
+#             logger.info(f"No admin found for email: {normalized_email}")
+        
+#         # If no admin found or admin login failed, try tenant login
+#         logger.info(f"Attempting tenant login for: {normalized_email}")
+        
+#         supabase_result = await supabase_auth_service.sign_in(
+#             email=normalized_email,
+#             password=login_data.password
+#         )
+        
+#         if not supabase_result["success"]:
+#             logger.warning(f"Failed tenant login: {normalized_email} from {client_ip}")
+#             raise HTTPException(
+#                 status_code=status.HTTP_401_UNAUTHORIZED,
+#                 detail="Invalid email or password"
+#             )
+        
+#         tenant = db.query(Tenant).filter(
+#             func.lower(Tenant.email) == normalized_email,
+#             Tenant.is_active == True
+#         ).first()
+        
+#         if not tenant:
+#             logger.error(f"Tenant not found after successful Supabase auth: {normalized_email}")
+#             raise HTTPException(
+#                 status_code=status.HTTP_404_NOT_FOUND,
+#                 detail="No tenant found with this email address"
+#             )
+        
+#         logger.info(f"Tenant login successful: {tenant.name} ({tenant.email}) from {client_ip}")
+        
+#         session = supabase_result["session"]
+#         user = supabase_result["user"]
+        
+#         return {
+#             "access_token": session.access_token,
+#             "token_type": "bearer",
+#             "expires_at": datetime.fromtimestamp(session.expires_at),
+#             "user_id": user.id,
+#             "email": user.email,
+#             "tenant_id": tenant.id,
+#             "tenant_name": tenant.name,
+#             "api_key": tenant.api_key,
+#             "is_admin": False  # Add this for tenant responses
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
+#         raise HTTPException(status_code=500, detail="Login failed")
+
+
+
+
 @router.post("/login", response_model=SupabaseTokenResponse)
 async def login_with_supabase(
     login_data: SupabaseLoginRequest,
@@ -947,17 +1009,37 @@ async def login_with_supabase(
                     expires_delta=timedelta(minutes=30)
                 )
                 
-                return {
+                # --- MODIFICATION START ---
+                # 1. Prepare response data
+                response_data = {
                     "access_token": access_token,
                     "token_type": "bearer",
                     "expires_at": expires_at,
                     "user_id": str(admin.id),
                     "email": admin.email,
                     "tenant_id": None,
-                    "tenant_name": None,  # Admins don't have tenant names
+                    "tenant_name": None,
                     "api_key": None,
-                    "is_admin": True  # Add this field for admin identification
+                    "is_admin": True
                 }
+                
+                # 2. Create JSON response
+                response = JSONResponse(content=response_data)
+                
+                # 3. Set admin's access_token cookie
+                response.set_cookie(
+                    key="access_token",
+                    value=access_token,
+                    httponly=True,
+                    secure=True,  # Set to True for production (HTTPS)
+                    samesite="lax",
+                    path="/"
+                )
+                
+                # 4. Return response
+                return response
+                # --- MODIFICATION END ---
+
             else:
                 logger.warning(f"Failed admin login (wrong password): {normalized_email} from {client_ip}")
                 raise HTTPException(
@@ -990,7 +1072,7 @@ async def login_with_supabase(
         if not tenant:
             logger.error(f"Tenant not found after successful Supabase auth: {normalized_email}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_4404_NOT_FOUND,
                 detail="No tenant found with this email address"
             )
         
@@ -999,7 +1081,9 @@ async def login_with_supabase(
         session = supabase_result["session"]
         user = supabase_result["user"]
         
-        return {
+        # --- MODIFICATION START ---
+        # 1. Prepare response data
+        response_data = {
             "access_token": session.access_token,
             "token_type": "bearer",
             "expires_at": datetime.fromtimestamp(session.expires_at),
@@ -1008,16 +1092,41 @@ async def login_with_supabase(
             "tenant_id": tenant.id,
             "tenant_name": tenant.name,
             "api_key": tenant.api_key,
-            "is_admin": False  # Add this for tenant responses
+            "is_admin": False
         }
+        
+        # 2. Create JSON response
+        response = JSONResponse(content=response_data)
+        
+        # 3. Set tenant_api_key cookie
+        response.set_cookie(
+            key="tenant_api_key",
+            value=tenant.api_key,
+            httponly=True,
+            secure=True,  # Set to True for production (HTTPS)
+            samesite="lax",
+            path="/"
+        )
+
+        # 4. Set access_token cookie
+        response.set_cookie(
+            key="access_token",
+            value=session.access_token,
+            httponly=True,
+            secure=True,  # Set to True for production (HTTPS)
+            samesite="lax",
+            path="/"
+        )
+        
+        # 5. Return response
+        return response
+        # --- MODIFICATION END ---
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
         raise HTTPException(status_code=500, detail="Login failed")
-
-
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
