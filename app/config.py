@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     META_API_VERSION: str = "v18.0"
     INSTAGRAM_WEBHOOK_ENDPOINT: str = "/api/instagram/webhook"
     INSTAGRAM_MAX_MESSAGE_LENGTH: int = 1000
+    INSTAGRAM_META_APP_ID: str
+    INSTAGRAM_META_APP_SECRET: str
+    INSTAGRAM_REDIRECT_URI: str
+    INSTAGRAM_FRONTEND_SUCCESS_URL: str = "https://agentlyra.com/dashboard/integrations/instagram?status=success"
+    
     
     CHATBOT_WIDGET_ICON_URL: str = '/static/assets/chatbot-icon-32x32.png'
 
