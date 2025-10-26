@@ -286,7 +286,7 @@ class DocumentProcessor:
                         self.file_path = file_path
                     
                     def load(self):
-                        from langchain.schema import Document
+                        from langchain_core.documents import Document
                         import pandas as pd
                         df = pd.read_excel(self.file_path)
                         text = df.to_string()

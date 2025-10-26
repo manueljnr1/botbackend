@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 from typing import List, Set, Dict, Optional
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 

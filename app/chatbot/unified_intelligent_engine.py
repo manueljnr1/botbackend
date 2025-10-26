@@ -1387,7 +1387,7 @@ Answer:"""
         final_system_prompt = f"{persona}\n\n{system_rules}"
 
         try:
-            from langchain.schema import SystemMessage, HumanMessage
+            from langchain_core.messages import SystemMessage, HumanMessage
             
             response = self.llm.invoke([
                 SystemMessage(content=final_system_prompt),
