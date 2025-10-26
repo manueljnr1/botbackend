@@ -184,7 +184,7 @@ async def process_natural_admin_command(
         user_identifier = f"direct_command_{str(uuid.uuid4())[:8]}"
         
         # Process command
-        admin_engine = get_enhanced_super_tenant_admin_engine(db)
+        admin_engine = get_super_tenant_admin_engine(db)
         result = admin_engine.process_admin_message(
             user_message=command,
             authenticated_tenant_id=tenant.id,
@@ -224,7 +224,7 @@ async def test_admin_conversation(
         # 🔒 Validate authentication
         tenant = get_tenant_from_api_key(api_key, db)
         
-        admin_engine = get_enhanced_super_tenant_admin_engine(db)
+        admin_engine = get_super_tenant_admin_engine(db)
         user_identifier = f"test_conversation_{tenant.id}"
         
         conversation_results = []
