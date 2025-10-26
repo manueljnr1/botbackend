@@ -1226,6 +1226,46 @@ class InstagramWebhookProcessor:
         
         logger.warning("❌ Instagram webhook verification failed")
         return None
+    
+
+    def verify_webhook_challenge(self, params: Dict[str, Any]) -> Optional[str]:
+        """
+        Verify webhook challenge from Meta.
+        Meta sends: hub.mode, hub.verify_token, hub.challenge
+        """
+        try:
+            mode = params.get("hub.mode")
+            token = params.get("hub.verify_token")
+            challenge = params.get("hub.challenge")
+            
+            logger.info(f"🔍 Webhook verification attempt - mode: {mode}, token: {token[:10] if token else 'None'}...")
+            
+            # Check if this is a subscription verification
+            if mode != "subscribe":
+                logger.warning(f"❌ Invalid mode: {mode}")
+                return None
+            
+            # Get the verify token from settings (the one you set in Meta dashboard)
+            # You need to add this to your .env file
+            from app.config import settings
+            expected_token = settings.INSTAGRAM_WEBHOOK_VERIFY_TOKEN
+            
+            if not expected_token:
+                logger.error("❌ INSTAGRAM_WEBHOOK_VERIFY_TOKEN not configured in settings")
+                return None
+            
+            # Verify the token matches
+            if token != expected_token:
+                logger.warning(f"❌ Token mismatch. Expected: {expected_token[:10]}..., Got: {token[:10] if token else 'None'}...")
+                return None
+            
+            # Return the challenge to complete verification
+            logger.info(f"✅ Webhook verification successful! Returning challenge: {challenge}")
+            return challenge
+            
+        except Exception as e:
+            logger.error(f"💥 Error in webhook verification: {str(e)}")
+            return None
 
 
 class InstagramConversationManager:

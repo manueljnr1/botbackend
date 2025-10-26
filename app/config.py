@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     INSTAGRAM_META_APP_SECRET: str
     INSTAGRAM_REDIRECT_URI: str
     INSTAGRAM_FRONTEND_SUCCESS_URL: str = "https://agentlyra.com/dashboard/integrations/instagram?status=success"
+    INSTAGRAM_WEBHOOK_VERIFY_TOKEN: str
     
     
     CHATBOT_WIDGET_ICON_URL: str = '/static/assets/chatbot-icon-32x32.png'
