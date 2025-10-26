@@ -787,6 +787,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, validator
 import hashlib
 import hmac
+from fastapi import Cookie
 
 from app.database import get_db
 from app.tenants.router import get_tenant_from_api_key
@@ -848,20 +849,33 @@ class InstagramMessageResponse(BaseModel):
     message_status: str
     created_at: str
 
-# --- REMOVED: /setup Endpoint ---
-# This is no longer needed as credentials are in .env
 
-# --- MODIFIED: /auth/login Endpoint ---
+
+
 @router.get("/auth/login")
 async def instagram_auth_login(
-    api_key: str = Query(..., alias="api_key"),
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    tenant_api_key: Optional[str] = Cookie(None, alias="tenant_api_key"),
+    access_token: Optional[str] = Cookie(None, alias="access_token")
 ):
     """
     Step 1: Redirect user to Facebook for OAuth.
     Uses the platform's Meta App ID from environment settings.
     """
     try:
+        # Try to get API key from cookie or header
+        api_key = tenant_api_key
+        if not api_key:
+            # Fallback to header
+            api_key = request.headers.get("X-API-Key")
+        
+        if not api_key:
+            raise HTTPException(
+                status_code=401,
+                detail="API key not found. Please log in."
+            )
+        
         tenant = get_tenant_from_api_key(api_key, db)
         
         # Check if integration limit is hit
@@ -913,6 +927,9 @@ async def instagram_auth_login(
     except Exception as e:
         logger.error(f"Error generating auth redirect: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to initiate authentication")
+    
+
+
 
 # --- MODIFIED: /auth/callback Endpoint ---
 @router.get("/auth/callback")
