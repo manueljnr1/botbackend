@@ -14,7 +14,7 @@ from app.config import settings
 
 try:
     from langchain_openai import ChatOpenAI
-    from langchain.prompts import PromptTemplate
+    from langchain_core.prompts import PromptTemplate
     LLM_AVAILABLE = True
 except ImportError:
     LLM_AVAILABLE = False

@@ -540,7 +540,7 @@ class DocumentProcessor:
                 full_content = "\n".join([doc.page_content for doc in documents])
                 
                 # Enhanced LLM prompt for smart conversion
-                from langchain.prompts import PromptTemplate
+                from langchain_core.prompts import PromptTemplate
                 
                 prompt = PromptTemplate(
                     input_variables=["document_content"],
@@ -868,7 +868,7 @@ JSON Response:"""
                 full_content = "\n".join([doc.page_content for doc in documents])
                 
                 # Enhanced sales extraction prompt with conversation flows
-                from langchain.prompts import PromptTemplate
+                from langchain_core.prompts  import PromptTemplate
                 
                 prompt = PromptTemplate(
                     input_variables=["document_content"],
