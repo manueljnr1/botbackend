@@ -1014,7 +1014,7 @@ async def login_with_supabase(
                 response_data = {
                     "access_token": access_token,
                     "token_type": "bearer",
-                    "expires_at": expires_at,
+                    "expires_at": expires_at.isoformat(),
                     "user_id": str(admin.id),
                     "email": admin.email,
                     "tenant_id": None,
@@ -1086,7 +1086,7 @@ async def login_with_supabase(
         response_data = {
             "access_token": session.access_token,
             "token_type": "bearer",
-            "expires_at": datetime.fromtimestamp(session.expires_at),
+            "expires_at": datetime.fromtimestamp(session.expires_at).isoformat(),
             "user_id": user.id,
             "email": user.email,
             "tenant_id": tenant.id,
