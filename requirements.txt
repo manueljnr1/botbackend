@@ -159,5 +159,6 @@ lxml
 html5lib
 pydantic
 certifi
+langchain-text-splitters
 # playwright
 # pip install -r requirements.txt && python -m playwright install chromium
