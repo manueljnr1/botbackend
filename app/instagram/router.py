@@ -854,7 +854,7 @@ class InstagramMessageResponse(BaseModel):
 # --- MODIFIED: /auth/login Endpoint ---
 @router.get("/auth/login")
 async def instagram_auth_login(
-    api_key: str = Header(..., alias="X-API-Key"),
+    api_key: str = Query(..., alias="api_key"),
     db: Session = Depends(get_db)
 ):
     """
