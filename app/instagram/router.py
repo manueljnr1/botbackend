@@ -899,6 +899,8 @@ async def instagram_auth_login(
         
         # Scopes needed for messaging and account info
         scopes = [
+            "pages_manage_metadata",
+            "pages_messaging", 
             "instagram_basic",
             "instagram_manage_messages"
         ]
