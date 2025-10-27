@@ -66,6 +66,8 @@ class Tenant(Base):
     slack_enabled = Column(Boolean, default=False)
     slack_team_id = Column(String, nullable=True)  # Slack workspace ID
     slack_bot_user_id = Column(String, nullable=True)  # Bot user ID in Slack
+    slack_team_name = Column(String, nullable=True)
+    slack_bot_user_id = Column(String, nullable=True)
 
     # 🔒 NEW: Custom prompt management
     system_prompt = Column(Text, nullable=True)  # Custom system prompt

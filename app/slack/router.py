@@ -5,10 +5,15 @@ Handles Slack webhook events and management endpoints
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import httpx
+import os
+from fastapi.responses import RedirectResponse
+
+
 
 # Define ThreadAnalyticsResponse if not already defined elsewhere
 
@@ -25,6 +30,11 @@ from app.tenants.router import get_tenant_from_api_key, get_current_tenant
 from app.slack.bot_manager import get_slack_bot_manager
 from app.auth.models import User
 from app.auth.router import get_current_user
+
+
+SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID")
+SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET")
+SLACK_REDIRECT_URI = os.getenv("SLACK_REDIRECT_URI")
 
 logger = logging.getLogger(__name__)
 
@@ -246,41 +256,114 @@ async def slack_webhook(
         return JSONResponse(content={"status": "ok"})
     
     
-@router.post("/config")
-async def configure_slack(
-    config: SlackConfig,
+# @router.post("/config")
+# async def configure_slack(
+#     config: SlackConfig,
+#     api_key: str = Header(..., alias="X-API-Key"),
+#     db: Session = Depends(get_db)
+# ):
+#     """Configure Slack integration for a tenant"""
+#     try:
+#         tenant = get_tenant_from_api_key(api_key, db)
+#         logger.info(f"Configuring Slack for tenant {tenant.id}")
+        
+#         tenant.slack_bot_token = config.bot_token
+#         tenant.slack_signing_secret = config.signing_secret
+#         tenant.slack_app_id = config.app_id
+#         tenant.slack_client_id = config.client_id
+#         tenant.slack_client_secret = config.client_secret
+#         tenant.slack_enabled = config.enabled
+        
+#         db.commit()
+#         logger.info(f"✅ Slack configured for tenant {tenant.id}")
+        
+#         # Update bot manager
+#         bot_manager = get_slack_bot_manager()
+#         await bot_manager.update_bot_for_tenant(tenant, db)
+        
+#         return {
+#             "success": True,
+#             "message": "Slack configuration updated successfully",
+#             "webhook_url": f"/api/slack/webhook/{tenant.id}",
+#             "enabled": tenant.slack_enabled
+#         }
+        
+#     except Exception as e:
+#         logger.error(f"Error configuring Slack: {e}")
+#         raise HTTPException(status_code=500, detail="Failed to configure Slack")
+
+
+
+@router.get("/oauth/authorize")
+async def slack_oauth_authorize(
     api_key: str = Header(..., alias="X-API-Key"),
     db: Session = Depends(get_db)
 ):
-    """Configure Slack integration for a tenant"""
-    try:
-        tenant = get_tenant_from_api_key(api_key, db)
-        logger.info(f"Configuring Slack for tenant {tenant.id}")
+    """Initiate Slack OAuth flow"""
+    tenant = get_tenant_from_api_key(api_key, db)
+    
+    oauth_url = (
+        f"https://slack.com/oauth/v2/authorize?"
+        f"client_id={SLACK_CLIENT_ID}&"
+        f"scope=chat:write,channels:read,groups:read,im:read,mpim:read,users:read,team:read,app_mentions:read,channels:history,groups:history,im:history,mpim:history&"
+        f"user_scope=&"
+        f"redirect_uri={SLACK_REDIRECT_URI}&"
+        f"state={tenant.id}"
+    )
+    
+    return {"authorization_url": oauth_url}
+
+@router.get("/callback")
+async def slack_oauth_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    """Handle Slack OAuth callback"""
+    tenant_id = int(state)
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            "https://slack.com/api/oauth.v2.access",
+            data={
+                "client_id": SLACK_CLIENT_ID,
+                "client_secret": SLACK_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": SLACK_REDIRECT_URI
+            }
+        )
         
-        tenant.slack_bot_token = config.bot_token
-        tenant.slack_signing_secret = config.signing_secret
-        tenant.slack_app_id = config.app_id
-        tenant.slack_client_id = config.client_id
-        tenant.slack_client_secret = config.client_secret
-        tenant.slack_enabled = config.enabled
+        if token_response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to exchange code")
         
+        tokens = token_response.json()
+        
+        if not tokens.get("ok"):
+            raise HTTPException(status_code=400, detail=tokens.get("error", "OAuth failed"))
+        
+        # Store OAuth data
+        tenant.slack_bot_token = tokens["access_token"]
+        tenant.slack_app_id = tokens["app_id"]
+        tenant.slack_team_id = tokens["team"]["id"]
+        tenant.slack_team_name = tokens["team"]["name"]
+        tenant.slack_bot_user_id = tokens["bot_user_id"]
+        tenant.slack_enabled = True
         db.commit()
-        logger.info(f"✅ Slack configured for tenant {tenant.id}")
         
-        # Update bot manager
+        # Initialize bot
         bot_manager = get_slack_bot_manager()
-        await bot_manager.update_bot_for_tenant(tenant, db)
-        
-        return {
-            "success": True,
-            "message": "Slack configuration updated successfully",
-            "webhook_url": f"/api/slack/webhook/{tenant.id}",
-            "enabled": tenant.slack_enabled
-        }
-        
-    except Exception as e:
-        logger.error(f"Error configuring Slack: {e}")
-        raise HTTPException(status_code=500, detail="Failed to configure Slack")
+        await bot_manager.create_bot_for_tenant(tenant, db)
+    
+    return RedirectResponse(url="/settings?slack=success")
+
+
+
+
+
 
 @router.get("/config")
 async def get_slack_config(
