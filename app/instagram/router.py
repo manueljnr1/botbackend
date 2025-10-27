@@ -1617,3 +1617,39 @@ async def restart_instagram_integration(
     except Exception as e:
         logger.error(f"Error restarting integration: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to restart integration")
+
+
+@router.get("/webhook")
+async def instagram_webhook_verify(request: Request):
+    """Verify Instagram webhook"""
+    try:
+        params = dict(request.query_params)
+        webhook_processor = InstagramWebhookProcessor(next(get_db()))
+        challenge = webhook_processor.verify_webhook_challenge(params)
+        
+        if challenge:
+            return int(challenge)
+        else:
+            raise HTTPException(status_code=403, detail="Verification failed")
+    except Exception as e:
+        logger.error(f"Webhook verification error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/webhook")
+async def instagram_webhook_handler(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Handle Instagram webhook events"""
+    try:
+        body = await request.body()
+        payload = json.loads(body.decode('utf-8'))
+        
+        background_tasks.add_task(process_webhook, payload)
+        return {"status": "received"}
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def process_webhook(payload: Dict):
+    """Process webhook in background"""
+    db = next(get_db())
+    webhook_processor = InstagramWebhookProcessor(db)
+    webhook_processor.process_webhook_event(payload, {})
