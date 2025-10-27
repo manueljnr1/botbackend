@@ -56,6 +56,7 @@ class Tenant(Base):
     discord_application_id = Column(String, nullable=True)
     discord_enabled = Column(Boolean, default=False)
     discord_status_message = Column(String, nullable=True, default="Chatting with customers")
+    discord_refresh_token = Column(String, nullable=True)
 
     slack_bot_token = Column(String, nullable=True)
     slack_signing_secret = Column(String, nullable=True)
