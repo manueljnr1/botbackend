@@ -2740,8 +2740,8 @@ async def smart_chat_with_followup_streaming(
             yield f"{json.dumps(main_response)}\n"
             
             # ⭐ SMART FOLLOW-UP GENERATION
-            base_followup_delay = 1.5 + random.uniform(0.3, 0.8)
-            await asyncio.sleep(base_followup_delay)
+            # base_followup_delay = 1.5 + random.uniform(0.3, 0.8)
+            # await asyncio.sleep(base_followup_delay)
             
             # Generate contextual follow-ups based on intent and response
             followups = generate_intelligent_followups(
@@ -2754,9 +2754,9 @@ async def smart_chat_with_followup_streaming(
             
             if followups:
                 for i, followup in enumerate(followups):
-                    if i > 0:
-                        inter_followup_delay = 0.8 + random.uniform(0.2, 0.5)
-                        await asyncio.sleep(inter_followup_delay)
+                    # if i > 0:
+                    #     inter_followup_delay = 0.8 + random.uniform(0.2, 0.5)
+                    #     await asyncio.sleep(inter_followup_delay)
                     
                     followup_data = {
                         'type': 'followup',
@@ -3066,8 +3066,8 @@ async def smart_chat_with_followup_streaming(
                     final_response = acknowledgment
                     
                     # 🧠 Store both user message and bot response in memory
-                    memory.store_message(session_id, request.message, True)
-                    memory.store_message(session_id, acknowledgment, False)
+                    # memory.store_message(session_id, request.message, True)
+                    # memory.store_message(session_id, acknowledgment, False)
                     update_session_preview(session_id, final_response)
                     
                     # Send immediate response for email capture

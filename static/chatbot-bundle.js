@@ -1466,7 +1466,7 @@
               if (stored) {
                 const loadedMessages = JSON.parse(stored);
                 if (loadedMessages.length > 0) {
-                  messages = loadedMessages;
+                  messages = loadedMessages.reverse();
               
                 }
               }
@@ -1487,7 +1487,7 @@
             if (response.ok) {
               const data = await response.json();
               if (data.messages && data.messages.length > 0) {
-                messages = data.messages;
+                messages = data.messages.reverse();
                 
               }
             }
