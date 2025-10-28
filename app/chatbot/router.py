@@ -4384,11 +4384,10 @@ async def get_specific_chat_history(
     messages = db.query(ChatMessage).filter(
         ChatMessage.session_id == session.id
     ).order_by(
-        ChatMessage.created_at.desc()
+        ChatMessage.created_at.asc()
     ).limit(page_size).all()
     print(f"⏱️ fetch_messages: {time.time()-t2:.3f}s")
     
-    messages.reverse()
     
     print(f"⏱️ TOTAL: {time.time()-start:.3f}s")
     
