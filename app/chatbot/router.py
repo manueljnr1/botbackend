@@ -4043,6 +4043,7 @@ async def get_chat_history(
     messages = db.query(ChatMessage).filter(
         ChatMessage.session_id == chat_session.id
     ).order_by(ChatMessage.created_at.asc()).all()
+    print(f"📨 Messages order: {[(msg.id, msg.content[:30], msg.created_at) for msg in messages]}")
     
     return {
         "messages": [

@@ -498,7 +498,7 @@ async def verify_payment_enhanced(
 async def send_upgrade_confirmation(tenant: Tenant, plan: PricingPlan, payment_data: Dict):
     """Send upgrade confirmation email to tenant"""
     try:
-        from app.services.email_service import EmailService
+        from app.email.email_service import EmailService
         
         email_service = EmailService()
         

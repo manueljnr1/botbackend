@@ -611,7 +611,7 @@ def track_conversation_started(tenant_id: int, user_identifier: str, platform: s
                existing_conversation.duration_minutes = int(duration)
                
                db.commit()
-               logger.info(f"✅ Updated existing conversation for tenant {tenant_id}")
+               logger.info(f" Updated existing conversation for tenant {tenant_id}")
                return True
            else:
                # Start new conversation and log usage
@@ -632,10 +632,10 @@ def track_conversation_started(tenant_id: int, user_identifier: str, platform: s
                    db.add(new_conversation)
                    db.commit()
                    
-                   logger.info(f"✅ Started new conversation and logged usage for tenant {tenant_id}")
+                   logger.info(f" Started new conversation and logged usage for tenant {tenant_id}")
                    return True
                else:
-                   logger.warning(f"⚠️ Failed to start conversation - limit exceeded for tenant {tenant_id}")
+                   logger.warning(f" Failed to start conversation - limit exceeded for tenant {tenant_id}")
                    return False
        else:
            # Fallback to simple usage tracking without conversation sessions
@@ -643,14 +643,14 @@ def track_conversation_started(tenant_id: int, user_identifier: str, platform: s
            success = pricing_service.log_message_usage(tenant_id, 1)
            
            if success:
-               logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+               logger.info(f" Logged message usage (fallback) for tenant {tenant_id}")
            else:
-               logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+               logger.warning(f" Failed to log message usage for tenant {tenant_id}")
            
            return success
        
    except Exception as e:
-       logger.error(f"💥 Error tracking conversation for tenant {tenant_id}: {e}")
+       logger.error(f" Error tracking conversation for tenant {tenant_id}: {e}")
        import traceback
        logger.error(traceback.format_exc())
        return False
@@ -667,7 +667,7 @@ def track_message_sent(tenant_id: int, db: Session, count: int = 1, user_identif
     This now focuses on updating conversation activity rather than counting individual messages
     """
     try:
-        logger.info(f"📊 Tracking message for tenant {tenant_id}, count: {count}, platform: {platform}")
+        logger.info(f" Tracking message for tenant {tenant_id}, count: {count}, platform: {platform}")
         
         if user_identifier:
             # Use conversation tracking
@@ -678,9 +678,9 @@ def track_message_sent(tenant_id: int, db: Session, count: int = 1, user_identif
             success = pricing_service.log_message_usage(tenant_id, count)
             
             if success:
-                logger.info(f"✅ Logged message usage (fallback) for tenant {tenant_id}")
+                logger.info(f" Logged message usage (fallback) for tenant {tenant_id}")
             else:
-                logger.warning(f"⚠️ Failed to log message usage for tenant {tenant_id}")
+                logger.warning(f" Failed to log message usage for tenant {tenant_id}")
             
             return success
         
@@ -698,14 +698,14 @@ def track_message_sent(tenant_id: int, db: Session, count: int = 1, user_identif
 def track_integration_added(tenant_id: int, db: Session, integration_type: str) -> bool:
     """Track integration addition after successful setup"""
     try:
-        logger.info(f"📊 Tracking integration addition for tenant {tenant_id}, type: {integration_type}")
+        logger.info(f" Tracking integration addition for tenant {tenant_id}, type: {integration_type}")
         pricing_service = PricingService(db)
         success = pricing_service.log_integration_usage(tenant_id, integration_type, "added")
         
         if success:
-            logger.info(f"✅ Successfully tracked integration addition for tenant {tenant_id}")
+            logger.info(f" Successfully tracked integration addition for tenant {tenant_id}")
         else:
-            logger.warning(f"⚠️ Failed to track integration addition for tenant {tenant_id}")
+            logger.warning(f" Failed to track integration addition for tenant {tenant_id}")
         
         return success
     except Exception as e:
@@ -716,18 +716,18 @@ def track_integration_added(tenant_id: int, db: Session, integration_type: str) 
 def track_integration_removed(tenant_id: int, db: Session, integration_type: str) -> bool:
     """Track integration removal"""
     try:
-        logger.info(f"📊 Tracking integration removal for tenant {tenant_id}, type: {integration_type}")
+        logger.info(f" Tracking integration removal for tenant {tenant_id}, type: {integration_type}")
         pricing_service = PricingService(db)
         success = pricing_service.log_integration_usage(tenant_id, integration_type, "removed")
         
         if success:
-            logger.info(f"✅ Successfully tracked integration removal for tenant {tenant_id}")
+            logger.info(f" Successfully tracked integration removal for tenant {tenant_id}")
         else:
-            logger.warning(f"⚠️ Failed to track integration removal for tenant {tenant_id}")
+            logger.warning(f" Failed to track integration removal for tenant {tenant_id}")
         
         return success
     except Exception as e:
-        logger.error(f"💥 Error tracking integration removal: {e}")
+        logger.error(f" Error tracking integration removal: {e}")
         return False
 
 
@@ -738,7 +738,7 @@ def track_integration_removed(tenant_id: int, db: Session, integration_type: str
 def get_tenant_usage_summary(tenant_id: int, db: Session) -> Dict[str, Any]:
     """Get a summary of tenant's current usage and limits"""
     try:
-        logger.info(f"📈 Getting usage summary for tenant {tenant_id}")
+        logger.info(f" Getting usage summary for tenant {tenant_id}")
         pricing_service = PricingService(db)
         
         # Get basic usage stats
@@ -778,7 +778,7 @@ def get_tenant_usage_summary(tenant_id: int, db: Session) -> Dict[str, Any]:
             "warnings": check_and_warn_usage_limits(tenant_id, db)
         }
     except Exception as e:
-        logger.error(f"💥 Error getting usage summary: {e}")
+        logger.error(f" Error getting usage summary: {e}")
         return {"error": str(e)}
 
 
@@ -825,7 +825,7 @@ def check_and_warn_usage_limits(tenant_id: int, db: Session) -> List[Dict[str, A
         
         return warnings
     except Exception as e:
-        logger.error(f"💥 Error checking usage limits: {e}")
+        logger.error(f" Error checking usage limits: {e}")
         return []
 
 
@@ -857,14 +857,14 @@ def end_conversation_session(tenant_id: int, user_identifier: str, platform: str
             conversation.duration_minutes = int(duration)
             
             db.commit()
-            logger.info(f"✅ Ended conversation session for tenant {tenant_id}")
+            logger.info(f" Ended conversation session for tenant {tenant_id}")
             return True
         else:
-            logger.info(f"ℹ️ No active conversation found to end for tenant {tenant_id}")
+            logger.info(f" No active conversation found to end for tenant {tenant_id}")
             return False
             
     except Exception as e:
-        logger.error(f"💥 Error ending conversation session: {e}")
+        logger.error(f" Error ending conversation session: {e}")
         return False
 
 
