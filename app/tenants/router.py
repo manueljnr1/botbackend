@@ -22,7 +22,7 @@ from fastapi_limiter.depends import RateLimiter
 import uuid
 import time
 from collections import defaultdict
-import asyncio
+from datetime import timezone
 from app.database import get_db
 from app.tenants.models import Tenant
 from app.admin.models import Admin
@@ -823,16 +823,15 @@ async def resend_confirmation_email(
             }
         
         # Check rate limiting (prevent spam)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if tenant.email_confirmation_sent_at:
             time_since_last = now - tenant.email_confirmation_sent_at
-            if time_since_last.total_seconds() < 300:  # 5 minutes
+            if time_since_last.total_seconds() < 300:
                 remaining = 300 - int(time_since_last.total_seconds())
                 raise HTTPException(
                     status_code=429,
                     detail=f"Please wait {remaining} seconds before requesting another confirmation email"
                 )
-        
         
         
         resend_result = await supabase_auth_service.resend_otp(email=email)
@@ -862,113 +861,6 @@ async def resend_confirmation_email(
 
 
 
-
-
-# @router.post("/login", response_model=SupabaseTokenResponse)
-# async def login_with_supabase(
-#     login_data: SupabaseLoginRequest,
-#     request: Request,
-#     db: Session = Depends(get_db)
-# ):
-#     """Clean login without rate limiting for debugging"""
-#     try:
-#         normalized_email = login_data.email.lower().strip()
-#         client_ip = request.client.host
-        
-#         # Check for admin login first
-#         admin = db.query(Admin).filter(
-#             (func.lower(Admin.username) == normalized_email) |
-#             (func.lower(Admin.email) == normalized_email),
-#             Admin.is_active == True
-#         ).first()
-        
-#         if admin:
-#             logger.info(f"Admin found: {admin.username}, checking password...")
-#             password_valid = verify_password(login_data.password, admin.hashed_password)
-#             logger.info(f"Password valid: {password_valid}")
-            
-#             if password_valid:
-#                 logger.info(f"Admin login successful: {admin.username} ({admin.email}) from {client_ip}")
-                
-#                 access_token, expires_at = create_access_token(
-#                     data={
-#                         "sub": str(admin.id), 
-#                         "is_admin": True,
-#                         "login_ip": client_ip,
-#                         "login_time": datetime.utcnow().isoformat()
-#                     },
-#                     expires_delta=timedelta(minutes=30)
-#                 )
-                
-#                 return {
-#                     "access_token": access_token,
-#                     "token_type": "bearer",
-#                     "expires_at": expires_at,
-#                     "user_id": str(admin.id),
-#                     "email": admin.email,
-#                     "tenant_id": None,
-#                     "tenant_name": None,  # Admins don't have tenant names
-#                     "api_key": None,
-#                     "is_admin": True  # Add this field for admin identification
-#                 }
-#             else:
-#                 logger.warning(f"Failed admin login (wrong password): {normalized_email} from {client_ip}")
-#                 raise HTTPException(
-#                     status_code=status.HTTP_401_UNAUTHORIZED,
-#                     detail="Invalid email or password"
-#                 )
-#         else:
-#             logger.info(f"No admin found for email: {normalized_email}")
-        
-#         # If no admin found or admin login failed, try tenant login
-#         logger.info(f"Attempting tenant login for: {normalized_email}")
-        
-#         supabase_result = await supabase_auth_service.sign_in(
-#             email=normalized_email,
-#             password=login_data.password
-#         )
-        
-#         if not supabase_result["success"]:
-#             logger.warning(f"Failed tenant login: {normalized_email} from {client_ip}")
-#             raise HTTPException(
-#                 status_code=status.HTTP_401_UNAUTHORIZED,
-#                 detail="Invalid email or password"
-#             )
-        
-#         tenant = db.query(Tenant).filter(
-#             func.lower(Tenant.email) == normalized_email,
-#             Tenant.is_active == True
-#         ).first()
-        
-#         if not tenant:
-#             logger.error(f"Tenant not found after successful Supabase auth: {normalized_email}")
-#             raise HTTPException(
-#                 status_code=status.HTTP_404_NOT_FOUND,
-#                 detail="No tenant found with this email address"
-#             )
-        
-#         logger.info(f"Tenant login successful: {tenant.name} ({tenant.email}) from {client_ip}")
-        
-#         session = supabase_result["session"]
-#         user = supabase_result["user"]
-        
-#         return {
-#             "access_token": session.access_token,
-#             "token_type": "bearer",
-#             "expires_at": datetime.fromtimestamp(session.expires_at),
-#             "user_id": user.id,
-#             "email": user.email,
-#             "tenant_id": tenant.id,
-#             "tenant_name": tenant.name,
-#             "api_key": tenant.api_key,
-#             "is_admin": False  # Add this for tenant responses
-#         }
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Login error: {e} for {login_data.email} from {getattr(request.client, 'host', 'unknown')}")
-#         raise HTTPException(status_code=500, detail="Login failed")
 
 
 

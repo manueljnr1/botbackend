@@ -208,12 +208,12 @@ app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
 app.include_router(instagram_router, prefix="/api/instagram", tags=["Instagram"])
 app.include_router(telegram_router, prefix="/api/telegram", tags=["Telegram"])
 
-app.include_router(live_chat_auth_router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
-app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"])
+# app.include_router(live_chat_auth_router, prefix="/live-chat/auth", tags=["Live Chat Auth"])
+# app.include_router(live_chat_main_router, prefix="/live-chat", tags=["Live Chat"])
 app.add_middleware(CustomerDetectionMiddleware, enabled=True)
-app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
+# app.include_router(transcript_router, prefix="/live-chat/transcript", tags=["transcripts"])
 app.include_router(admin_router, prefix="/chatbot/enhanced-admin", tags=["Enhanced Admin"])
-app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
+# app.include_router(intent_training_router.router, prefix="/admin/intent-training", tags=["admin-intent"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 # app.include_router(fine_tuning_router, prefix="/fine-tuning", tags=["Fine-Tuning"])
@@ -273,35 +273,6 @@ def health_check():
 
 
 
-@app.get("/health/live-chat")
-async def live_chat_health_check():
-    """Health check endpoint for live chat system"""
-    try:
-        from app.live_chat.websocket_manager import websocket_manager
-        
-        # Check database connectivity
-        db = next(get_db())
-        
-        # Check WebSocket manager
-        connection_stats = websocket_manager.get_connection_stats()
-        
-        return {
-            "status": "healthy",
-            "service": "live_chat",
-            "websocket_connections": connection_stats["total_connections"],
-            "active_connections": connection_stats["active_connections"],
-            "timestamp": datetime.utcnow().isoformat(),
-            "database_connected": True
-        }
-        
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "service": "live_chat",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
 
 
 
@@ -310,146 +281,54 @@ async def live_chat_health_check():
 
 @app.on_event("startup")
 async def startup_event():
-    """Combined startup event - UPDATED with Telegram"""
+    """Application startup - initialize bot integrations"""
     try:
-
         from app.database import engine
         try:
             engine.dispose()
             logger.info("🔄 Database connection pool reset")
         except Exception as e:
-            logger.error(f"❌ Pool reset failed: {e}")
-
+            logger.error(f" Pool reset failed: {e}")
 
         env_emoji = "🔒" if settings.is_production() else "🧪" if settings.is_staging() else "🔧"
         logger.info(f"🚀 Starting LYRA application {env_emoji} (Environment: {settings.ENVIRONMENT})...")
 
-
-
-        # try:
-        #     from app.fine_tuning.trainer import start_background_training
-        #     asyncio.create_task(start_background_training())
-        #     logger.info("🧠 Background fine-tuning system started - Autonomous learning enabled")
-        # except Exception as e:
-        #     logger.error(f"❌ Failed to start background training: {e}")
-
-
-        from app.database import retry_database_initialization
-        
-        try:
-            initialize_database_with_retry()  # Test connection
-            create_tables_with_retry()        # Create tables
-            db_success = True
-        except Exception as e:
-            logger.error(f"Database initialization failed: {e}")
-            db_success = False
-            if not db_success:
-                logger.error("❌ Database initialization failed - some features may not work")
-                if settings.is_production():
-                    # In production, you might want to exit
-                    logger.error("🚨 Exiting due to database failure in production")
-                    import sys
-                    sys.exit(1)
-
-
-        try:
-            from app.database import engine
-            from sqlalchemy import text
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            logger.info("✅ Database connections warmed")
-        except Exception as e:
-            logger.error(f"❌ Database warming failed: {e}")
-
-        
-        # 1. Start Discord, Slack, Instagram, and Telegram bots
+        # Start bot integrations
         try:
             discord_manager = get_discord_bot_manager()
             await discord_manager.start_all_bots()
             logger.info("✅ All Discord bots started successfully")
         except Exception as e:
-            logger.error(f"❌ Error starting Discord bots: {e}")
-        
+            logger.error(f" Error starting Discord bots: {e}")
+
         try:
             slack_manager = get_slack_bot_manager()
             db = next(get_db())
             await slack_manager.initialize_bots(db)
-            logger.info("✅ All Slack bots initialized successfully")
+            logger.info(" All Slack bots initialized successfully")
         except Exception as e:
-            logger.error(f"❌ Error starting Slack bots: {e}")
-        
+            logger.error(f" Error starting Slack bots: {e}")
+
         try:
             instagram_manager = get_instagram_bot_manager()
             db = next(get_db())
             await instagram_manager.initialize_bots(db)
-            logger.info("✅ All Instagram bots initialized successfully")
+            logger.info(" All Instagram bots initialized successfully")
         except Exception as e:
-            logger.error(f"❌ Error starting Instagram bots: {e}")
-        
-        # NEW: Telegram bot initialization
+            logger.error(f" Error starting Instagram bots: {e}")
+
         try:
             telegram_manager = get_telegram_bot_manager()
             db = next(get_db())
             await telegram_manager.initialize_bots(db)
-            logger.info("✅ All Telegram bots initialized successfully")
+            logger.info(" All Telegram bots initialized successfully")
         except Exception as e:
-            logger.error(f"❌ Error starting Telegram bots: {e}")
-        
-        # 2. Ensure all tenants have subscriptions (existing code remains the same)
-        try:
-            from app.database import SessionLocal
-            from app.tenants.models import Tenant
-            from app.pricing.models import TenantSubscription
-            from app.pricing.service import PricingService
-            
-            db = SessionLocal()
-            
-            try:
-                logger.info("🔍 Checking for tenants without subscriptions...")
-                
-                tenants_without_subscriptions = db.query(Tenant).outerjoin(
-                    TenantSubscription,
-                    (Tenant.id == TenantSubscription.tenant_id) & (TenantSubscription.is_active == True)
-                ).filter(
-                    TenantSubscription.id.is_(None),
-                    Tenant.is_active == True
-                ).all()
-                
-                if tenants_without_subscriptions:
-                    logger.info(f"📊 Found {len(tenants_without_subscriptions)} tenants without subscriptions")
-                    
-                    pricing_service = PricingService(db)
-                    pricing_service.create_default_plans()
-                    
-                    fixed_count = 0
-                    for tenant in tenants_without_subscriptions:
-                        try:
-                            logger.info(f"🔧 Fixing subscription for tenant: {tenant.name} (ID: {tenant.id})")
-                            subscription = pricing_service.create_free_subscription_for_tenant(tenant.id)
-                            
-                            if subscription:
-                                fixed_count += 1
-                                logger.info(f"✅ Fixed subscription for {tenant.name}")
-                            else:
-                                logger.error(f"❌ Failed to create subscription for {tenant.name}")
-                                
-                        except Exception as e:
-                            logger.error(f"💥 Error fixing tenant {tenant.name}: {e}")
-                    
-                    logger.info(f"🎉 Fixed subscriptions for {fixed_count}/{len(tenants_without_subscriptions)} tenants")
-                else:
-                    logger.info("✅ All tenants have subscriptions")
-                    
-            finally:
-                db.close()
-                
-        except Exception as e:
-            logger.error(f"💥 Error in startup subscription check: {e}")
-        
+            logger.error(f" Error starting Telegram bots: {e}")
+
         logger.info("🎉 Application startup completed")
-        
+
     except Exception as e:
-        logger.error(f"💥 Error in startup event: {e}")
+        logger.error(f" Error in startup event: {e}")
 
 # 4. UPDATE YOUR EXISTING shutdown_event FUNCTION:
 # Replace your current shutdown_event with this updated version:

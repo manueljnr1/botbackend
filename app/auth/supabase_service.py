@@ -625,9 +625,9 @@ class SupabaseAuthService:
     async def resend_otp(self, email: str) -> Dict[str, Any]:
         """Resend OTP to email"""
         try:
-            response = self.public_client.auth.resend({
-                "type": "signup",
-                "email": email
+            response = self.public_client.auth.sign_in_with_otp({
+                "email": email,
+                "options": {"should_create_user": False}
             })
             
             return {
@@ -641,103 +641,6 @@ class SupabaseAuthService:
             }
 
 
-
-
-class DummySupabaseService:
-    """Fallback service for development when Supabase is not configured"""
-    
-    async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
-        """Dummy sign in method"""
-        logger.warning("⚠️ Using dummy Supabase service - sign_in")
-        return {
-            "success": False,
-            "error": "Supabase not configured",
-            "session": None,
-            "user": None
-        }
-    
-    async def create_user(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Dummy create user method"""
-        logger.warning("⚠️ Using dummy Supabase service - create_user")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-    async def create_user_with_confirmation(self, email: str, password: str, confirmation_url: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Dummy create user with confirmation method"""
-        logger.warning("⚠️ Using dummy Supabase service - create_user_with_confirmation")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-    async def send_confirmation_email(self, email: str, confirmation_url: str) -> Dict[str, Any]:
-        """Dummy send confirmation email method"""
-        logger.warning("⚠️ Using dummy Supabase service - send_confirmation_email")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-    async def resend_confirmation_email(self, email: str, confirmation_url: str) -> Dict[str, Any]:
-        """Dummy resend confirmation email method"""
-        logger.warning("⚠️ Using dummy Supabase service - resend_confirmation_email")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-    async def verify_email_confirmation(self, token: str) -> Dict[str, Any]:
-        """Dummy verify email confirmation method"""
-        logger.warning("⚠️ Using dummy Supabase service - verify_email_confirmation")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
-        """Dummy get user from token method"""
-        logger.warning("⚠️ Using dummy Supabase service - get_user_from_token")
-        return {
-            "success": False,
-            "error": "Supabase not configured",
-            "user": None
-        }
-    
-    async def update_user_metadata(self, user_id: str, additional_metadata: dict) -> Dict[str, Any]:
-        """Dummy update user metadata method"""
-        logger.warning("⚠️ Using dummy Supabase service - update_user_metadata")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-    
-
-
-    async def create_user_with_otp(self, email: str, password: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
-        """Dummy create user with OTP method"""
-        logger.warning("⚠️ Using dummy Supabase service - create_user_with_otp")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-
-    async def verify_otp(self, email: str, otp: str) -> Dict[str, Any]:
-        """Dummy verify OTP method"""
-        logger.warning("⚠️ Using dummy Supabase service - verify_otp")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
-
-    async def resend_otp(self, email: str) -> Dict[str, Any]:
-        """Dummy resend OTP method"""
-        logger.warning("⚠️ Using dummy Supabase service - resend_otp")
-        return {
-            "success": False,
-            "error": "Supabase not configured"
-        }
 
 
 
@@ -764,12 +667,8 @@ def check_supabase_config() -> bool:
 
 # Create the global service instance
 try:
-    if check_supabase_config():
-        supabase_auth_service = SupabaseAuthService()
-        logger.info("✅ Supabase auth service created successfully")
-    else:
-        logger.warning("⚠️ Supabase not configured, using dummy service")
-        supabase_auth_service = DummySupabaseService()
+    supabase_auth_service = SupabaseAuthService()
+    logger.info("✅ Supabase auth service created successfully")
 except Exception as e:
     logger.error(f"❌ Failed to create Supabase service: {e}")
-    supabase_auth_service = DummySupabaseService()
+    supabase_auth_service = None

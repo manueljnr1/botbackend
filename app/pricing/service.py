@@ -95,7 +95,7 @@ class PricingService:
                 "display_order": 3
             },
             {
-                "name": "Special",
+                "name": "Advanced",
                 "plan_type": "pro",
                 "price_monthly": 150.00,
                 "price_yearly": 1500.00,
@@ -139,7 +139,8 @@ class PricingService:
             
             if existing_plan:
                 for key, value in plan_data.items():
-                    setattr(existing_plan, key, value)
+                    if key != "name":
+                        setattr(existing_plan, key, value)
             else:
                 plan = PricingPlan(**plan_data)
                 self.db.add(plan)
