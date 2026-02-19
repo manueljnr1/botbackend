@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     
     CHATBOT_WIDGET_ICON_URL: str = '/static/assets/chatbot-icon-32x32.png'
 
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
+
 
     # 📧 NEW: Frontend URL for email confirmation redirects
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")

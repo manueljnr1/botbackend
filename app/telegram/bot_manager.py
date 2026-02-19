@@ -34,7 +34,8 @@ class TelegramBotManager:
         base_url = getattr(settings, 'WEBHOOK_BASE_URL', None)
         if not base_url:
             # Fallback to frontend URL or default
-            base_url = settings.FRONTEND_URL or "https://agentlyra.up.railway.app"
+            # base_url = settings.FRONTEND_URL or "https://agentlyra.up.railway.app"
+            base_url = settings.BASE_URL
         
         # Ensure no trailing slash
         return base_url.rstrip('/')

@@ -900,9 +900,9 @@ async def instagram_auth_login(
         # Scopes needed for messaging and account info
         scopes = [
             "pages_manage_metadata",
-            "pages_messaging", 
-            "instagram_basic",
-            "instagram_manage_messages"
+            "pages_read_engagement", 
+            "business_management",
+            "instagram_messaging"
         ]
         
         # Pass tenant_id in state to identify user on callback
