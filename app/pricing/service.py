@@ -61,8 +61,8 @@ class PricingService:
             {
                 "name": "Basic",
                 "plan_type": "basic",
-                "price_monthly": 50.00,
-                "price_yearly": 500.00,
+                "price_monthly": 150.00,
+                "price_yearly": 1500.00,
                 "max_integrations": -1,
                 "max_messages_monthly": 2000,
                 "custom_prompt_allowed": True,
@@ -79,8 +79,8 @@ class PricingService:
             {
                 "name": "Special",
                 "plan_type": "growth",
-                "price_monthly": 100.00,
-                "price_yearly": 1000.00,
+                "price_monthly": 230.00,
+                "price_yearly": 2300.00,
                 "max_integrations": -1,
                 "max_messages_monthly": 5000,
                 "custom_prompt_allowed": True,
@@ -97,8 +97,8 @@ class PricingService:
             {
                 "name": "Advanced",
                 "plan_type": "pro",
-                "price_monthly": 150.00,
-                "price_yearly": 1500.00,
+                "price_monthly": 300.00,
+                "price_yearly": 3000.00,
                 "max_integrations": -1,
                 "max_messages_monthly": 20000,
                 "custom_prompt_allowed": True,
@@ -115,8 +115,8 @@ class PricingService:
             {
                 "name": "Advanced+Community Growth",
                 "plan_type": "agency",
-                "price_monthly": 250.00,
-                "price_yearly": 2500.00,
+                "price_monthly": 400.00,
+                "price_yearly": 4000.00,
                 "max_integrations": -1,
                 "max_messages_monthly": 50000,
                 "custom_prompt_allowed": True,
